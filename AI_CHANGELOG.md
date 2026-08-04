@@ -1,5 +1,13 @@
 # AI changelog
 
+## 2026-08-04 — controlled original-document retention
+
+- Added administrator-only original-byte purge with CSRF and current-password reauthentication, mandatory reason and pre-delete size/SHA-256 verification.
+- Added same-volume staging/rollback handling, provenance tombstones and database-trigger-protected append-only purge events.
+- Added analyst UI confirmation, explicit residual-data warning and HTTP 410 behavior.
+- Added service and live HTTP tests for denial, success, replay, retrieval and purge-event immutability.
+- Documented that backups, extracted records and immutable governance history are not erased; no external storage or records service was introduced.
+
 ## 2026-08-04 — institutional local administrator bootstrap
 
 - Removed implicit demo-credential creation from normal startup and sign-in.

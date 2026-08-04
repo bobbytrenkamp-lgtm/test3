@@ -179,6 +179,43 @@ class Service:
         self.db.audit(organization_id, user_id, "document.uploaded", "document", document_id, {"sha256": digest, "size": len(content), "mime": mime, "category": category, "processing": status, "warning": error}, deal_id)
         return {"id": document_id, "category": category, "status": status, "sha256": digest, "candidates": len(candidates), "warning": error}
 
+    def purge_original_document(self, organization_id: str, user_id: str, document_id: str, reason: str) -> dict:
+        reason = str(reason or "").strip()
+        if len(reason) < 12:
+            raise ValueError("A specific purge reason of at least 12 characters is required")
+        with self.db.connect() as connection:
+            document = connection.execute("SELECT * FROM documents WHERE id=? AND organization_id=?", (document_id, organization_id)).fetchone()
+        if not document:
+            raise LookupError("Document not found")
+        if document["original_purged_at"]:
+            raise ValueError("The original document bytes were already purged")
+        path = (self.upload_dir / organization_id / document["deal_id"] / document["stored_name"]).resolve()
+        if self.upload_dir.resolve() not in path.parents or not path.is_file():
+            raise ValueError("The original document is missing or has an unsafe storage path")
+        content = path.read_bytes()
+        if len(content) != document["size_bytes"] or hashlib.sha256(content).hexdigest() != document["sha256"]:
+            raise ValueError("The stored original failed its recorded size or SHA-256 integrity check")
+        purge_id, created = str(uuid.uuid4()), now()
+        staging_root = (self.data_dir / ".purge-staging").resolve()
+        staging_root.mkdir(parents=True, exist_ok=True)
+        staged = staging_root / purge_id
+        path.replace(staged)
+        try:
+            with self.db.connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                current = connection.execute("SELECT original_purged_at FROM documents WHERE id=? AND organization_id=?", (document_id, organization_id)).fetchone()
+                if not current or current["original_purged_at"]:
+                    raise ValueError("The document purge state changed; no purge was completed")
+                connection.execute("UPDATE documents SET original_purged_at=?,original_purged_by=?,original_purge_reason=?,processing_status='purged' WHERE id=?", (created, user_id, reason[:4000], document_id))
+                connection.execute("INSERT INTO document_purges VALUES(?,?,?,?,?,?,?,?,?)", (purge_id, organization_id, document["deal_id"], document_id, user_id, document["sha256"], document["size_bytes"], reason[:4000], created))
+                staged.unlink()
+        except Exception:
+            if staged.exists() and not path.exists():
+                staged.replace(path)
+            raise
+        self.db.audit(organization_id, user_id, "document.original_purged", "document", document_id, {"purge_id": purge_id, "sha256": document["sha256"], "size": document["size_bytes"], "reason": reason[:4000]}, document["deal_id"])
+        return {"id": document_id, "original_purged_at": created, "purge_id": purge_id, "metadata_retained": True}
+
     def review_value(self, organization_id: str, user_id: str, value_id: str, status: str, normalized_value: str | None, comments: str = "") -> dict:
         normalized_value = None if normalized_value is None else str(normalized_value)
         comments = str(comments or "")

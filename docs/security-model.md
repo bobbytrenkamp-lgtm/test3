@@ -21,9 +21,11 @@ Confidential documents, approved assumptions, identities and audit history are s
 Protected JSON, static and document responses carry a restrictive same-origin CSP, anti-framing, no-sniff, no-referrer and browser-permission-denial headers. JSON bodies are capped at 1 MiB and uploads are rejected from declared length before allocation when over the configured limit. Original filenames in `Content-Disposition` are UTF-8 percent encoded. `TEST3_SECURE_COOKIE=1` is available only for an operator who has explicitly placed the loopback service behind local TLS; direct HTTP operation must retain `0`.
 
 Normal startup fails closed until `test3-init-admin` creates a local administrator. The password is read twice through `getpass`, is never a command argument or environment setting, and must contain at least 16 characters. The well-known fictional identity is created only when `TEST3_DEMO_MODE=1` is explicitly selected. Password rotation invalidates every session for that user.
+
+Failed current-password reauthentication from an already authenticated session creates a metadata-only audit event containing the local route, never the submitted password.
 | External transmission | No telemetry, hosted API or remote model; local endpoint validation | Egress-deny deployment guide |
 | Sensitive logging | Metadata-only request log; no content/key logging | Redaction audit |
-| Backup/deletion | Manifested local backup and temporary restore drill | Encryption and controlled deletion workflow |
+| Backup/deletion | Manifested local backup/restore drill plus admin-only, password-reauthenticated, integrity-checked original-byte purge with append-only tombstone | Backup/media erasure remains an operator retention duty; full-case history erasure is offline |
 | Audit/approval tampering | Serialized audit and append-only review-decision hash chains with independent verifiers and immutable-decision triggers | External signed anchor not present |
 
 Malware status is explicitly `not_available`; the application never claims a scan occurred.

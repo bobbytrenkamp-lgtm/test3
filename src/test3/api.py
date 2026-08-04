@@ -23,6 +23,10 @@ ROOT = Path(__file__).resolve().parents[2]
 WEB = ROOT / "web"
 
 
+class GoneError(Exception):
+    pass
+
+
 class Handler(SimpleHTTPRequestHandler):
     service: Service
     signin_limiter = SigninLimiter()
@@ -70,6 +74,13 @@ class Handler(SimpleHTTPRequestHandler):
             raise PermissionError("Invalid CSRF token")
         require(user["role"], permission)
 
+    def _reauthorize(self, user: dict, password: object) -> None:
+        with self.service.db.connect() as connection:
+            current = connection.execute("SELECT password_hash FROM users WHERE id=? AND organization_id=?", (user["id"], user["organization_id"])).fetchone()
+        if not current or not verify_password(str(password or ""), current["password_hash"]):
+            self.service.db.audit(user["organization_id"], user["id"], "security.reauthentication_failed", "user", user["id"], {"request_path": urlparse(self.path).path})
+            raise PermissionError("Current-password reauthentication failed")
+
     def _payload(self):
         length = int(self.headers.get("Content-Length", "0"))
         if length < 0 or length > 1_000_000:
@@ -96,6 +107,8 @@ class Handler(SimpleHTTPRequestHandler):
                     document = connection.execute("SELECT * FROM documents WHERE id=? AND organization_id=?", (document_id, user["organization_id"])).fetchone()
                 if not document:
                     raise LookupError("Document not found")
+                if document["original_purged_at"]:
+                    raise GoneError("Original document bytes were purged; provenance metadata and governed history remain")
                 path = (self.service.upload_dir / user["organization_id"] / document["deal_id"] / document["stored_name"]).resolve()
                 if self.service.upload_dir.resolve() not in path.parents:
                     raise ValueError("Unsafe document path")
@@ -141,6 +154,8 @@ class Handler(SimpleHTTPRequestHandler):
             return super().do_GET()
         except PermissionError as error:
             return self._json(401, {"error": str(error)})
+        except GoneError as error:
+            return self._json(410, {"error": str(error)})
         except (ValueError, LookupError, json.JSONDecodeError) as error:
             return self._json(404 if isinstance(error, LookupError) else 400, {"error": str(error)})
 
@@ -179,6 +194,11 @@ class Handler(SimpleHTTPRequestHandler):
                 secure = "; Secure" if self.secure_cookie else ""
                 cookie = f"test3_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0{secure}"
                 return self._json(200, {"signedIn": False}, cookie)
+            if len(parts) == 4 and parts[:2] == ["api", "documents"] and parts[3] == "purge-original":
+                self._authorize_post(user, "document.purge")
+                payload = self._payload()
+                self._reauthorize(user, payload.get("current_password"))
+                return self._json(200, self.service.purge_original_document(user["organization_id"], user["id"], parts[2], payload.get("reason", "")))
             if parts == ["api", "deals"]:
                 self._authorize_post(user, "deal.create")
                 return self._json(201, self.service.create_deal(user["organization_id"], user["id"], self._payload()))

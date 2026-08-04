@@ -44,6 +44,8 @@ For a fictional demonstration only, set `TEST3_DEMO_MODE=1` before first startup
 
 Only fictional synthetic data may be committed. Uploaded documents stay under ignored `data/uploads/`.
 
+Administrator original-byte purge is password-reauthenticated, integrity-checked and tombstoned. It does not erase extracted governance history or existing backups; review the [retention and deletion policy](docs/data-retention-and-deletion.md) before use.
+
 ## Architecture and status
 
 Start with [repository assessment](docs/repository-assessment.md), [architecture](docs/architecture.md), [feature status](docs/feature-status.md), and the [cost and billing audit](docs/cost-and-billing-audit.md).

@@ -76,6 +76,7 @@ class SecurityTests(unittest.TestCase):
         require("reviewer", "value.review")
         with self.assertRaises(PermissionError): require("viewer", "document.upload")
         with self.assertRaises(PermissionError): require("analyst", "value.review")
+        with self.assertRaises(PermissionError): require("analyst", "document.purge")
 
     def test_local_password_hashing(self):
         encoded = hash_password("fictional-demo", salt=b"0123456789abcdef")
@@ -156,6 +157,22 @@ class HttpSecurityTests(unittest.TestCase):
                 bootstrap = json.loads(response.read())
                 self.assertEqual(response.status, 200)
                 self.assertNotIn("session_token_hash", bootstrap["user"])
+                document = Handler.service.upload(bootstrap["user"]["organization_id"], bootstrap["user"]["id"], bootstrap["deals"][0]["id"], "fictional.csv", b"Tenant,Rent\nExample,100\n")
+                purge_path = f"/api/documents/{document['id']}/purge-original"
+                purge_headers = {"Cookie": cookie, "X-CSRF-Token": bootstrap["user"]["csrf_token"], "Content-Type": "application/json"}
+                connection.request("POST", purge_path, json.dumps({"reason": "Retention period expired", "current_password": "wrong-password"}), purge_headers)
+                response = connection.getresponse()
+                response.read()
+                self.assertEqual(response.status, 401)
+                connection.request("POST", purge_path, json.dumps({"reason": "Retention period expired", "current_password": "fictional-demo"}), purge_headers)
+                response = connection.getresponse()
+                purge = json.loads(response.read())
+                self.assertEqual(response.status, 200)
+                self.assertTrue(purge["metadata_retained"])
+                connection.request("GET", f"/api/documents/{document['id']}", headers={"Cookie": cookie})
+                response = connection.getresponse()
+                response.read()
+                self.assertEqual(response.status, 410)
                 connection.request("POST", "/api/signout", headers={"Cookie": cookie, "X-CSRF-Token": bootstrap["user"]["csrf_token"]})
                 response = connection.getresponse()
                 response.read()
@@ -493,6 +510,26 @@ class ServiceTests(unittest.TestCase):
         self.service.upload(self.user["organization_id"], self.user["id"], self.deal_id, "rent-roll.csv", content)
         with self.assertRaisesRegex(ValueError, "Duplicate upload"):
             self.service.upload(self.user["organization_id"], self.user["id"], self.deal_id, "copy.csv", content)
+
+    def test_original_document_purge_is_integrity_checked_and_tombstoned(self):
+        content = b"Tenant,Rent\nExample,100\n"
+        uploaded = self.service.upload(self.user["organization_id"], self.user["id"], self.deal_id, "retained.csv", content)
+        before = next(item for item in self.service.deal(self.deal_id, self.user["organization_id"])["documents"] if item["id"] == uploaded["id"])
+        path = self.service.upload_dir / self.user["organization_id"] / self.deal_id / before["stored_name"]
+        result = self.service.purge_original_document(self.user["organization_id"], self.user["id"], uploaded["id"], "Retention period expired")
+        self.assertFalse(path.exists())
+        self.assertTrue(result["metadata_retained"])
+        after = next(item for item in self.service.deal(self.deal_id, self.user["organization_id"])["documents"] if item["id"] == uploaded["id"])
+        self.assertEqual(after["sha256"], hashlib.sha256(content).hexdigest())
+        self.assertEqual(after["processing_status"], "purged")
+        self.assertIsNotNone(after["original_purged_at"])
+        with self.service.db.connect() as connection:
+            purge = connection.execute("SELECT * FROM document_purges WHERE document_id=?", (uploaded["id"],)).fetchone()
+            self.assertEqual(purge["original_sha256"], after["sha256"])
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute("DELETE FROM document_purges WHERE id=?", (purge["id"],))
+        with self.assertRaisesRegex(ValueError, "already purged"):
+            self.service.purge_original_document(self.user["organization_id"], self.user["id"], uploaded["id"], "Duplicate purge request")
 
     def test_organization_isolation(self):
         with self.assertRaises(LookupError): self.service.deal(self.deal_id, "other-org")

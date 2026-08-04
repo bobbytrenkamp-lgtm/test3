@@ -20,7 +20,7 @@ Confidential documents, approved assumptions, identities and audit history are s
 | External transmission | No telemetry, hosted API or remote model; local endpoint validation | Egress-deny deployment guide |
 | Sensitive logging | Metadata-only request log; no content/key logging | Redaction audit |
 | Backup/deletion | Manifested local backup and temporary restore drill | Encryption and controlled deletion workflow |
-| Audit tampering | Serialized previous-event hash chain with verifier | External signed anchor not present |
+| Audit/approval tampering | Serialized audit and append-only review-decision hash chains with independent verifiers and immutable-decision triggers | External signed anchor not present |
 
 Malware status is explicitly `not_available`; the application never claims a scan occurred.
 

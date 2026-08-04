@@ -163,10 +163,17 @@ class Handler(SimpleHTTPRequestHandler):
             if len(parts) == 4 and parts[:2] == ["api", "deals"] and parts[3] == "reconcile":
                 self._authorize_post(user, "reconcile.run")
                 return self._json(200, self.service.run_reconciliation(user["organization_id"], user["id"], parts[2]))
+            if len(parts) == 4 and parts[:2] == ["api", "deals"] and parts[3] == "assumptions":
+                self._authorize_post(user, "assumption.create")
+                return self._json(201, self.service.create_assumption(user["organization_id"], user["id"], parts[2], self._payload()))
             if len(parts) == 4 and parts[:2] == ["api", "values"] and parts[3] == "review":
                 self._authorize_post(user, "value.review")
                 payload = self._payload()
                 return self._json(200, self.service.review_value(user["organization_id"], user["id"], parts[2], payload.get("status"), payload.get("normalized_value"), payload.get("comments", "")))
+            if len(parts) == 4 and parts[:2] == ["api", "assumptions"] and parts[3] == "review":
+                self._authorize_post(user, "assumption.review")
+                payload = self._payload()
+                return self._json(200, self.service.review_assumption(user["organization_id"], user["id"], parts[2], payload.get("status"), payload.get("normalized_value"), payload.get("comments", "")))
             if len(parts) == 4 and parts[:2] == ["api", "findings"] and parts[3] == "resolve":
                 self._authorize_post(user, "finding.resolve")
                 return self._json(200, self.service.resolve_finding(user["organization_id"], user["id"], parts[2], self._payload().get("notes", "")))

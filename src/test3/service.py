@@ -11,7 +11,8 @@ from .adapters import diligence_summary, test1_enrichment, test2_export
 from .auth import hash_password
 from .classification import classify
 from .db import Database, now
-from .extraction import process
+from .extraction import normalize_value, process
+from .field_registry import FIELD_BY_NAME
 from .reconciliation import as_dicts, reconcile
 from .security import sha256_bytes, validate_upload
 
@@ -44,7 +45,13 @@ class Service:
             for deal in deals:
                 deal["document_count"] = connection.execute("SELECT COUNT(*) FROM documents WHERE deal_id=?", (deal["id"],)).fetchone()[0]
                 deal["finding_count"] = connection.execute("SELECT COUNT(*) FROM findings WHERE deal_id=? AND resolution_status!='resolved'", (deal["id"],)).fetchone()[0]
-        return {"user": user, "deals": deals, "zeroCost": True, "localOnly": True}
+        return {
+            "user": user, "deals": deals, "zeroCost": True, "localOnly": True,
+            "manualAssumptionFields": [
+                {"name": field.name, "label": field.label, "unit": field.unit, "currency": field.currency}
+                for field in FIELD_BY_NAME.values()
+            ],
+        }
 
     def deal(self, deal_id: str, organization_id: str) -> dict:
         with self.db.connect() as connection:
@@ -53,14 +60,41 @@ class Service:
                 raise LookupError("Deal not found")
             documents = [dict(row) for row in connection.execute("SELECT * FROM documents WHERE deal_id=? AND organization_id=? ORDER BY uploaded_at DESC", (deal_id, organization_id))]
             values = [dict(row) for row in connection.execute("SELECT * FROM extracted_values WHERE deal_id=? AND organization_id=? ORDER BY created_at", (deal_id, organization_id))]
+            assumptions = [dict(row) for row in connection.execute("SELECT * FROM manual_assumptions WHERE deal_id=? AND organization_id=? ORDER BY created_at", (deal_id, organization_id))]
+            decisions = [dict(row) for row in connection.execute("SELECT * FROM review_decisions WHERE deal_id=? AND organization_id=? ORDER BY rowid", (deal_id, organization_id))]
             findings = [dict(row) for row in connection.execute("SELECT * FROM findings WHERE deal_id=? AND organization_id=? ORDER BY created_at DESC", (deal_id, organization_id))]
             audit = [dict(row) for row in connection.execute("SELECT * FROM audit_events WHERE deal_id=? AND organization_id=? ORDER BY created_at DESC LIMIT 100", (deal_id, organization_id))]
+        latest_decision = {(item["entity_type"], item["entity_id"]): item for item in decisions}
         for value in values:
             value["bbox"] = json.loads(value.pop("bbox_json")) if value.get("bbox_json") else None
+            value["source_kind"] = "document"
+            value["entity_type"] = "extracted_value"
+            value["extracted_normalized_value"] = value["normalized_value"]
+            decision = latest_decision.get(("extracted_value", value["id"]))
+            if decision:
+                value["normalized_value"] = decision["proposed_normalized_value"]
+                value["latest_decision_id"] = decision["id"]
+        for assumption in assumptions:
+            decision = latest_decision.get(("manual_assumption", assumption["id"]))
+            values.append({
+                **assumption,
+                "entity_type": "manual_assumption", "source_kind": "user_entered",
+                "document_id": None, "document_version": None,
+                "document_category": "user_entered_assumption",
+                "raw_value": assumption["proposed_value"],
+                "normalized_value": decision["proposed_normalized_value"] if decision else assumption["proposed_value"],
+                "page_number": None, "bbox": None,
+                "source_excerpt": assumption["rationale"],
+                "source_text_hash": hashlib.sha256(assumption["rationale"].encode()).hexdigest(),
+                "extraction_method": "user_entered", "extractor_version": "1.0",
+                "confidence": 1.0, "validation_status": "user_entered",
+                "comments": decision["comments"] if decision else None,
+                "latest_decision_id": decision["id"] if decision else None,
+            })
         for finding in findings:
             for key in ("compared_values_json", "source_documents_json", "page_references_json"):
                 finding[key.removesuffix("_json")] = json.loads(finding.pop(key))
-        return {"deal": dict(deal), "documents": documents, "values": values, "findings": findings, "audit": audit}
+        return {"deal": dict(deal), "documents": documents, "values": values, "findings": findings, "audit": audit, "review_decisions": decisions}
 
     def create_deal(self, organization_id: str, user_id: str, payload: dict) -> dict:
         name = str(payload.get("name", "")).strip()
@@ -108,27 +142,113 @@ class Service:
         return {"id": document_id, "category": category, "status": status, "sha256": digest, "candidates": len(candidates), "warning": error}
 
     def review_value(self, organization_id: str, user_id: str, value_id: str, status: str, normalized_value: str | None, comments: str = "") -> dict:
+        normalized_value = None if normalized_value is None else str(normalized_value)
+        comments = str(comments or "")
         if status not in ("approved", "rejected", "needs_review"):
             raise ValueError("Invalid review status")
+        if status == "approved" and not str(normalized_value or "").strip():
+            raise ValueError("An approved normalized value is required")
+        if status == "rejected" and not comments.strip():
+            raise ValueError("Rejection comments are required")
         with self.db.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             value = connection.execute("SELECT * FROM extracted_values WHERE id=? AND organization_id=?", (value_id, organization_id)).fetchone()
             if not value:
                 raise LookupError("Extracted value not found")
+            if status == "approved":
+                normalized_value = self._validated_registered_value(value["field_name"], normalized_value)
             reviewed = now()
+            decision_id = self._append_review_decision(connection, organization_id, value["deal_id"], user_id, "extracted_value", value_id, status, normalized_value, comments, reviewed)
+            superseded = self._set_controlling_value(connection, organization_id, value["deal_id"], value["field_name"], "extracted_value", value_id) if status == "approved" else []
             final_id = value_id if status == "approved" else None
-            connection.execute("UPDATE extracted_values SET normalized_value=?, review_status=?, reviewer_id=?, reviewed_at=?, comments=?, final_approved_value_id=? WHERE id=?", (normalized_value, status, user_id, reviewed, comments[:2000], final_id, value_id))
-        self.db.audit(organization_id, user_id, f"value.{status}", "extracted_value", value_id, {"normalized_value": normalized_value, "comments": comments}, value["deal_id"])
-        return {"id": value_id, "review_status": status, "reviewed_at": reviewed}
+            connection.execute("UPDATE extracted_values SET review_status=?, reviewer_id=?, reviewed_at=?, comments=?, final_approved_value_id=? WHERE id=?", (status, user_id, reviewed, comments[:2000], final_id, value_id))
+        self.db.audit(organization_id, user_id, f"value.{status}", "extracted_value", value_id, {"decision_id": decision_id, "proposed_normalized_value": normalized_value, "comments": comments, "superseded": superseded}, value["deal_id"])
+        return {"id": value_id, "review_status": status, "reviewed_at": reviewed, "decision_id": decision_id, "superseded": superseded}
+
+    def create_assumption(self, organization_id: str, user_id: str, deal_id: str, payload: dict) -> dict:
+        field_name = str(payload.get("field_name", "")).strip()
+        proposed_value = str(payload.get("proposed_value", "")).strip()
+        rationale = str(payload.get("rationale", "")).strip()
+        if field_name not in FIELD_BY_NAME:
+            raise ValueError("Manual assumptions require a registered field name")
+        if not proposed_value:
+            raise ValueError("A proposed value is required")
+        if not rationale:
+            raise ValueError("A source or rationale is required")
+        assumption_id, created = str(uuid.uuid4()), now()
+        field = FIELD_BY_NAME[field_name]
+        with self.db.connect() as connection:
+            if not connection.execute("SELECT id FROM deals WHERE id=? AND organization_id=?", (deal_id, organization_id)).fetchone():
+                raise LookupError("Deal not found")
+            connection.execute("INSERT INTO manual_assumptions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (assumption_id, organization_id, deal_id, field_name, proposed_value[:1000], field.unit, field.currency, rationale[:4000], "needs_review", None, None, user_id, created))
+        self.db.audit(organization_id, user_id, "assumption.created", "manual_assumption", assumption_id, {"field_name": field_name, "proposed_value": proposed_value, "rationale": rationale}, deal_id)
+        return {"id": assumption_id, "field_name": field_name, "review_status": "needs_review"}
+
+    def review_assumption(self, organization_id: str, user_id: str, assumption_id: str, status: str, normalized_value: str | None, comments: str = "") -> dict:
+        normalized_value = None if normalized_value is None else str(normalized_value)
+        comments = str(comments or "")
+        if status not in ("approved", "rejected", "needs_review"):
+            raise ValueError("Invalid review status")
+        if status == "approved" and not str(normalized_value or "").strip():
+            raise ValueError("An approved normalized value is required")
+        if status == "rejected" and not comments.strip():
+            raise ValueError("Rejection comments are required")
+        reviewed = now()
+        with self.db.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            assumption = connection.execute("SELECT * FROM manual_assumptions WHERE id=? AND organization_id=?", (assumption_id, organization_id)).fetchone()
+            if not assumption:
+                raise LookupError("Manual assumption not found")
+            if status == "approved":
+                normalized_value = self._validated_registered_value(assumption["field_name"], normalized_value)
+            decision_id = self._append_review_decision(connection, organization_id, assumption["deal_id"], user_id, "manual_assumption", assumption_id, status, normalized_value, comments, reviewed)
+            superseded = self._set_controlling_value(connection, organization_id, assumption["deal_id"], assumption["field_name"], "manual_assumption", assumption_id) if status == "approved" else []
+            connection.execute("UPDATE manual_assumptions SET review_status=?, reviewer_id=?, reviewed_at=? WHERE id=?", (status, user_id, reviewed, assumption_id))
+        self.db.audit(organization_id, user_id, f"assumption.{status}", "manual_assumption", assumption_id, {"decision_id": decision_id, "proposed_normalized_value": normalized_value, "comments": comments, "superseded": superseded}, assumption["deal_id"])
+        return {"id": assumption_id, "review_status": status, "reviewed_at": reviewed, "decision_id": decision_id, "superseded": superseded}
+
+    @staticmethod
+    def _append_review_decision(connection, organization_id: str, deal_id: str, actor_id: str, entity_type: str, entity_id: str, decision: str, proposed_value: str | None, comments: str, created: str) -> str:
+        previous = connection.execute("SELECT decision_hash FROM review_decisions WHERE organization_id=? ORDER BY rowid DESC LIMIT 1", (organization_id,)).fetchone()
+        previous_hash = previous[0] if previous else None
+        decision_id = str(uuid.uuid4())
+        payload = json.dumps({"id": decision_id, "organization_id": organization_id, "deal_id": deal_id, "actor_id": actor_id, "entity_type": entity_type, "entity_id": entity_id, "decision": decision, "proposed_normalized_value": proposed_value, "comments": comments[:2000], "previous": previous_hash, "created_at": created}, sort_keys=True)
+        decision_hash = hashlib.sha256(payload.encode()).hexdigest()
+        connection.execute("INSERT INTO review_decisions VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (decision_id, organization_id, deal_id, actor_id, entity_type, entity_id, decision, proposed_value, comments[:2000], previous_hash, decision_hash, created))
+        return decision_id
+
+    @staticmethod
+    def _validated_registered_value(field_name: str, proposed_value: str | None) -> str:
+        field = FIELD_BY_NAME.get(field_name)
+        if not field:
+            return str(proposed_value).strip()
+        normalized = normalize_value(str(proposed_value), field.value_type, field.unit)
+        if normalized is None:
+            raise ValueError(f"Approved {field_name} does not satisfy its registered {field.value_type} type")
+        return normalized
+
+    @staticmethod
+    def _set_controlling_value(connection, organization_id: str, deal_id: str, field_name: str, entity_type: str, entity_id: str) -> list[str]:
+        extracted = [row[0] for row in connection.execute("SELECT id FROM extracted_values WHERE organization_id=? AND deal_id=? AND field_name=? AND review_status='approved' AND id!=?", (organization_id, deal_id, field_name, entity_id if entity_type == "extracted_value" else ""))]
+        manual = [row[0] for row in connection.execute("SELECT id FROM manual_assumptions WHERE organization_id=? AND deal_id=? AND field_name=? AND review_status='approved' AND id!=?", (organization_id, deal_id, field_name, entity_id if entity_type == "manual_assumption" else ""))]
+        for old_id in extracted:
+            connection.execute("UPDATE extracted_values SET review_status='superseded', final_approved_value_id=? WHERE id=?", (entity_id if entity_type == "extracted_value" else None, old_id))
+        for old_id in manual:
+            connection.execute("UPDATE manual_assumptions SET review_status='superseded' WHERE id=?", (old_id,))
+        return [*extracted, *manual]
 
     def run_reconciliation(self, organization_id: str, user_id: str, deal_id: str) -> list[dict]:
+        snapshot = self.deal(deal_id, organization_id)
+        documents_by_id = {item["id"]: item for item in snapshot["documents"]}
+        active = [item for item in snapshot["values"] if item["review_status"] not in ("rejected", "superseded")]
+        values = {}
+        for row in active:
+            values[row["field_name"]] = row["normalized_value"]
+            document = documents_by_id.get(row.get("document_id"))
+            values[f"{row['field_name']}__document"] = document["original_name"] if document else "User-entered assumption"
+            values[f"{row['field_name']}__page"] = row.get("page_number")
+        results = as_dicts(reconcile(values))
         with self.db.connect() as connection:
-            rows = [dict(row) for row in connection.execute("SELECT e.*, d.original_name FROM extracted_values e JOIN documents d ON d.id=e.document_id WHERE e.deal_id=? AND e.organization_id=? AND e.review_status!='rejected'", (deal_id, organization_id))]
-            values = {}
-            for row in rows:
-                values[row["field_name"]] = row["normalized_value"]
-                values[f"{row['field_name']}__document"] = row["original_name"]
-                values[f"{row['field_name']}__page"] = row["page_number"]
-            results = as_dicts(reconcile(values))
             connection.execute("DELETE FROM findings WHERE deal_id=? AND organization_id=? AND resolution_status='open'", (deal_id, organization_id))
             created = now()
             for item in results:
@@ -152,7 +272,8 @@ class Service:
         approved = [item for item in snapshot["values"] if item["review_status"] == "approved"]
         documents_by_id = {item["id"]: item for item in snapshot["documents"]}
         for item in approved:
-            item["document_sha256"] = documents_by_id[item["document_id"]]["sha256"]
+            document = documents_by_id.get(item.get("document_id"))
+            item["document_sha256"] = document["sha256"] if document else None
         if kind == "test2":
             result = test2_export(snapshot["deal"], approved, snapshot["findings"])
         elif kind == "memo":

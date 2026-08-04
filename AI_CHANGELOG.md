@@ -40,3 +40,12 @@
 - Added deterministic rate, basis-point, integer and date normalization plus registry-derived units and currencies.
 - Added category-negative tests so unrelated document types do not emit misleading candidates.
 - Preserved tabular row identity and the mandatory human-review boundary.
+
+## 2026-08-04 — approval governance tranche
+
+- Preserved extracted normalization as immutable source evidence and moved reviewer edits into append-only decisions.
+- Added database immutability triggers, serialized decision hashes and an independent tamper verifier.
+- Added registered, rationale-required manual assumptions that begin pending and retain user-entered provenance.
+- Added typed approval validation and explicit supersession of the prior controlling value.
+- Included assumption and decision counts in backup restore verification.
+- Replaced native prompt interactions with labeled review/resolution forms and completed a clean-console browser workflow.

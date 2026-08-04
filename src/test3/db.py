@@ -21,6 +21,10 @@ CREATE TABLE IF NOT EXISTS deals(id TEXT PRIMARY KEY, organization_id TEXT NOT N
 CREATE TABLE IF NOT EXISTS documents(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), deal_id TEXT NOT NULL REFERENCES deals(id), original_name TEXT NOT NULL, stored_name TEXT NOT NULL, detected_mime TEXT NOT NULL, category TEXT NOT NULL, sha256 TEXT NOT NULL, size_bytes INTEGER NOT NULL, uploader_id TEXT NOT NULL REFERENCES users(id), uploaded_at TEXT NOT NULL, processing_status TEXT NOT NULL, malware_scan_status TEXT NOT NULL DEFAULT 'not_available', UNIQUE(deal_id,sha256));
 CREATE TABLE IF NOT EXISTS document_versions(id TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES documents(id), version INTEGER NOT NULL, extractor_version TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(document_id,version));
 CREATE TABLE IF NOT EXISTS extracted_values(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), deal_id TEXT NOT NULL REFERENCES deals(id), document_id TEXT NOT NULL REFERENCES documents(id), document_version INTEGER NOT NULL, document_category TEXT NOT NULL, field_name TEXT NOT NULL, raw_value TEXT NOT NULL, normalized_value TEXT, unit TEXT, currency TEXT, page_number INTEGER, bbox_json TEXT, source_excerpt TEXT NOT NULL, source_text_hash TEXT NOT NULL, extraction_method TEXT NOT NULL, extractor_version TEXT NOT NULL, confidence REAL NOT NULL CHECK(confidence BETWEEN 0 AND 1), validation_status TEXT NOT NULL, review_status TEXT NOT NULL, reviewer_id TEXT REFERENCES users(id), reviewed_at TEXT, comments TEXT, superseded_value_id TEXT REFERENCES extracted_values(id), final_approved_value_id TEXT REFERENCES extracted_values(id), created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS manual_assumptions(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), deal_id TEXT NOT NULL REFERENCES deals(id), field_name TEXT NOT NULL, proposed_value TEXT NOT NULL, unit TEXT, currency TEXT, rationale TEXT NOT NULL, review_status TEXT NOT NULL CHECK(review_status IN ('needs_review','approved','rejected','superseded')), reviewer_id TEXT REFERENCES users(id), reviewed_at TEXT, created_by TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS review_decisions(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), deal_id TEXT NOT NULL REFERENCES deals(id), actor_id TEXT NOT NULL REFERENCES users(id), entity_type TEXT NOT NULL CHECK(entity_type IN ('extracted_value','manual_assumption')), entity_id TEXT NOT NULL, decision TEXT NOT NULL CHECK(decision IN ('approved','rejected','needs_review')), proposed_normalized_value TEXT, comments TEXT NOT NULL, previous_hash TEXT, decision_hash TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS review_decisions_no_update BEFORE UPDATE ON review_decisions BEGIN SELECT RAISE(ABORT, 'review decisions are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS review_decisions_no_delete BEFORE DELETE ON review_decisions BEGIN SELECT RAISE(ABORT, 'review decisions are append-only'); END;
 CREATE TABLE IF NOT EXISTS findings(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), deal_id TEXT NOT NULL REFERENCES deals(id), rule_code TEXT NOT NULL, severity TEXT NOT NULL, explanation TEXT NOT NULL, compared_values_json TEXT NOT NULL, source_documents_json TEXT NOT NULL, page_references_json TEXT NOT NULL, suggested_next_step TEXT NOT NULL, resolution_status TEXT NOT NULL, resolution_notes TEXT, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS audit_events(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), deal_id TEXT, actor_id TEXT REFERENCES users(id), action TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT, details_json TEXT NOT NULL, previous_hash TEXT, event_hash TEXT NOT NULL, created_at TEXT NOT NULL);
 """
@@ -71,4 +75,24 @@ class Database:
             if row["previous_hash"] != previous or row["event_hash"] != hashlib.sha256(payload.encode()).hexdigest():
                 return False, row["id"]
             previous = row["event_hash"]
+        return True, None
+
+    def verify_review_chain(self, organization_id: str) -> tuple[bool, str | None]:
+        import hashlib
+        with self.connect() as connection:
+            rows = connection.execute("SELECT * FROM review_decisions WHERE organization_id=? ORDER BY rowid", (organization_id,)).fetchall()
+        previous = None
+        for row in rows:
+            payload = json.dumps({
+                "id": row["id"], "organization_id": row["organization_id"],
+                "deal_id": row["deal_id"], "actor_id": row["actor_id"],
+                "entity_type": row["entity_type"], "entity_id": row["entity_id"],
+                "decision": row["decision"],
+                "proposed_normalized_value": row["proposed_normalized_value"],
+                "comments": row["comments"], "previous": previous,
+                "created_at": row["created_at"],
+            }, sort_keys=True)
+            if row["previous_hash"] != previous or row["decision_hash"] != hashlib.sha256(payload.encode()).hexdigest():
+                return False, row["id"]
+            previous = row["decision_hash"]
         return True, None

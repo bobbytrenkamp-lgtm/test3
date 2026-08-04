@@ -4,11 +4,14 @@ import csv
 import io
 import re
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from xml.etree import ElementTree
+
+import pypdfium2 as pdfium
+from openpyxl import load_workbook
 
 from .normalization import number
+from .local_ocr import available as ocr_available, extract as ocr_extract, validate_image
 
 MAX_XLSX_ENTRIES = 250
 MAX_XLSX_XML_BYTES = 25 * 1024 * 1024
@@ -84,35 +87,27 @@ def parse_xlsx(content: bytes) -> tuple[list[list[str]], list[Candidate]]:
             if entry.compress_size and entry.file_size / entry.compress_size > 200:
                 raise ValueError("XLSX compression ratio is unsafe")
         names = set(archive.namelist())
-        shared = []
-        if "xl/sharedStrings.xml" in names:
-            root = ElementTree.fromstring(archive.read("xl/sharedStrings.xml"))
-            shared = ["".join(node.itertext()) for node in root]
         sheet_name = next((name for name in sorted(names) if name.startswith("xl/worksheets/sheet") and name.endswith(".xml")), None)
         if not sheet_name:
             return [], []
-        root = ElementTree.fromstring(archive.read(sheet_name))
-        rows = []
-        row_nodes = [node for node in root.iter() if node.tag.endswith("}row")]
-        if len(row_nodes) > MAX_XLSX_ROWS:
-            raise ValueError("XLSX row count exceeds the safety limit")
-        cell_count = 0
-        for row in row_nodes:
-            values = []
-            cells = [node for node in row if node.tag.endswith("}c")]
-            cell_count += len(cells)
-            if cell_count > MAX_XLSX_CELLS:
-                raise ValueError("XLSX cell count exceeds the safety limit")
-            for cell in cells:
-                value_node = next((node for node in cell.iter() if node.tag.endswith("}v")), None)
-                value = value_node.text if value_node is not None and value_node.text else ""
-                if cell.attrib.get("t") == "s" and value.isdigit() and int(value) < len(shared):
-                    value = shared[int(value)]
-                values.append(value)
-            rows.append(values)
-        csv_content = io.StringIO()
-        csv.writer(csv_content).writerows(rows)
-        return parse_csv(csv_content.getvalue().encode())
+    workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=False, keep_links=False)
+    try:
+        sheet = workbook.worksheets[0]
+        if sheet.max_row > MAX_XLSX_ROWS or sheet.max_column * sheet.max_row > MAX_XLSX_CELLS:
+            raise ValueError("XLSX dimensions exceed the safety limit")
+        rows = [["" if cell.value is None else str(cell.value) for cell in row] for row in sheet.iter_rows()]
+    finally:
+        workbook.close()
+    candidates = []
+    if rows:
+        headers = [re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_") for value in rows[0]]
+        for row_index, row in enumerate(rows[1:], 2):
+            for index, raw in enumerate(row):
+                if not raw.strip() or index >= len(headers):
+                    continue
+                formula = raw.startswith("=")
+                candidates.append(Candidate(f"row.{row_index}.{headers[index] or index}", raw, None if formula else (str(number(raw)) if number(raw) is not None else raw.strip()), 1, f"XLSX sheet {sheet.title!r}, cell row {row_index}, column {index + 1}", 0.4 if formula else 0.95, "xlsx_formula_not_evaluated_v2" if formula else "xlsx_cell_v2", (index, row_index - 1, index + 1, row_index)))
+    return rows, candidates
 
 
 def extract_selectable_pdf_text(content: bytes) -> str:
@@ -124,6 +119,88 @@ def extract_selectable_pdf_text(content: bytes) -> str:
     return "\n".join(chunks)
 
 
+def extract_pdf_candidates(content: bytes) -> tuple[list[Candidate], int]:
+    document = pdfium.PdfDocument(content)
+    candidates, text_pages = [], 0
+    try:
+        for page_index in range(len(document)):
+            page = document[page_index]
+            text_page = page.get_textpage()
+            try:
+                text = text_page.get_text_range()
+                if text.strip():
+                    text_pages += 1
+                for candidate in extract_text_candidates(text, page_index + 1, "pdfium_text_v2"):
+                    bbox = None
+                    searcher = text_page.search(candidate.raw)
+                    try:
+                        match = searcher.get_next()
+                        if match:
+                            start, count = match
+                            boxes = [text_page.get_charbox(index) for index in range(start, start + count)]
+                            left, bottom, right, top = min(box[0] for box in boxes), min(box[1] for box in boxes), max(box[2] for box in boxes), max(box[3] for box in boxes)
+                            width, height = page.get_size()
+                            bbox = (left / width, (height - top) / height, (right - left) / width, (top - bottom) / height)
+                    finally:
+                        searcher.close()
+                    candidates.append(replace(candidate, bbox=bbox))
+            finally:
+                text_page.close()
+                page.close()
+    finally:
+        document.close()
+    return candidates, text_pages
+
+
+def _ocr_candidates(image_content: bytes, suffix: str, page_number: int) -> list[Candidate]:
+    width, height, _ = validate_image(image_content)
+    result = ocr_extract(image_content, suffix)
+    output = []
+    for candidate in extract_text_candidates(result.text, page_number, result.engine):
+        wanted = [re.sub(r"\W", "", token).lower() for token in candidate.raw.split()]
+        words = result.words
+        matched = []
+        for start in range(len(words)):
+            actual = [re.sub(r"\W", "", item["text"]).lower() for item in words[start:start + len(wanted)]]
+            if actual == wanted:
+                matched = words[start:start + len(wanted)]
+                break
+        bbox = None
+        if matched:
+            boxes = [item["bbox"] for item in matched]
+            left, top, right, bottom = min(box[0] for box in boxes), min(box[1] for box in boxes), max(box[2] for box in boxes), max(box[3] for box in boxes)
+            bbox = (left / width, top / height, (right - left) / width, (bottom - top) / height)
+        confidence = min(candidate.confidence, sum(item["confidence"] for item in matched) / len(matched)) if matched else min(candidate.confidence, 0.65)
+        output.append(replace(candidate, bbox=bbox, confidence=confidence))
+    return output
+
+
+def ocr_pdf_candidates(content: bytes) -> list[Candidate]:
+    document = pdfium.PdfDocument(content)
+    candidates = []
+    try:
+        if len(document) > 250:
+            raise ValueError("PDF page count exceeds the OCR safety limit")
+        for page_index in range(len(document)):
+            page = document[page_index]
+            try:
+                width, height = page.get_size()
+                scale = min(2.0, 10_000 / max(width, height))
+                if width * height * scale * scale > 80_000_000:
+                    raise ValueError("Rendered OCR page exceeds the pixel safety limit")
+                bitmap = page.render(scale=scale)
+                try:
+                    image = bitmap.to_pil(); stream = io.BytesIO(); image.save(stream, format="PNG")
+                finally:
+                    bitmap.close()
+                candidates.extend(_ocr_candidates(stream.getvalue(), ".png", page_index + 1))
+            finally:
+                page.close()
+    finally:
+        document.close()
+    return candidates
+
+
 def process(filename: str, mime: str, content: bytes) -> tuple[str, list[Candidate], str | None]:
     if mime == "text/csv":
         _, candidates = parse_csv(content)
@@ -132,14 +209,36 @@ def process(filename: str, mime: str, content: bytes) -> tuple[str, list[Candida
         try:
             _, candidates = parse_xlsx(content)
             return "extracted", candidates, None
-        except (zipfile.BadZipFile, ElementTree.ParseError, KeyError, ValueError) as error:
+        except Exception as error:
             return "failed", [], f"Spreadsheet could not be parsed: {error}"
     if mime == "application/pdf":
-        text = extract_selectable_pdf_text(content)
-        if not text.strip():
-            return "needs_review", [], "No safely extractable text found. Use optional local Tesseract OCR or manual entry."
-        return "extracted", extract_text_candidates(text), None
+        try:
+            candidates, text_pages = extract_pdf_candidates(content)
+        except Exception as error:
+            text = extract_selectable_pdf_text(content)
+            if text.strip():
+                return "needs_review", extract_text_candidates(text), f"Mature PDF parser rejected the file; conservative fallback used: {type(error).__name__}"
+            return "failed", [], f"PDF could not be safely parsed: {type(error).__name__}"
+        if not text_pages:
+            if not ocr_available():
+                return "needs_review", [], "No selectable text found. Install local Tesseract to enable scanned-page OCR."
+            try:
+                candidates = ocr_pdf_candidates(content)
+                return ("extracted" if candidates else "needs_review"), candidates, None if candidates else "Local OCR completed but no supported fields were identified."
+            except (RuntimeError, ValueError, OSError) as error:
+                return "failed", [], str(error)
+        return "extracted" if candidates else "needs_review", candidates, None if candidates else "Text was extracted but no supported fields were identified."
     if mime.startswith("image/"):
-        return "needs_review", [], "Image accepted; optional local Tesseract OCR is not configured."
+        try:
+            validate_image(content)
+        except ValueError as error:
+            return "failed", [], str(error)
+        if not ocr_available():
+            return "needs_review", [], "Image verified; optional local Tesseract OCR is not installed."
+        try:
+            candidates = _ocr_candidates(content, Path(filename).suffix.lower(), 1)
+            return ("extracted" if candidates else "needs_review"), candidates, None if candidates else "OCR completed but no supported fields were identified."
+        except (RuntimeError, ValueError, OSError) as error:
+            return "failed", [], str(error)
     return "failed", [], "Unsupported processor"
 

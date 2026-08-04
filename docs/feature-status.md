@@ -7,8 +7,8 @@
 | Deal pipeline and fictional seed | Tested | Local service tests |
 | Local sign-in, sessions, CSRF and roles | Tested | PBKDF2, hashed opaque sessions, CSRF and role matrix; rate limiting/TLS deferred |
 | Secure upload metadata/hash/duplicates | Tested | Synthetic tests |
-| PDF/CSV/XLSX/image support | In development | Verification works; complex PDF/OCR limited |
-| Source-linked review | Functional | UI and service tests; browser e2e pending |
+| PDF/CSV/XLSX/image support | Tested | Local mature parsers; Tesseract optional and unavailable state tested |
+| Source-linked review | Functional | Rendered page and normalized source-area highlight; browser e2e pending |
 | Reconciliation center | Tested | 19 deterministic rules |
 | Approved assumptions | Functional | Approved-only query/UI |
 | test2 export | In development | Contract tests pass; actual test2 import pending |

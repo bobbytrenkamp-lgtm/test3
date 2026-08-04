@@ -17,12 +17,12 @@ POLICY_ONLY = {
     Path("docs/cost-and-billing-audit.md"), Path("docs/zero-cost-operation.md"), Path("docs/security-model.md"),
     Path("AI_CONTEXT.md"), Path("AI_CHANGELOG.md"), Path("BUG_TRACKER.md"), Path("README.md"), Path("scripts/cost_guard.py"),
 }
-SKIP_PARTS = {".git", "__pycache__", ".pytest_cache", "data", "node_modules"}
+SKIP_PARTS = {".git", ".venv", "__pycache__", ".pytest_cache", "data", "node_modules"}
 
 
 def iter_text_files():
     for path in ROOT.rglob("*"):
-        if not path.is_file() or any(part in SKIP_PARTS for part in path.relative_to(ROOT).parts):
+        if not path.is_file() or any(part in SKIP_PARTS or part.endswith(".egg-info") for part in path.relative_to(ROOT).parts):
             continue
         if path.suffix.lower() in TEXT_SUFFIXES or path.name == ".env.example":
             yield path

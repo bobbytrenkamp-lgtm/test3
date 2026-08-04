@@ -16,7 +16,13 @@ Audit date: 2026-08-04. “Possibility of charges” covers this repository’s 
 | AWS/Azure/GCP/Cloudflare runtime | Hosting/storage/compute | Cloud providers | Yes | Often | Metered/free allowance | Yes | Local app/static Pages | Rejected | Free tiers can become billable |
 | Supabase/Firebase/hosted Postgres | Hosted auth/database | Hosted providers | Yes | Varies | Free allowance | Potential | SQLite | Rejected | Potentially billable/terms can change |
 | Mapbox/ArcGIS hosted APIs | Maps/jurisdiction | Hosted providers | Yes/key | Varies | Metered | Local test1 snapshot | Rejected | Potential usage billing |
-| PyMuPDF/pdfplumber/openpyxl/Pillow | Potential future parsing | Package maintainers | No | No | Local resources | None | Current stdlib parser/manual review | Not approved yet | Local/open-source but license/necessity/version audit required before addition |
+| pypdfium2 5.12.1 | PDF text and rendering | Open-source package/PDFium | No | No | Local hardware | None | Conservative parser/manual review | Approved | Apache-2.0 OR BSD-3-Clause plus bundled permissive notices; no service |
+| Pillow 12.3.0 | Image validation/rendering | Python Pillow project | No | No | Local hardware | None | Browser/manual review | Approved | MIT-CMU; no service |
+| openpyxl 3.1.5 | XLSX parsing | openpyxl project | No | No | Local hardware | None | ZIP/XML parser | Approved | MIT; no service; formulas never executed |
+| defusedxml 0.7.1 | XML attack defense | Python community | No | No | Local hardware | None | Strict manual XML limits | Approved | PSF-2.0; no service |
+| et_xmlfile 2.0.0 | openpyxl dependency | Open-source package | No | No | Local hardware | None | Standard-library XML | Approved | MIT; no service; explicitly pinned |
+| setuptools 83.0.0 | Local package build | Python Packaging Authority | No | No | Local hardware | None | PYTHONPATH execution | Approved | MIT; exact-pinned build dependency |
+| PyMuPDF | Alternative PDF processing | Package maintainer | No | No | Local hardware | None | pypdfium2 | Rejected | AGPL/commercial dual-license ambiguity conflicts with permissive-license rule |
 
 Dependencies may change license or distribution terms later; every proposed version requires a fresh audit and local/static alternative review. No external service was added.
 

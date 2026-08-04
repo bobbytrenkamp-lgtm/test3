@@ -90,7 +90,10 @@ class Service:
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(content)
         initial_category, classification_confidence = classify(safe_name)
-        status, candidates, error = process(safe_name, mime, content)
+        try:
+            status, candidates, error = process(safe_name, mime, content)
+        except Exception as processing_error:
+            status, candidates, error = "failed", [], f"Processor failed safely: {type(processing_error).__name__}"
         category, confidence = classify(safe_name, "\n".join(candidate.excerpt for candidate in candidates))
         category = category if confidence >= classification_confidence else initial_category
         created = now()

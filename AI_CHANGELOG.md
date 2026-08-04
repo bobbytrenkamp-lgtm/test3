@@ -17,3 +17,11 @@
 - Added XLSX expanded-size, entry, compression-ratio, row and cell safety limits.
 - Added non-overwriting local backups with file manifests, hashes and temporary restore/integrity drills.
 - Expanded the suite to 30 tests and validated 401/CSRF/authorized-create behavior over live HTTP.
+
+## 2026-08-04 — Document processing tranche
+
+- Audited and exact-pinned pypdfium2/PDFium, Pillow, openpyxl, defusedxml and transitive et_xmlfile; all are local and permissively licensed.
+- Added PDFium page-aware text extraction and normalized source bounding boxes.
+- Added local rendered-PDF page endpoint and analyst source-area highlighting.
+- Added Pillow decode/pixel safety checks and optional local Tesseract image/scanned-PDF OCR with confidence/bounding provenance.
+- Replaced direct XLSX XML parsing with guarded openpyxl read-only parsing; formulas remain unexecuted candidates and macro-enabled files are rejected.

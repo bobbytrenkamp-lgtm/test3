@@ -9,6 +9,8 @@ import unittest
 import zipfile
 from decimal import Decimal
 from pathlib import Path
+from openpyxl import Workbook
+from PIL import Image
 
 from test3.adapters import diligence_summary, test1_enrichment, test2_export
 from test3.auth import hash_password, verify_password
@@ -25,14 +27,26 @@ from test3.service import Service
 
 
 def synthetic_xlsx() -> bytes:
-    shared = '<?xml version="1.0"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>Tenant</t></si><si><t>Example LLC</t></si></sst>'
-    sheet = '<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1"><v>Rent</v></c></row><row r="2"><c r="A2" t="s"><v>1</v></c><c r="B2"><v>1250</v></c></row></sheetData></worksheet>'
     out = io.BytesIO()
-    with zipfile.ZipFile(out, "w") as archive:
-        archive.writestr("[Content_Types].xml", "<Types/>")
-        archive.writestr("xl/sharedStrings.xml", shared)
-        archive.writestr("xl/worksheets/sheet1.xml", sheet)
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Tenant", "Rent"])
+    sheet.append(["Example LLC", 1250])
+    workbook.save(out)
+    workbook.close()
     return out.getvalue()
+
+
+def synthetic_pdf(stream: bytes = b"BT /F1 12 Tf 72 720 Td (Property Name: Example Plaza) Tj 0 -18 Td (Asking Price: $10,000,000) Tj ET") -> bytes:
+    objects = [b"<< /Type /Catalog /Pages 2 0 R >>", b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>", b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>", b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>", b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream"]
+    output = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for index, obj in enumerate(objects, 1):
+        offsets.append(len(output)); output.extend(f"{index} 0 obj\n".encode() + obj + b"\nendobj\n")
+    xref = len(output); output.extend(f"xref\n0 {len(objects)+1}\n0000000000 65535 f \n".encode())
+    for offset in offsets[1:]: output.extend(f"{offset:010d} 00000 n \n".encode())
+    output.extend(f"trailer\n<< /Size {len(objects)+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode())
+    return bytes(output)
 
 
 class SecurityTests(unittest.TestCase):
@@ -58,6 +72,16 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(detect_mime("a.png", b"\x89PNG\r\n\x1a\nrest"), "image/png")
         self.assertEqual(detect_mime("a.jpg", b"\xff\xd8\xffrest"), "image/jpeg")
         self.assertEqual(detect_mime("a.xlsx", synthetic_xlsx()), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    def test_macro_enabled_archive_is_rejected(self):
+        out = io.BytesIO()
+        with zipfile.ZipFile(out, "w") as archive:
+            archive.writestr("[Content_Types].xml", "<Types/>")
+            archive.writestr("xl/worksheets/sheet1.xml", "<worksheet/>")
+            archive.writestr("xl/vbaProject.bin", b"fictional macro")
+        self.assertEqual(detect_mime("renamed.xlsx", out.getvalue()), "application/vnd.ms-excel.sheet.macroEnabled.12")
+        with self.assertRaisesRegex(ValueError, "Unsupported"):
+            validate_upload("renamed.xlsx", out.getvalue(), 100_000)
 
     def test_file_limits_and_unsupported(self):
         with self.assertRaises(ValueError): validate_upload("a.pdf", b"", 100)
@@ -112,11 +136,36 @@ class ExtractionTests(unittest.TestCase):
         self.assertEqual(rows[1][0], "Example LLC")
         self.assertTrue(any(item.normalized == "1250" for item in candidates))
 
+    def test_xlsx_formula_is_never_evaluated(self):
+        content = synthetic_xlsx()
+        workbook = Workbook(); sheet = workbook.active; sheet.append(["Total"]); sheet.append(["=1+1"]); out = io.BytesIO(); workbook.save(out); workbook.close()
+        _, candidates = parse_xlsx(out.getvalue())
+        self.assertEqual(candidates[0].raw, "=1+1")
+        self.assertIsNone(candidates[0].normalized)
+        self.assertEqual(candidates[0].method, "xlsx_formula_not_evaluated_v2")
+
+    def test_pdfium_pdf_source_bbox(self):
+        status, candidates, warning = process("fictional-om.pdf", "application/pdf", synthetic_pdf())
+        self.assertEqual(status, "extracted")
+        self.assertIsNone(warning)
+        name = next(item for item in candidates if item.field == "property_name")
+        self.assertEqual(name.page, 1)
+        self.assertIsNotNone(name.bbox)
+
+    def test_image_decode_verification(self):
+        out = io.BytesIO(); Image.new("RGB", (10, 8), "white").save(out, format="PNG")
+        status, _, warning = process("scan.png", "image/png", out.getvalue())
+        self.assertIn(status, ("needs_review", "extracted"))
+        self.assertNotEqual(status, "failed")
+        self.assertEqual(process("bad.png", "image/png", b"\x89PNG\r\n\x1a\ncorrupt")[0], "failed")
+
     def test_simple_pdf_and_ocr_failure_state(self):
         pdf = b"%PDF-1.4\nBT (Property Name: Example Plaza) Tj ET"
         self.assertIn("Example Plaza", extract_selectable_pdf_text(pdf))
-        self.assertEqual(process("scan.pdf", "application/pdf", b"%PDF-1.4 image-only")[0], "needs_review")
-        self.assertEqual(process("scan.png", "image/png", b"\x89PNG\r\n\x1a\n")[0], "needs_review")
+        self.assertEqual(process("corrupt.pdf", "application/pdf", b"%PDF-1.4 image-only")[0], "failed")
+        self.assertEqual(process("scan.pdf", "application/pdf", synthetic_pdf(b""))[0], "needs_review")
+        image = io.BytesIO(); Image.new("L", (2, 2), 255).save(image, format="PNG")
+        self.assertIn(process("scan.png", "image/png", image.getvalue())[0], ("needs_review", "extracted"))
 
     def test_corrupt_xlsx_fails_honestly(self):
         status, candidates, warning = process("bad.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", b"not-a-zip")

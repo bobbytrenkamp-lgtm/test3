@@ -1,9 +1,20 @@
+[build-system]
+requires = ["setuptools==83.0.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "test3-cre-diligence"
 version = "0.1.0"
 description = "Local-first CRE deal intake and due diligence engine"
 requires-python = ">=3.11"
 license = {text = "MIT"}
+dependencies = [
+  "defusedxml==0.7.1",
+  "et_xmlfile==2.0.0",
+  "openpyxl==3.1.5",
+  "Pillow==12.3.0",
+  "pypdfium2==5.12.1",
+]
 
 [project.scripts]
 test3 = "test3.api:main"

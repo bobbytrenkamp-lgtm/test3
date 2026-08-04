@@ -4,6 +4,7 @@ import json
 import hashlib
 import os
 import secrets
+import io
 import sys
 from datetime import datetime, timedelta, timezone
 from http.cookies import SimpleCookie
@@ -16,6 +17,7 @@ from .service import Service
 from .auth import session_token, verify_password
 from .db import now
 from .permissions import require
+import pypdfium2 as pdfium
 
 ROOT = Path(__file__).resolve().parents[2]
 WEB = ROOT / "web"
@@ -77,7 +79,8 @@ class Handler(SimpleHTTPRequestHandler):
                     return self._json(200, self.service.deal(deal_id, user["organization_id"]))
             if parsed.path.startswith("/api/documents/"):
                 user = self._identity()
-                document_id = parsed.path.rsplit("/", 1)[-1]
+                parts = parsed.path.strip("/").split("/")
+                document_id = parts[2]
                 with self.service.db.connect() as connection:
                     document = connection.execute("SELECT * FROM documents WHERE id=? AND organization_id=?", (document_id, user["organization_id"])).fetchone()
                 if not document:
@@ -86,6 +89,38 @@ class Handler(SimpleHTTPRequestHandler):
                 if self.service.upload_dir.resolve() not in path.parents:
                     raise ValueError("Unsafe document path")
                 body = path.read_bytes()
+                if len(parts) == 5 and parts[3] == "page":
+                    if document["detected_mime"] != "application/pdf":
+                        raise ValueError("Rendered pages are available only for PDFs")
+                    page_number = int(parts[4])
+                    pdf = pdfium.PdfDocument(body)
+                    try:
+                        if page_number < 1 or page_number > len(pdf):
+                            raise ValueError("Page number is out of range")
+                        page = pdf[page_number - 1]
+                        try:
+                            width, height = page.get_size()
+                            scale = min(2.0, 10_000 / max(width, height))
+                            if width * height * scale * scale > 80_000_000:
+                                raise ValueError("Rendered page exceeds the pixel safety limit")
+                            bitmap = page.render(scale=scale)
+                            try:
+                                image = bitmap.to_pil(); output = io.BytesIO(); image.save(output, format="PNG"); body = output.getvalue()
+                            finally:
+                                bitmap.close()
+                        finally:
+                            page.close()
+                    finally:
+                        pdf.close()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/png")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Cache-Control", "private, no-store")
+                    self.send_header("X-Content-Type-Options", "nosniff")
+                    self.end_headers()
+                    return self.wfile.write(body)
+                if len(parts) != 3:
+                    raise LookupError("Document route not found")
                 self.send_response(200)
                 self.send_header("Content-Type", document["detected_mime"])
                 self.send_header("Content-Disposition", f"inline; filename*=UTF-8''{document['original_name']}")

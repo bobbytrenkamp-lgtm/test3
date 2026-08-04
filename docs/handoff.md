@@ -32,5 +32,9 @@ Add optional local Tesseract and a mature permissively licensed local PDF parser
 
 PR #1 established the foundation. The next tranche adds role/CSRF enforcement, hashed sessions, audit verification, archive-bomb limits and backup/restore drills. The suite is now 30 tests; live HTTP checks return 401 without authentication, 401 without CSRF and 201 with the valid local session/CSRF pair.
 
+## Document-processing tranche update
+
+The exact dependency set (pypdfium2 5.12.1, Pillow 12.3.0, openpyxl 3.1.5, defusedxml 0.7.1 and et_xmlfile 2.0.0) was installed in an ignored local environment. All 34 tests pass under those versions. A packaged-entry-point HTTP smoke test uploaded a fictional PDF, extracted two candidates, stored a normalized bounding box and rendered the linked source page as a 22,402-byte PNG with HTTP 200. Scanned OCR remains optional on a separately installed local Tesseract executable; no document is transmitted.
+
 ZERO-COST CHECK PASSED: No application component can create a charge for the repository owner.
 

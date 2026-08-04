@@ -3,6 +3,10 @@ __pycache__/
 .pytest_cache/
 .coverage
 .env
+.venv/
+build/
+dist/
+*.egg-info/
 data/*.db
 data/uploads/
 data/exports/

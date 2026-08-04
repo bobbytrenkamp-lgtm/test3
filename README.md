@@ -8,22 +8,23 @@
 
 - Local fictional deal workspace and role-ready organization model
 - PDF, CSV, XLSX, PNG and JPEG verification, SHA-256 hashing and duplicate prevention
-- Conservative deterministic extraction; unsupported or uncertain processing remains visible
+- Mature local PDF/XLSX/image extraction with source-page bounding boxes and optional local Tesseract OCR
 - Side-by-side source review with approve, edit and reject actions
 - 19 deterministic reconciliation controls
 - Approved-only `test2` JSON adapter, test1 unavailable-state adapter and draft source-linked memo
 - SQLite audit history with a hash chain
 - No required account, credentials, hosted API, telemetry or document transmission
 
-This is an early functional release, not production-ready. Complex PDFs and scanned files require manual review or an optional locally installed Tesseract workflow. Lease outputs are diligence support, not legal conclusions.
+This is an early functional release, not production-ready. Scanned files use optional locally installed Tesseract; without it they remain visibly queued for manual review. Lease outputs are diligence support, not legal conclusions.
 
 ## Run locally
 
-Requires Python 3.11+ only; there are no third-party runtime packages.
+Requires Python 3.11+. Installation downloads only audited, pinned, open-source local-processing packages; no package needs an account or paid service.
 
 ```powershell
-$env:PYTHONPATH = "src"
-python -m test3.api
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install .
+.\.venv\Scripts\test3.exe
 ```
 
 Open `http://127.0.0.1:8765`. Stop with Ctrl+C.
@@ -33,10 +34,9 @@ The fictional development sign-in is `analyst@example.test` / `fictional-demo`. 
 ## Verify
 
 ```powershell
-$env:PYTHONPATH = "src"
-python -m unittest discover -s tests -v
-python scripts/cost_guard.py
-python scripts/license_guard.py
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe scripts/cost_guard.py
+.\.venv\Scripts\python.exe scripts/license_guard.py
 ```
 
 Only fictional synthetic data may be committed. Uploaded documents stay under ignored `data/uploads/`.

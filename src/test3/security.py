@@ -4,6 +4,8 @@ import hashlib
 import html
 import mimetypes
 import re
+import io
+import zipfile
 from pathlib import Path
 
 ALLOWED_TYPES = {
@@ -38,8 +40,16 @@ def detect_mime(filename: str, content: bytes) -> str:
         return "image/png"
     if head.startswith(b"\xff\xd8\xff"):
         return "image/jpeg"
-    if head.startswith(b"PK\x03\x04") and b"[Content_Types].xml" in content[:5000]:
-        return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    if head.startswith(b"PK\x03\x04"):
+        try:
+            with zipfile.ZipFile(io.BytesIO(content)) as archive:
+                names = set(archive.namelist())
+            if "xl/vbaProject.bin" in names:
+                return "application/vnd.ms-excel.sheet.macroEnabled.12"
+            if "[Content_Types].xml" in names and any(name.startswith("xl/worksheets/") for name in names):
+                return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        except (zipfile.BadZipFile, OSError):
+            pass
     extension = Path(filename).suffix.lower()
     if extension == ".csv":
         try:

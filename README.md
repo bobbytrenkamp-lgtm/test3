@@ -40,6 +40,7 @@ For a fictional demonstration only, set `TEST3_DEMO_MODE=1` before first startup
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 .\.venv\Scripts\python.exe scripts/cost_guard.py
 .\.venv\Scripts\python.exe scripts/license_guard.py
+.\.venv\Scripts\python.exe -m test3.load_probe --operations 100 --workers 8
 ```
 
 Only fictional synthetic data may be committed. Uploaded documents stay under ignored `data/uploads/`.
@@ -48,7 +49,7 @@ Administrator original-byte purge is password-reauthenticated, integrity-checked
 
 ## Architecture and status
 
-Start with [repository assessment](docs/repository-assessment.md), [architecture](docs/architecture.md), [feature status](docs/feature-status.md), and the [cost and billing audit](docs/cost-and-billing-audit.md).
+Start with [repository assessment](docs/repository-assessment.md), [architecture](docs/architecture.md), [feature status](docs/feature-status.md), [resilience evidence](docs/resilience-evidence.md), and the [cost and billing audit](docs/cost-and-billing-audit.md).
 
 ## Related repositories
 

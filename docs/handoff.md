@@ -2,6 +2,10 @@
 
 Date: 2026-08-04
 
+## Resilience-evidence update
+
+The local bounded harness concurrently creates and ingests fictional deals, asserts exact database/audit counts and readiness, creates backup format 3.0, opens a disposable restore through current code and reruns operational integrity. Two 100-operation/8-worker runs completed with zero failures and exact counts; results and limits are recorded in `docs/resilience-evidence.md`. Next: automated browser accessibility/XSS/security evidence and operational interrupted-transaction recovery procedures.
+
 ## Readiness-integrity update
 
 SQLite now has an explicit governed schema version and rejects future databases. Audit events are preventively append-only. The authenticated administrator operations probe validates database/FK/schema health, both hash chains, every active original hash, purged tombstones and interrupted purge staging with no network requests. The suite is 60 tests. Next: deterministic local load/concurrency harness, repeat restore evidence, and automated browser accessibility/security review.

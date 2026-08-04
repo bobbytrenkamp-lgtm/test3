@@ -9,6 +9,8 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .db import SCHEMA_VERSION
+
 
 def _hash(path: Path) -> str:
     digest = hashlib.sha256()
@@ -34,7 +36,7 @@ def create_backup(data_dir: Path, destination: Path) -> Path:
         upload_root = data_dir / "uploads"
         if upload_root.exists():
             files.extend((path, path.relative_to(data_dir).as_posix()) for path in upload_root.rglob("*") if path.is_file())
-        manifest = {"format": "test3-backup/2.0", "createdAt": datetime.now(timezone.utc).isoformat(), "files": {name: {"sha256": _hash(path), "bytes": path.stat().st_size} for path, name in files}}
+        manifest = {"format": "test3-backup/3.0", "schemaVersion": SCHEMA_VERSION, "createdAt": datetime.now(timezone.utc).isoformat(), "files": {name: {"sha256": _hash(path), "bytes": path.stat().st_size} for path, name in files}}
         with zipfile.ZipFile(destination, "x", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
             for path, name in files:
                 archive.write(path, name)
@@ -50,7 +52,7 @@ def verify_backup(archive_path: Path, max_expanded_bytes: int = 2 * 1024 * 1024 
         if any(Path(info.filename).is_absolute() or ".." in Path(info.filename).parts for info in infos):
             raise ValueError("Backup contains an unsafe path")
         manifest = json.loads(archive.read("manifest.json"))
-        if manifest.get("format") not in ("test3-backup/1.0", "test3-backup/2.0"):
+        if manifest.get("format") not in ("test3-backup/1.0", "test3-backup/2.0", "test3-backup/3.0"):
             raise ValueError("Unsupported backup format")
         root = Path(temporary)
         archive.extractall(root)
@@ -70,5 +72,17 @@ def verify_backup(archive_path: Path, max_expanded_bytes: int = 2 * 1024 * 1024 
                 count_tables += ("manual_assumptions", "review_decisions")
                 if not set(count_tables).issubset(available):
                     raise ValueError("Backup database does not match its 2.0 manifest format")
+            if manifest["format"] == "test3-backup/3.0":
+                count_tables += ("manual_assumptions", "review_decisions", "reconciliation_runs", "document_purges")
+                if manifest.get("schemaVersion") != SCHEMA_VERSION or not set(count_tables).issubset(available):
+                    raise ValueError("Backup database does not match its 3.0 schema/table contract")
             counts = {table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in count_tables if table in available}
-    return {"valid": True, "format": manifest["format"], "counts": counts, "fileCount": len(manifest["files"])}
+            organization_ids = [row[0] for row in connection.execute("SELECT id FROM organizations")]
+        operational = []
+        if manifest["format"] == "test3-backup/3.0":
+            from .service import Service
+            restored = Service(root)
+            operational = [restored.operational_integrity(organization_id) for organization_id in organization_ids]
+            if not all(report["ok"] for report in operational):
+                raise ValueError("Restored application failed operational integrity checks")
+    return {"valid": True, "format": manifest["format"], "schemaVersion": manifest.get("schemaVersion"), "counts": counts, "fileCount": len(manifest["files"]), "restoredOperationalIntegrity": all(report["ok"] for report in operational) if operational else None}

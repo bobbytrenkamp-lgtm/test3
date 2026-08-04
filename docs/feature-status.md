@@ -11,7 +11,7 @@
 | Source-linked review | Functional | Rendered page and normalized source-area highlight; browser e2e pending |
 | Reconciliation center | Tested | 19 deterministic rules |
 | Approved assumptions | Functional | Approved-only query/UI |
-| test2 export | In development | Contract tests pass; actual test2 import pending |
+| test2 export | Tested, minimal | Real `cre-platform-model` shape passed test2's own `parseModelInput`; non-ready packages are explicitly blocked |
 | test1 enrichment | Designed | Local fallback tested; snapshot mapping pending |
 | Draft IC memo | Functional | Approved facts and source appendix |
 | Optional local model | Designed | Loopback restriction; no generation adapter yet |

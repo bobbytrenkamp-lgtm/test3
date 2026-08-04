@@ -25,3 +25,11 @@
 - Added local rendered-PDF page endpoint and analyst source-area highlighting.
 - Added Pillow decode/pixel safety checks and optional local Tesseract image/scanned-PDF OCR with confidence/bounding provenance.
 - Replaced direct XLSX XML parsing with guarded openpyxl read-only parsing; formulas remain unexecuted candidates and macro-enabled files are rejected.
+
+## 2026-08-04 — test2 contract tranche
+
+- Replaced the nominal test3-shaped handoff with a real nested test2 `cre-platform-model` document.
+- Made import readiness fail closed when approved forecast, valuation or property inputs are missing or invalid.
+- Kept rejected and pending values out of both the model and supporting-source manifest.
+- Executed the fictional minimal model through test2's own `parseModelInput` implementation without adding a runtime dependency.
+- Honored test2's supply-chain policy when its disposable dependency install rejected newly published lockfile entries; no policy was relaxed.

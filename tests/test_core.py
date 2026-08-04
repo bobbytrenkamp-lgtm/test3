@@ -212,9 +212,38 @@ class AdapterTests(unittest.TestCase):
 
     def test_export_excludes_unapproved(self):
         result = test2_export(self.deal, self.approved, [])
-        self.assertEqual(result["property"]["name"], "Fictional Plaza")
-        self.assertIsNone(result["acquisitionAssumptions"]["purchasePrice"])
+        self.assertFalse(result["mappingDiagnostics"]["importReady"])
+        self.assertIsNone(result["test2PortableModel"])
+        self.assertIn("missing approved discount_rate", result["mappingDiagnostics"]["blockers"])
+        self.assertNotIn("asking_price", [source["field"] for source in result["supportingSources"]])
         self.assertEqual(result["sourceDocumentHashes"], ["abc"])
+
+    def test_export_builds_real_test2_portable_model_from_approved_values(self):
+        approved = self.approved + [
+            {"field_name":"forecast_start_date","normalized_value":"2026-01-01","review_status":"approved","document_id":"doc-2"},
+            {"field_name":"forecast_months","normalized_value":"120","review_status":"approved","document_id":"doc-2"},
+            {"field_name":"discount_rate","normalized_value":"0.075","review_status":"approved","document_id":"doc-2"},
+            {"field_name":"rentable_square_feet","normalized_value":"125000","review_status":"approved","document_id":"doc-2"},
+        ]
+        result = test2_export(self.deal, approved, [])
+        portable = result["test2PortableModel"]
+        self.assertTrue(result["mappingDiagnostics"]["importReady"])
+        self.assertEqual(portable["format"], "cre-platform-model")
+        self.assertEqual(portable["formatVersion"], 1)
+        self.assertEqual(portable["model"]["forecast"], {"startDate":"2026-01-01", "months":120})
+        self.assertEqual(portable["model"]["valuation"], {"discountRate":"0.075"})
+        self.assertEqual(portable["model"]["property"]["rentableArea"], "125000")
+        self.assertNotIn("acquisitionPrice", portable["model"]["valuation"])
+
+    def test_export_rejects_percent_style_discount_rate(self):
+        approved = self.approved + [
+            {"field_name":"forecast_start_date","normalized_value":"2026-01-01","review_status":"approved","document_id":"doc-2"},
+            {"field_name":"forecast_months","normalized_value":"120","review_status":"approved","document_id":"doc-2"},
+            {"field_name":"discount_rate","normalized_value":"7.5","review_status":"approved","document_id":"doc-2"},
+        ]
+        result = test2_export(self.deal, approved, [])
+        self.assertFalse(result["mappingDiagnostics"]["importReady"])
+        self.assertIn("approved discount_rate must be a decimal fraction from 0 through 1", result["mappingDiagnostics"]["blockers"])
 
     def test_test1_fallback(self):
         result = test1_enrichment({"county_fips":"00000"})

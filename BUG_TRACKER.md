@@ -9,3 +9,4 @@
 | T3-006 | Fixed 2026-08-04 | High | Document/extracted-value inserts used ambiguous placeholder counts. | Added explicit column lists and exact placeholder counts. |
 | T3-007 | Fixed 2026-08-04 | Medium | SQLite backup connections remained open on Windows because connection context managers do not close handles. | Wrapped backup and drill connections in `contextlib.closing`; Windows cleanup test added. |
 | T3-008 | Fixed 2026-08-04 | Low | Cost guard scanned ignored virtual-environment vendor files and reported irrelevant provider documentation. | Excluded `.venv`; repository-owned source/config/docs remain scanned. |
+| T3-009 | Fixed 2026-08-04 | High | Rerunning reconciliation deleted prior open findings and erased conflict history. | Added immutable input-hashed reconciliation runs, retained findings, explicit supersession and database deletion guards. |

@@ -2,6 +2,10 @@
 
 Date: 2026-08-04
 
+## Reconciliation-integrity update
+
+Reconciliation reruns no longer delete discrepancies. Every run is immutable and records the rule-engine version and SHA-256 of its normalized inputs; prior open findings are retained as superseded. The suite is now 55 tests. Next: local authentication abuse controls, session revocation and operational health/integrity probes.
+
 ## Completed
 
 - Read-only repository assessment for test1/test2 and isolated adapter design.

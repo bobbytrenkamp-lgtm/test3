@@ -1,5 +1,7 @@
 # Zero-cost operation
 
+Authentication abuse controls and session revocation run entirely in local process memory/SQLite. They require no account, network service, monitoring provider or paid identity system. Secure-cookie mode is a local browser flag and does not provision TLS or any external resource.
+
 The full app runs locally with Python, SQLite and exact-pinned open-source document packages. Package installation is free and local. No account, payment method, API key, domain, cloud resource, hosted database, storage, OCR, AI inference or monitoring is required.
 
 Optional Ollama/Tesseract are locally installed open-source software and must remain loopback/local. GitHub may store source and run CI for this public repository; the workflow does not enable paid features or deploy cloud runtime resources. The full private-document workflow is not deployed.

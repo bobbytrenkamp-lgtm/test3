@@ -4,17 +4,21 @@ import hashlib
 import html
 import io
 import json
+import http.client
 import sqlite3
 import tempfile
+import threading
 import unittest
 import zipfile
 from decimal import Decimal
 from pathlib import Path
+from http.server import ThreadingHTTPServer
 from openpyxl import Workbook
 from PIL import Image
 
 from test3.adapters import diligence_summary, test1_enrichment, test2_export
-from test3.auth import hash_password, verify_password
+from test3.auth import DUMMY_PASSWORD_HASH, SigninLimiter, hash_password, verify_password
+from test3.api import Handler
 from test3.backup import create_backup, verify_backup
 from test3.classification import classify
 from test3.db import Database
@@ -78,6 +82,17 @@ class SecurityTests(unittest.TestCase):
         self.assertTrue(verify_password("fictional-demo", encoded))
         self.assertFalse(verify_password("wrong-password", encoded))
         self.assertNotIn("fictional-demo", encoded)
+        self.assertTrue(verify_password("not-a-real-user-password", DUMMY_PASSWORD_HASH))
+
+    def test_signin_limiter_locks_and_resets_deterministically(self):
+        limiter = SigninLimiter(max_failures=3, window_seconds=10, lock_seconds=20)
+        for timestamp in (1, 2, 3):
+            limiter.failure("loopback:user", timestamp)
+        self.assertFalse(limiter.allowed("loopback:user", 4))
+        self.assertTrue(limiter.allowed("loopback:user", 24))
+        limiter.failure("loopback:user", 25)
+        limiter.success("loopback:user")
+        self.assertTrue(limiter.allowed("loopback:user", 26))
 
     def test_sha256_known_value(self):
         self.assertEqual(sha256_bytes(b"fictional"), "a524644266885e16a3bb16166ae38bdbfb36af08fc51036f4dbb91423c7cbcc1")
@@ -112,6 +127,49 @@ class SecurityTests(unittest.TestCase):
     def test_html_sanitization(self):
         payload = '<img src=x onerror="steal()">'
         self.assertEqual(sanitize_text(payload), html.escape(payload, quote=True))
+
+
+class HttpSecurityTests(unittest.TestCase):
+    def test_signout_revokes_session_and_all_responses_have_security_headers(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            Handler.service = Service(Path(temporary), max_upload_bytes=100_000)
+            Handler.service.seed()
+            Handler.signin_limiter = SigninLimiter()
+            Handler.signin_address_limiter = SigninLimiter(max_failures=20)
+            Handler.secure_cookie = False
+            server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+            worker = threading.Thread(target=server.serve_forever, daemon=True)
+            worker.start()
+            try:
+                connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+                credentials = json.dumps({"email": "analyst@example.test", "password": "fictional-demo"})
+                connection.request("POST", "/api/signin", credentials, {"Content-Type": "application/json"})
+                response = connection.getresponse()
+                response.read()
+                self.assertEqual(response.status, 200)
+                self.assertEqual(response.getheader("X-Frame-Options"), "DENY")
+                self.assertIn("form-action 'self'", response.getheader("Content-Security-Policy"))
+                cookie = response.getheader("Set-Cookie").split(";", 1)[0]
+
+                connection.request("GET", "/api/bootstrap", headers={"Cookie": cookie})
+                response = connection.getresponse()
+                bootstrap = json.loads(response.read())
+                self.assertEqual(response.status, 200)
+                connection.request("POST", "/api/signout", headers={"Cookie": cookie, "X-CSRF-Token": bootstrap["user"]["csrf_token"]})
+                response = connection.getresponse()
+                response.read()
+                self.assertEqual(response.status, 200)
+                self.assertIn("Max-Age=0", response.getheader("Set-Cookie"))
+
+                connection.request("GET", "/api/bootstrap", headers={"Cookie": cookie})
+                response = connection.getresponse()
+                response.read()
+                self.assertEqual(response.status, 401)
+                connection.close()
+            finally:
+                server.shutdown()
+                server.server_close()
+                worker.join(timeout=5)
 
 
 class NormalizationTests(unittest.TestCase):

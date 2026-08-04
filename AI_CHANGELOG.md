@@ -1,5 +1,13 @@
 # AI changelog
 
+## 2026-08-04 — schema and operational readiness integrity
+
+- Established governed SQLite schema version 1 and fail-closed rejection of databases created by newer application code.
+- Added preventive append-only triggers for audit events while retaining independent hash-chain verification after deliberate control bypass.
+- Added an authenticated administrator integrity probe covering SQLite quick/FK/schema status, audit/review chains, streamed original hashes, tombstones and purge staging.
+- Added live HTTP and service regression coverage, including zero-network evidence and a Windows-safe future-schema fixture.
+- Added no service or dependency; all readiness checks are local and non-billable.
+
 ## 2026-08-04 — controlled original-document retention
 
 - Added administrator-only original-byte purge with CSRF and current-password reauthentication, mandatory reason and pre-delete size/SHA-256 verification.

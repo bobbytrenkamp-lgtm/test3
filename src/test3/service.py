@@ -18,6 +18,14 @@ from .security import sha256_bytes, validate_upload
 from .test1_snapshot import Test1SnapshotError, load_snapshot
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 class Service:
     def __init__(self, data_dir: Path, max_upload_bytes: int = 50 * 1024 * 1024, test1_data_dir: Path | None = None):
         self.data_dir = data_dir.resolve()
@@ -215,6 +223,36 @@ class Service:
             raise
         self.db.audit(organization_id, user_id, "document.original_purged", "document", document_id, {"purge_id": purge_id, "sha256": document["sha256"], "size": document["size_bytes"], "reason": reason[:4000]}, document["deal_id"])
         return {"id": document_id, "original_purged_at": created, "purge_id": purge_id, "metadata_retained": True}
+
+    def operational_integrity(self, organization_id: str) -> dict:
+        database = self.db.health()
+        audit_valid, audit_break = self.db.verify_audit_chain(organization_id)
+        review_valid, review_break = self.db.verify_review_chain(organization_id)
+        with self.db.connect() as connection:
+            documents = connection.execute("SELECT deal_id,stored_name,sha256,size_bytes,original_purged_at FROM documents WHERE organization_id=?", (organization_id,)).fetchall()
+        storage = {"activeOriginals": 0, "purgedTombstones": 0, "missingActiveOriginals": 0, "integrityMismatches": 0, "unexpectedPurgedOriginals": 0, "unsafePaths": 0}
+        upload_root = self.upload_dir.resolve()
+        for document in documents:
+            path = (self.upload_dir / organization_id / document["deal_id"] / document["stored_name"]).resolve()
+            if upload_root not in path.parents:
+                storage["unsafePaths"] += 1
+                continue
+            if document["original_purged_at"]:
+                storage["purgedTombstones"] += 1
+                if path.exists():
+                    storage["unexpectedPurgedOriginals"] += 1
+                continue
+            storage["activeOriginals"] += 1
+            if not path.is_file():
+                storage["missingActiveOriginals"] += 1
+                continue
+            if path.stat().st_size != document["size_bytes"] or _sha256_file(path) != document["sha256"]:
+                storage["integrityMismatches"] += 1
+        staging_root = self.data_dir / ".purge-staging"
+        staging_files = sum(1 for item in staging_root.iterdir() if item.is_file()) if staging_root.is_dir() else 0
+        chains = {"auditValid": audit_valid, "auditBreakId": audit_break, "reviewValid": review_valid, "reviewBreakId": review_break}
+        storage_ok = not any(storage[key] for key in ("missingActiveOriginals", "integrityMismatches", "unexpectedPurgedOriginals", "unsafePaths")) and staging_files == 0
+        return {"ok": database["ok"] and audit_valid and review_valid and storage_ok, "checkedAt": now(), "database": database, "chains": chains, "storage": storage, "purgeStagingFiles": staging_files, "networkRequests": 0}
 
     def review_value(self, organization_id: str, user_id: str, value_id: str, status: str, normalized_value: str | None, comments: str = "") -> dict:
         normalized_value = None if normalized_value is None else str(normalized_value)

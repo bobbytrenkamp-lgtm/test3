@@ -93,6 +93,10 @@ class Handler(SimpleHTTPRequestHandler):
             if parsed.path == "/api/bootstrap":
                 user = self._identity()
                 return self._json(200, self.service.bootstrap(user))
+            if parsed.path == "/api/operations/integrity":
+                user = self._identity()
+                require(user["role"], "operations.inspect")
+                return self._json(200, self.service.operational_integrity(user["organization_id"]))
             if parsed.path.startswith("/api/deals/"):
                 user = self._identity()
                 parts = parsed.path.strip("/").split("/")

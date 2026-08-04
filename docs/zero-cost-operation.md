@@ -12,5 +12,7 @@ Optional test1 enrichment reads only a user-configured local static data directo
 
 Run `python scripts/cost_guard.py` before each phase/deployment. Any uncertain provider is rejected until the owner explicitly approves it in writing after billing review.
 
+The administrator integrity probe is entirely local and reads SQLite/filesystem state directly. It performs no hosted health check, telemetry upload or monitoring API call and reports `networkRequests: 0`.
+
 ZERO-COST CHECK PASSED: No application component can create a charge for the repository owner.
 

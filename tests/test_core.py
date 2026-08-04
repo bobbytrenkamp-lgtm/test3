@@ -157,6 +157,12 @@ class HttpSecurityTests(unittest.TestCase):
                 bootstrap = json.loads(response.read())
                 self.assertEqual(response.status, 200)
                 self.assertNotIn("session_token_hash", bootstrap["user"])
+                connection.request("GET", "/api/operations/integrity", headers={"Cookie": cookie})
+                response = connection.getresponse()
+                integrity = json.loads(response.read())
+                self.assertEqual(response.status, 200)
+                self.assertTrue(integrity["ok"])
+                self.assertEqual(integrity["networkRequests"], 0)
                 document = Handler.service.upload(bootstrap["user"]["organization_id"], bootstrap["user"]["id"], bootstrap["deals"][0]["id"], "fictional.csv", b"Tenant,Rent\nExample,100\n")
                 purge_path = f"/api/documents/{document['id']}/purge-original"
                 purge_headers = {"Cookie": cookie, "X-CSRF-Token": bootstrap["user"]["csrf_token"], "Content-Type": "application/json"}
@@ -594,10 +600,31 @@ class ServiceTests(unittest.TestCase):
     def test_audit_tampering_is_detected(self):
         with self.service.db.connect() as connection:
             event = connection.execute("SELECT id FROM audit_events LIMIT 1").fetchone()
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute("UPDATE audit_events SET details_json=? WHERE id=?", ('{"tampered":true}', event["id"]))
+            connection.execute("DROP TRIGGER audit_events_no_update")
             connection.execute("UPDATE audit_events SET details_json=? WHERE id=?", ('{"tampered":true}', event["id"]))
         valid, broken_id = self.service.db.verify_audit_chain(self.user["organization_id"])
         self.assertFalse(valid)
         self.assertEqual(broken_id, event["id"])
+
+    def test_database_schema_version_and_integrity_readiness(self):
+        health = self.service.db.health()
+        self.assertTrue(health["ok"])
+        self.assertTrue(health["schemaCurrent"])
+        report = self.service.operational_integrity(self.user["organization_id"])
+        self.assertTrue(report["ok"])
+        self.assertEqual(report["storage"]["missingActiveOriginals"], 0)
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "future.db"
+            connection = sqlite3.connect(path)
+            try:
+                connection.execute("PRAGMA user_version=99")
+                connection.commit()
+            finally:
+                connection.close()
+            with self.assertRaisesRegex(RuntimeError, "newer than supported"):
+                Database(path)
 
     def test_reconciliation_runs_retain_and_supersede_finding_history(self):
         for field_name, value in (("asking_price", "10000000"), ("broker_stated_noi", "500000"), ("broker_stated_cap_rate", "0.06")):

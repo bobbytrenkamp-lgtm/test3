@@ -1,5 +1,13 @@
 # AI changelog
 
+## 2026-08-04 — local authentication and session hardening
+
+- Added deterministic process-local sign-in lockouts at account and loopback-address scopes and equal-cost unknown-account password checks.
+- Added CSRF-protected server-side session revocation and a visible sign-out action.
+- Centralized restrictive security headers across static, JSON, rendered-page and original-document responses; encoded response filenames safely.
+- Added optional local-TLS secure-cookie mode and live HTTP replay regression coverage.
+- Added no service or dependency; all controls remain local and non-billable.
+
 ## 2026-08-04 — reconciliation history integrity
 
 - Replaced destructive reconciliation refreshes with immutable runs and retained finding supersession.

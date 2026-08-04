@@ -2,6 +2,10 @@
 
 Date: 2026-08-04
 
+## Authentication/session hardening update
+
+Local sign-in now applies account- and address-scoped lockouts, performs full PBKDF2 work for unknown accounts and rejects ambiguous duplicate emails. Sign-out deletes the hashed server-side session and clears the browser cookie; a live HTTP test proves replay fails. Security headers now apply to every response. The next control is an explicit institutional first-run administrator bootstrap so the fictional demonstration credential is never the operational default.
+
 ## Reconciliation-integrity update
 
 Reconciliation reruns no longer delete discrepancies. Every run is immutable and records the rule-engine version and SHA-256 of its normalized inputs; prior open findings are retained as superseded. The suite is now 55 tests. Next: local authentication abuse controls, session revocation and operational health/integrity probes.

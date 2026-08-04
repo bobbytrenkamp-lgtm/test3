@@ -11,10 +11,10 @@ from http.cookies import SimpleCookie
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import quote, urlparse
 
 from .service import Service
-from .auth import session_token, verify_password
+from .auth import DUMMY_PASSWORD_HASH, SigninLimiter, session_token, verify_password
 from .db import now
 from .permissions import require
 import pypdfium2 as pdfium
@@ -25,9 +25,20 @@ WEB = ROOT / "web"
 
 class Handler(SimpleHTTPRequestHandler):
     service: Service
+    signin_limiter = SigninLimiter()
+    signin_address_limiter = SigninLimiter(max_failures=20)
+    secure_cookie = False
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(WEB), **kwargs)
+
+    def end_headers(self):
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; object-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+        super().end_headers()
 
     def _json(self, status: int, payload: object, cookie: str | None = None):
         body = json.dumps(payload, default=str).encode()
@@ -35,8 +46,6 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; object-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'")
         if cookie:
             self.send_header("Set-Cookie", cookie)
         self.end_headers()
@@ -52,7 +61,9 @@ class Handler(SimpleHTTPRequestHandler):
             user = connection.execute("SELECT u.*,s.csrf_token FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?", (token_hash, now())).fetchone()
         if not user:
             raise PermissionError("Session expired")
-        return {key: user[key] for key in ("id", "organization_id", "email", "display_name", "role", "csrf_token")}
+        identity = {key: user[key] for key in ("id", "organization_id", "email", "display_name", "role", "csrf_token")}
+        identity["session_token_hash"] = token_hash
+        return identity
 
     def _authorize_post(self, user: dict, permission: str):
         if not secrets.compare_digest(self.headers.get("X-CSRF-Token", ""), user["csrf_token"]):
@@ -61,7 +72,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _payload(self):
         length = int(self.headers.get("Content-Length", "0"))
-        if length > self.service.max_upload_bytes + 1_000_000:
+        if length < 0 or length > 1_000_000:
             raise ValueError("Request too large")
         return json.loads(self.rfile.read(length) or b"{}")
 
@@ -116,16 +127,15 @@ class Handler(SimpleHTTPRequestHandler):
                     self.send_header("Content-Type", "image/png")
                     self.send_header("Content-Length", str(len(body)))
                     self.send_header("Cache-Control", "private, no-store")
-                    self.send_header("X-Content-Type-Options", "nosniff")
                     self.end_headers()
                     return self.wfile.write(body)
                 if len(parts) != 3:
                     raise LookupError("Document route not found")
                 self.send_response(200)
                 self.send_header("Content-Type", document["detected_mime"])
-                self.send_header("Content-Disposition", f"inline; filename*=UTF-8''{document['original_name']}")
+                self.send_header("Content-Disposition", f"inline; filename*=UTF-8''{quote(document['original_name'], safe='')}")
                 self.send_header("Content-Length", str(len(body)))
-                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Cache-Control", "private, no-store")
                 self.end_headers()
                 return self.wfile.write(body)
             return super().do_GET()
@@ -140,17 +150,36 @@ class Handler(SimpleHTTPRequestHandler):
             if parts == ["api", "signin"]:
                 self.service.seed()
                 payload = self._payload()
+                email = str(payload.get("email", "")).strip().lower()
+                address_key = self.client_address[0]
+                limiter_key = f"{address_key}:{email}"
+                if not self.signin_limiter.allowed(limiter_key) or not self.signin_address_limiter.allowed(address_key):
+                    return self._json(429, {"error": "Too many failed sign-in attempts; retry later"})
                 with self.service.db.connect() as connection:
-                    user = connection.execute("SELECT * FROM users WHERE lower(email)=lower(?)", (str(payload.get("email", "")),)).fetchone()
-                    if not user or not verify_password(str(payload.get("password", "")), user["password_hash"]):
+                    users = connection.execute("SELECT * FROM users WHERE lower(email)=? LIMIT 2", (email,)).fetchall()
+                    user = users[0] if len(users) == 1 else None
+                    password_valid = verify_password(str(payload.get("password", "")), user["password_hash"] if user else DUMMY_PASSWORD_HASH)
+                    if not user or not password_valid:
+                        self.signin_limiter.failure(limiter_key)
+                        self.signin_address_limiter.failure(address_key)
                         raise PermissionError("Invalid local credentials")
+                    self.signin_limiter.success(limiter_key)
+                    self.signin_address_limiter.success(address_key)
                     token, csrf = session_token(), session_token()
                     expires = (datetime.now(timezone.utc) + timedelta(hours=12)).isoformat()
                     connection.execute("DELETE FROM sessions WHERE expires_at<=?", (now(),))
                     connection.execute("INSERT INTO sessions VALUES(?,?,?,?,?,?)", (secrets.token_hex(16), hashlib.sha256(token.encode()).hexdigest(), csrf, user["id"], expires, now()))
-                cookie = f"test3_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200"
+                secure = "; Secure" if self.secure_cookie else ""
+                cookie = f"test3_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200{secure}"
                 return self._json(200, {"signedIn": True}, cookie)
             user = self._identity()
+            if parts == ["api", "signout"]:
+                self._authorize_post(user, "read")
+                with self.service.db.connect() as connection:
+                    connection.execute("DELETE FROM sessions WHERE token_hash=?", (user["session_token_hash"],))
+                secure = "; Secure" if self.secure_cookie else ""
+                cookie = f"test3_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0{secure}"
+                return self._json(200, {"signedIn": False}, cookie)
             if parts == ["api", "deals"]:
                 self._authorize_post(user, "deal.create")
                 return self._json(201, self.service.create_deal(user["organization_id"], user["id"], self._payload()))
@@ -158,6 +187,8 @@ class Handler(SimpleHTTPRequestHandler):
                 self._authorize_post(user, "document.upload")
                 filename = self.headers.get("X-Filename", "upload")
                 length = int(self.headers.get("Content-Length", "0"))
+                if length < 0 or length > self.service.max_upload_bytes:
+                    raise ValueError("Upload exceeds the configured file-size limit")
                 content = self.rfile.read(length)
                 return self._json(201, self.service.upload(user["organization_id"], user["id"], parts[2], filename, content))
             if len(parts) == 4 and parts[:2] == ["api", "deals"] and parts[3] == "reconcile":
@@ -198,6 +229,7 @@ def main():
     data_dir = Path(os.getenv("TEST3_DATA_DIR", ROOT / "data"))
     test1_data = os.getenv("TEST3_TEST1_DATA_DIR")
     Handler.service = Service(data_dir, int(os.getenv("TEST3_MAX_UPLOAD_BYTES", str(50 * 1024 * 1024))), Path(test1_data) if test1_data else None)
+    Handler.secure_cookie = os.getenv("TEST3_SECURE_COOKIE", "0") == "1"
     Handler.service.seed()
     server = ThreadingHTTPServer((host, port), Handler)
     print(f"test3 is running locally at http://{host}:{port}")

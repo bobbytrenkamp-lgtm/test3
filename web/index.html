@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Local-first commercial real estate diligence workspace">
+  <title>test3 · Diligence Workspace</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/signin.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to workspace</a>
+  <section id="signin" class="signin" aria-labelledby="signin-title">
+    <form id="signin-form" class="signin-card">
+      <span class="brand-mark">t3</span><p class="eyebrow">LOCAL WORKSPACE</p><h1 id="signin-title">Sign in to test3</h1>
+      <p>Documents remain on this computer. No credentials or deal data are transmitted externally.</p>
+      <label>Email<input name="email" type="email" value="analyst@example.test" required autocomplete="username"></label>
+      <label>Password<input name="password" type="password" value="fictional-demo" required minlength="12" autocomplete="current-password"></label>
+      <button class="primary" type="submit">Sign in locally</button><small>Fictional development account · change before real use</small>
+    </form>
+  </section>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">t3</span><span>test3</span><small>DEAL DILIGENCE</small></div>
+    <div class="privacy"><span class="status-dot"></span> Local-only · No external transmission</div>
+    <button id="user-menu" class="user-chip" aria-label="Current user">CA</button>
+  </header>
+  <div class="shell">
+    <nav class="sidebar" aria-label="Primary navigation">
+      <button class="nav-item active" data-view="pipeline"><span>▦</span> Deal pipeline</button>
+      <button class="nav-item" data-view="documents"><span>▤</span> Document room</button>
+      <button class="nav-item" data-view="review"><span>◫</span> Data review</button>
+      <button class="nav-item" data-view="findings"><span>△</span> Discrepancies</button>
+      <button class="nav-item" data-view="approved"><span>✓</span> Approved facts</button>
+      <button class="nav-item" data-view="export"><span>⇧</span> Underwriting export</button>
+      <button class="nav-item" data-view="jurisdiction"><span>⌖</span> Jurisdiction</button>
+      <button class="nav-item" data-view="memo"><span>≣</span> IC memo</button>
+      <button class="nav-item" data-view="audit"><span>◷</span> Audit history</button>
+      <div class="sidebar-foot"><span>ZERO-COST MODE</span><p>Local SQLite · Static assets<br>No hosted providers</p></div>
+    </nav>
+    <main id="main" tabindex="-1">
+      <div id="toast" role="status" aria-live="polite"></div>
+      <section id="pipeline" class="view active" aria-labelledby="pipeline-title">
+        <div class="page-head"><div><p class="eyebrow">DEAL INTAKE</p><h1 id="pipeline-title">Diligence pipeline</h1><p>Move raw documents into verified underwriting inputs.</p></div><button id="new-deal" class="primary">+ New deal</button></div>
+        <div class="metrics"><article><span>Active deals</span><strong id="metric-deals">—</strong><small>Local workspace</small></article><article><span>Needs review</span><strong id="metric-review">—</strong><small>Human decision required</small></article><article><span>Open findings</span><strong id="metric-findings">—</strong><small>Deterministic checks</small></article><article><span>Approved values</span><strong id="metric-approved">—</strong><small>Export eligible</small></article></div>
+        <div class="panel"><div class="panel-head"><h2>Current deals</h2><input id="deal-search" type="search" placeholder="Search deals" aria-label="Search deals"></div><div id="deal-list" class="deal-list"><p class="empty">Loading local workspace…</p></div></div>
+      </section>
+      <section id="documents" class="view" aria-labelledby="documents-title">
+        <div class="page-head"><div><p class="eyebrow">SOURCE ROOM</p><h1 id="documents-title">Document room</h1><p id="documents-subtitle">Originals are preserved with SHA-256 provenance.</p></div><label class="primary upload-label">Upload document<input id="upload" type="file" accept=".pdf,.csv,.xlsx,.png,.jpg,.jpeg" multiple></label></div>
+        <div class="notice"><strong>Malware scanning:</strong> not available in this local release. Files are never executed; macros and formulas are not evaluated.</div>
+        <div class="panel"><div class="panel-head"><h2>Source documents</h2><span id="document-count" class="badge">0 files</span></div><div id="document-list" class="document-grid"></div></div>
+      </section>
+      <section id="review" class="view" aria-labelledby="review-title">
+        <div class="page-head"><div><p class="eyebrow">HUMAN-IN-THE-LOOP</p><h1 id="review-title">Source-linked data review</h1><p>Nothing enters underwriting without an explicit approval.</p></div></div>
+        <div class="review-layout"><div class="source-pane"><div class="pane-head"><h2>Source document</h2><span id="source-page">Select a value</span></div><div id="source-viewer" class="source-viewer"><p>Select an extracted field to open its exact source.</p></div></div><div class="fields-pane"><div class="pane-head"><h2>Extracted fields</h2><select id="review-filter" aria-label="Filter fields"><option value="all">All states</option><option value="needs_review">Needs review</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select></div><div id="value-list" class="value-list"></div></div></div>
+      </section>
+      <section id="findings" class="view" aria-labelledby="findings-title"><div class="page-head"><div><p class="eyebrow">DETERMINISTIC CONTROL</p><h1 id="findings-title">Discrepancy center</h1><p>Every conflict stays visible until a reviewer records a resolution.</p></div><button id="run-reconcile" class="primary">Run checks</button></div><div class="rule-strip">19 rules available · Math, cross-source, period, row and OCR integrity</div><div id="finding-list" class="finding-list"></div></section>
+      <section id="approved" class="view" aria-labelledby="approved-title"><div class="page-head"><div><p class="eyebrow">CONTROLLING SOURCES</p><h1 id="approved-title">Approved assumptions</h1><p>Only reviewed values appear here and enter exports.</p></div></div><div id="approved-list" class="panel table-wrap"></div></section>
+      <section id="export" class="view" aria-labelledby="export-title"><div class="page-head"><div><p class="eyebrow">VERSIONED HANDOFF</p><h1 id="export-title">Underwriting export</h1><p>Generate a diagnostic-rich package for test2.</p></div></div><div class="export-grid"><article class="export-card"><span class="export-icon">{ }</span><h2>test2 underwriting package</h2><p>Approved property and acquisition facts, source hashes, unresolved findings, mapping diagnostics and compatibility metadata.</p><button id="export-test2" class="primary">Generate JSON</button></article><article class="export-card"><span class="export-icon">≣</span><h2>Diligence summary</h2><p>A source-linked, explicitly draft memo using approved facts only.</p><button id="export-memo" class="secondary">Generate draft</button></article></div><pre id="export-preview" class="code-preview" tabindex="0">No export generated.</pre></section>
+      <section id="jurisdiction" class="view" aria-labelledby="jurisdiction-title"><div class="page-head"><div><p class="eyebrow">OPTIONAL ENRICHMENT</p><h1 id="jurisdiction-title">Jurisdiction intelligence</h1><p>Read-only test1 snapshots can enrich a deal without becoming a dependency.</p></div></div><div class="empty-state"><span>⌖</span><h2>No local test1 snapshot configured</h2><p>The diligence workflow remains fully functional. Missing coverage is never represented as zero or verified data.</p><button id="test1-status" class="secondary">View adapter status</button></div></section>
+      <section id="memo" class="view" aria-labelledby="memo-title"><div class="page-head"><div><p class="eyebrow">INVESTMENT COMMITTEE</p><h1 id="memo-title">Draft diligence memo</h1><p>Approved facts, open questions and a reproducible source appendix.</p></div><button id="memo-generate" class="primary">Generate draft</button></div><div id="memo-content" class="memo-paper"><p class="watermark">DRAFT · NOT INVESTMENT OR LEGAL ADVICE</p><p>Generate a draft after approving source-linked values.</p></div></section>
+      <section id="audit" class="view" aria-labelledby="audit-title"><div class="page-head"><div><p class="eyebrow">REPRODUCIBILITY</p><h1 id="audit-title">Audit history</h1><p>Hash-chained material actions for this deal.</p></div></div><div id="audit-list" class="timeline"></div></section>
+    </main>
+  </div>
+  <dialog id="new-deal-dialog"><form method="dialog" id="new-deal-form"><div class="dialog-head"><h2>Create fictional deal</h2><button value="cancel" aria-label="Close">×</button></div><label>Deal name<input name="name" required maxlength="200" placeholder="Example Commerce Center"></label><label>Address<input name="address" maxlength="500" placeholder="123 Fictional Street"></label><label>Property type<select name="property_type"><option>office</option><option>industrial</option><option>multifamily</option><option>retail</option><option>data_center</option><option>other</option></select></label><div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button value="default" class="primary" id="create-deal">Create deal</button></div></form></dialog>
+  <script src="/app.js" defer></script>
+</body>
+</html>

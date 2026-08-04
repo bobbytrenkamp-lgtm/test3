@@ -1,0 +1,23 @@
+name: zero-cost-ci
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cost and billing guard
+        run: python scripts/cost_guard.py
+      - name: Dependency license guard
+        run: python scripts/license_guard.py
+      - name: Tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -v
+

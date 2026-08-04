@@ -18,6 +18,7 @@ from test3.backup import create_backup, verify_backup
 from test3.classification import classify
 from test3.db import Database
 from test3.extraction import Candidate, extract_selectable_pdf_text, extract_text_candidates, parse_csv, parse_xlsx, process
+from test3.field_registry import FIELD_BY_NAME, FIELD_REGISTRY, applicable_fields
 from test3.normalization import date, number
 from test3.ollama import validate_local_endpoint
 from test3.permissions import require
@@ -112,6 +113,39 @@ class NormalizationTests(unittest.TestCase):
 
 
 class ExtractionTests(unittest.TestCase):
+    def test_field_registry_is_unique_governed_and_category_scoped(self):
+        self.assertEqual(len(FIELD_BY_NAME), len(FIELD_REGISTRY))
+        self.assertGreaterEqual(len(FIELD_REGISTRY), 30)
+        self.assertTrue(all(field.label and field.value_type and field.patterns and field.categories for field in FIELD_REGISTRY))
+        debt_names = {field.name for field in applicable_fields("debt_quote")}
+        self.assertIn("loan_amount", debt_names)
+        self.assertNotIn("tenant_name", debt_names)
+
+    def test_registry_normalizes_rates_dates_and_metadata(self):
+        candidates = extract_text_candidates(
+            "Discount Rate: 7.5%\nMarket Value: $12,500,000",
+            category="appraisal",
+        )
+        rate = next(item for item in candidates if item.field == "discount_rate")
+        value = next(item for item in candidates if item.field == "appraised_value")
+        self.assertEqual(rate.normalized, "0.075")
+        self.assertEqual(rate.unit, "decimal_fraction")
+        self.assertEqual(value.normalized, "12500000")
+        self.assertEqual(value.currency, "USD")
+
+    def test_registry_does_not_apply_debt_fields_to_lease(self):
+        candidates = extract_text_candidates(
+            "Tenant Name: Example LLC\nLoan Amount: $10,000,000",
+            category="commercial_lease",
+        )
+        self.assertIn("tenant_name", {item.field for item in candidates})
+        self.assertNotIn("loan_amount", {item.field for item in candidates})
+
+    def test_ambiguous_rate_without_percent_stays_for_review(self):
+        rate = next(item for item in extract_text_candidates("Discount Rate: 7.5", category="appraisal") if item.field == "discount_rate")
+        self.assertIsNone(rate.normalized)
+        self.assertLessEqual(rate.confidence, 0.45)
+
     def test_classification(self):
         self.assertEqual(classify("Fictional Rent Roll.csv")[0], "rent_roll")
         self.assertEqual(classify("mystery.bin")[0], "unknown")

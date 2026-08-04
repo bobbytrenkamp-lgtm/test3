@@ -10,7 +10,8 @@ from pathlib import Path
 import pypdfium2 as pdfium
 from openpyxl import load_workbook
 
-from .normalization import number
+from .field_registry import applicable_fields
+from .normalization import date, number
 from .local_ocr import available as ocr_available, extract as ocr_extract, validate_image
 
 MAX_XLSX_ENTRIES = 250
@@ -30,33 +31,44 @@ class Candidate:
     confidence: float
     method: str
     bbox: tuple[float, float, float, float] | None = None
+    unit: str | None = None
+    currency: str | None = None
 
 
-FIELD_PATTERNS = {
-    "property_name": r"(?im)^property(?: name)?\s*[:,-]\s*(.+)$",
-    "address": r"(?im)^address\s*[:,-]\s*(.+)$",
-    "asking_price": r"(?i)(?:asking|purchase) price\s*[:$ ]+([($0-9,.]+)",
-    "broker_stated_noi": r"(?i)(?:broker[- ]stated )?noi\s*[:$ ]+([($0-9,.]+)",
-    "broker_stated_cap_rate": r"(?i)(?:cap(?:italization)? rate)\s*[: ]+([0-9.]+%?)",
-    "rentable_square_feet": r"(?i)(?:rentable (?:area|square feet)|rsf)\s*[: ]+([0-9,.]+)",
-    "occupancy": r"(?i)occupancy\s*[: ]+([0-9.]+%?)",
-    "unit_count": r"(?i)(?:unit count|units)\s*[: ]+([0-9,]+)",
-    "loan_amount": r"(?i)loan amount\s*[:$ ]+([($0-9,.]+)",
-    "interest_rate": r"(?i)(?:all-in )?interest rate\s*[: ]+([0-9.]+%?)",
-}
+def _normalize(raw: str, value_type: str, unit: str | None) -> str | None:
+    if value_type == "text":
+        return raw.strip() or None
+    if value_type == "date":
+        return date(raw)[0]
+    numeric = number(raw)
+    if numeric is None:
+        return None
+    if value_type == "integer" and numeric != numeric.to_integral_value():
+        return None
+    if value_type == "rate":
+        if unit == "basis_points":
+            numeric /= 10_000
+        elif unit == "decimal_fraction":
+            if "%" in raw:
+                numeric /= 100
+            if numeric < 0 or numeric > 1:
+                return None
+    return str(numeric)
 
 
-def extract_text_candidates(text: str, page: int = 1, method: str = "deterministic_regex_v1") -> list[Candidate]:
+def extract_text_candidates(text: str, page: int = 1, method: str = "deterministic_registry_v2", category: str | None = None) -> list[Candidate]:
     candidates = []
-    for field, pattern in FIELD_PATTERNS.items():
-        match = re.search(pattern, text)
-        if not match:
-            continue
-        raw = match.group(1).strip()[:500]
-        numeric = number(raw)
-        normalized = str(numeric) if numeric is not None else raw
-        start, end = max(0, match.start() - 60), min(len(text), match.end() + 60)
-        candidates.append(Candidate(field, raw, normalized, page, text[start:end].strip(), 0.82, method))
+    for field in applicable_fields(category):
+        for pattern in field.patterns:
+            match = re.search(pattern, text)
+            if not match:
+                continue
+            raw = match.group(1).strip()[:500]
+            normalized = _normalize(raw, field.value_type, field.unit)
+            start, end = max(0, match.start() - 60), min(len(text), match.end() + 60)
+            confidence = field.confidence if normalized is not None else min(field.confidence, 0.45)
+            candidates.append(Candidate(field.name, raw, normalized, page, text[start:end].strip(), confidence, method, unit=field.unit, currency=field.currency))
+            break
     return candidates
 
 
@@ -119,7 +131,7 @@ def extract_selectable_pdf_text(content: bytes) -> str:
     return "\n".join(chunks)
 
 
-def extract_pdf_candidates(content: bytes) -> tuple[list[Candidate], int]:
+def extract_pdf_candidates(content: bytes, category: str | None = None) -> tuple[list[Candidate], int]:
     document = pdfium.PdfDocument(content)
     candidates, text_pages = [], 0
     try:
@@ -130,7 +142,7 @@ def extract_pdf_candidates(content: bytes) -> tuple[list[Candidate], int]:
                 text = text_page.get_text_range()
                 if text.strip():
                     text_pages += 1
-                for candidate in extract_text_candidates(text, page_index + 1, "pdfium_text_v2"):
+                for candidate in extract_text_candidates(text, page_index + 1, "pdfium_registry_v3", category):
                     bbox = None
                     searcher = text_page.search(candidate.raw)
                     try:
@@ -152,11 +164,11 @@ def extract_pdf_candidates(content: bytes) -> tuple[list[Candidate], int]:
     return candidates, text_pages
 
 
-def _ocr_candidates(image_content: bytes, suffix: str, page_number: int) -> list[Candidate]:
+def _ocr_candidates(image_content: bytes, suffix: str, page_number: int, category: str | None = None) -> list[Candidate]:
     width, height, _ = validate_image(image_content)
     result = ocr_extract(image_content, suffix)
     output = []
-    for candidate in extract_text_candidates(result.text, page_number, result.engine):
+    for candidate in extract_text_candidates(result.text, page_number, result.engine, category):
         wanted = [re.sub(r"\W", "", token).lower() for token in candidate.raw.split()]
         words = result.words
         matched = []
@@ -175,7 +187,7 @@ def _ocr_candidates(image_content: bytes, suffix: str, page_number: int) -> list
     return output
 
 
-def ocr_pdf_candidates(content: bytes) -> list[Candidate]:
+def ocr_pdf_candidates(content: bytes, category: str | None = None) -> list[Candidate]:
     document = pdfium.PdfDocument(content)
     candidates = []
     try:
@@ -193,7 +205,7 @@ def ocr_pdf_candidates(content: bytes) -> list[Candidate]:
                     image = bitmap.to_pil(); stream = io.BytesIO(); image.save(stream, format="PNG")
                 finally:
                     bitmap.close()
-                candidates.extend(_ocr_candidates(stream.getvalue(), ".png", page_index + 1))
+                candidates.extend(_ocr_candidates(stream.getvalue(), ".png", page_index + 1, category))
             finally:
                 page.close()
     finally:
@@ -201,7 +213,7 @@ def ocr_pdf_candidates(content: bytes) -> list[Candidate]:
     return candidates
 
 
-def process(filename: str, mime: str, content: bytes) -> tuple[str, list[Candidate], str | None]:
+def process(filename: str, mime: str, content: bytes, category: str | None = None) -> tuple[str, list[Candidate], str | None]:
     if mime == "text/csv":
         _, candidates = parse_csv(content)
         return "extracted", candidates, None
@@ -213,17 +225,17 @@ def process(filename: str, mime: str, content: bytes) -> tuple[str, list[Candida
             return "failed", [], f"Spreadsheet could not be parsed: {error}"
     if mime == "application/pdf":
         try:
-            candidates, text_pages = extract_pdf_candidates(content)
+            candidates, text_pages = extract_pdf_candidates(content, category)
         except Exception as error:
             text = extract_selectable_pdf_text(content)
             if text.strip():
-                return "needs_review", extract_text_candidates(text), f"Mature PDF parser rejected the file; conservative fallback used: {type(error).__name__}"
+                return "needs_review", extract_text_candidates(text, category=category), f"Mature PDF parser rejected the file; conservative fallback used: {type(error).__name__}"
             return "failed", [], f"PDF could not be safely parsed: {type(error).__name__}"
         if not text_pages:
             if not ocr_available():
                 return "needs_review", [], "No selectable text found. Install local Tesseract to enable scanned-page OCR."
             try:
-                candidates = ocr_pdf_candidates(content)
+                candidates = ocr_pdf_candidates(content, category)
                 return ("extracted" if candidates else "needs_review"), candidates, None if candidates else "Local OCR completed but no supported fields were identified."
             except (RuntimeError, ValueError, OSError) as error:
                 return "failed", [], str(error)
@@ -236,7 +248,7 @@ def process(filename: str, mime: str, content: bytes) -> tuple[str, list[Candida
         if not ocr_available():
             return "needs_review", [], "Image verified; optional local Tesseract OCR is not installed."
         try:
-            candidates = _ocr_candidates(content, Path(filename).suffix.lower(), 1)
+            candidates = _ocr_candidates(content, Path(filename).suffix.lower(), 1, category)
             return ("extracted" if candidates else "needs_review"), candidates, None if candidates else "OCR completed but no supported fields were identified."
         except (RuntimeError, ValueError, OSError) as error:
             return "failed", [], str(error)

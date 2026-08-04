@@ -1,8 +1,12 @@
 # Extraction specification
 
-The pipeline is registry-oriented by document category. Current deterministic methods are filename/content phrase classification, regex candidates, CSV cells, first-sheet openpyxl values, PDFium selectable text/coordinates, Pillow image validation and optional local Tesseract image/scanned-PDF OCR. When Tesseract is unavailable, scanned sources remain honestly `needs_review`.
+The pipeline is governed by the code-owned `FIELD_REGISTRY`. Every registered field has a stable machine name, analyst label, value type, one or more deterministic patterns, applicable document categories, optional unit/currency, confidence policy and optional reconciliation/export use. Registry names are unique and tested. Category scoping prevents, for example, debt terms from being extracted from a lease merely because similar words appear there. Unknown documents remain broad-scan candidates and always require review.
 
-Every candidate stores document/version/category, raw and normalized values, optional unit/currency/page/bounding box, exact source excerpt/hash, method/version, confidence, validation/review state, reviewer fields, comments and supersession/final-approval links.
+The current registry covers more than 30 property, transaction, operating, lease, debt, capital and underwriting fields. It is intentionally conservative: adding a field requires a registry entry, fictional positive/category-negative tests and documentation of downstream meaning. A registry entry enables candidate detection, never approval.
 
-XLSX formulas, macros, external links and embedded scripts are never evaluated. Macro-enabled workbooks are rejected by independent archive inspection. PDF/image bounding boxes use normalized top-left coordinates for rendered-page highlighting. No benchmark or accuracy claim is made.
+Current deterministic methods are filename/content phrase classification, registry patterns, CSV cells, first-sheet openpyxl values, PDFium selectable text/coordinates, Pillow image validation and optional local Tesseract image/scanned-PDF OCR. When Tesseract is unavailable, scanned sources remain honestly `needs_review`.
+
+Every candidate stores document/version/category, raw and normalized values, registry-derived unit/currency, optional page/bounding box, exact source excerpt/hash, method/version, confidence, validation/review state, reviewer fields, comments and supersession/final-approval links. Percent signs are normalized to decimal fractions, basis points to fractions, integers reject fractional input, dates require an understood calendar representation, and failed normalization lowers confidence and stays `needs_review`.
+
+XLSX formulas, macros, external links and embedded scripts are never evaluated. Macro-enabled workbooks are rejected by independent archive inspection. PDF/image bounding boxes use normalized top-left coordinates for rendered-page highlighting. Tabular rows retain source-specific `row.<row>.<header>` names so repeated tenants and periods are never collapsed into a single scalar. No benchmark or accuracy claim is made.
 

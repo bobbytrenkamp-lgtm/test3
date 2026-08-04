@@ -10,6 +10,12 @@ from xml.etree import ElementTree
 
 from .normalization import number
 
+MAX_XLSX_ENTRIES = 250
+MAX_XLSX_XML_BYTES = 25 * 1024 * 1024
+MAX_XLSX_TOTAL_BYTES = 100 * 1024 * 1024
+MAX_XLSX_ROWS = 100_000
+MAX_XLSX_CELLS = 2_000_000
+
 
 @dataclass(frozen=True)
 class Candidate:
@@ -67,6 +73,16 @@ def parse_csv(content: bytes) -> tuple[list[list[str]], list[Candidate]]:
 def parse_xlsx(content: bytes) -> tuple[list[list[str]], list[Candidate]]:
     # XLSX is a ZIP of XML. Values only are read; formulas, macros, links and scripts are never evaluated.
     with zipfile.ZipFile(io.BytesIO(content)) as archive:
+        entries = archive.infolist()
+        if len(entries) > MAX_XLSX_ENTRIES:
+            raise ValueError("XLSX archive contains too many entries")
+        if sum(entry.file_size for entry in entries) > MAX_XLSX_TOTAL_BYTES:
+            raise ValueError("XLSX expanded content exceeds the safety limit")
+        for entry in entries:
+            if entry.file_size > MAX_XLSX_XML_BYTES:
+                raise ValueError("XLSX entry exceeds the safety limit")
+            if entry.compress_size and entry.file_size / entry.compress_size > 200:
+                raise ValueError("XLSX compression ratio is unsafe")
         names = set(archive.namelist())
         shared = []
         if "xl/sharedStrings.xml" in names:
@@ -77,9 +93,17 @@ def parse_xlsx(content: bytes) -> tuple[list[list[str]], list[Candidate]]:
             return [], []
         root = ElementTree.fromstring(archive.read(sheet_name))
         rows = []
-        for row in [node for node in root.iter() if node.tag.endswith("}row")]:
+        row_nodes = [node for node in root.iter() if node.tag.endswith("}row")]
+        if len(row_nodes) > MAX_XLSX_ROWS:
+            raise ValueError("XLSX row count exceeds the safety limit")
+        cell_count = 0
+        for row in row_nodes:
             values = []
-            for cell in [node for node in row if node.tag.endswith("}c")]:
+            cells = [node for node in row if node.tag.endswith("}c")]
+            cell_count += len(cells)
+            if cell_count > MAX_XLSX_CELLS:
+                raise ValueError("XLSX cell count exceeds the safety limit")
+            for cell in cells:
                 value_node = next((node for node in cell.iter() if node.tag.endswith("}v")), None)
                 value = value_node.text if value_node is not None and value_node.text else ""
                 if cell.attrib.get("t") == "s" and value.isdigit() and int(value) < len(shared):

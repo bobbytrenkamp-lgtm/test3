@@ -12,11 +12,13 @@ from pathlib import Path
 
 from test3.adapters import diligence_summary, test1_enrichment, test2_export
 from test3.auth import hash_password, verify_password
+from test3.backup import create_backup, verify_backup
 from test3.classification import classify
 from test3.db import Database
 from test3.extraction import Candidate, extract_selectable_pdf_text, extract_text_candidates, parse_csv, parse_xlsx, process
 from test3.normalization import date, number
 from test3.ollama import validate_local_endpoint
+from test3.permissions import require
 from test3.reconciliation import reconcile
 from test3.security import detect_mime, safe_filename, sanitize_text, sha256_bytes, validate_upload
 from test3.service import Service
@@ -34,6 +36,12 @@ def synthetic_xlsx() -> bytes:
 
 
 class SecurityTests(unittest.TestCase):
+    def test_role_permissions(self):
+        require("viewer", "read")
+        require("reviewer", "value.review")
+        with self.assertRaises(PermissionError): require("viewer", "document.upload")
+        with self.assertRaises(PermissionError): require("analyst", "value.review")
+
     def test_local_password_hashing(self):
         encoded = hash_password("fictional-demo", salt=b"0123456789abcdef")
         self.assertTrue(verify_password("fictional-demo", encoded))
@@ -115,6 +123,14 @@ class ExtractionTests(unittest.TestCase):
         self.assertEqual(status, "failed")
         self.assertEqual(candidates, [])
         self.assertIn("could not be parsed", warning)
+
+    def test_xlsx_archive_bomb_is_rejected(self):
+        out = io.BytesIO()
+        with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("[Content_Types].xml", "<Types/>")
+            archive.writestr("xl/worksheets/sheet1.xml", " " * 1_000_000)
+        with self.assertRaisesRegex(ValueError, "compression ratio"):
+            parse_xlsx(out.getvalue())
 
 
 class ReconciliationTests(unittest.TestCase):
@@ -201,6 +217,27 @@ class ServiceTests(unittest.TestCase):
             events = connection.execute("SELECT * FROM audit_events WHERE organization_id=? ORDER BY created_at", (self.user["organization_id"],)).fetchall()
         self.assertGreaterEqual(len(events), 2)
         self.assertEqual(events[1]["previous_hash"], events[0]["event_hash"])
+        self.assertEqual(self.service.db.verify_audit_chain(self.user["organization_id"]), (True, None))
+
+    def test_audit_tampering_is_detected(self):
+        with self.service.db.connect() as connection:
+            event = connection.execute("SELECT id FROM audit_events LIMIT 1").fetchone()
+            connection.execute("UPDATE audit_events SET details_json=? WHERE id=?", ('{"tampered":true}', event["id"]))
+        valid, broken_id = self.service.db.verify_audit_chain(self.user["organization_id"])
+        self.assertFalse(valid)
+        self.assertEqual(broken_id, event["id"])
+
+    def test_backup_and_temporary_restore_drill(self):
+        content = b"Tenant,Rent\nExample,100\n"
+        self.service.upload(self.user["organization_id"], self.user["id"], self.deal_id, "rent-roll.csv", content)
+        destination = Path(self.temp.name) / "backup.zip"
+        create_backup(Path(self.temp.name), destination)
+        report = verify_backup(destination)
+        self.assertTrue(report["valid"])
+        self.assertEqual(report["counts"]["documents"], 1)
+        self.assertGreaterEqual(report["fileCount"], 2)
+        with self.assertRaisesRegex(ValueError, "overwrite"):
+            create_backup(Path(self.temp.name), destination)
 
 
 if __name__ == "__main__":

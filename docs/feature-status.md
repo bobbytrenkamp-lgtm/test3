@@ -5,7 +5,7 @@
 | Feature | Status | Evidence / limitation |
 |---|---|---|
 | Deal pipeline and fictional seed | Tested | Local service tests |
-| Local sign-in and organization/role schema | Tested | PBKDF2 + opaque local session; network/multi-user hardening deferred |
+| Local sign-in, sessions, CSRF and roles | Tested | PBKDF2, hashed opaque sessions, CSRF and role matrix; rate limiting/TLS deferred |
 | Secure upload metadata/hash/duplicates | Tested | Synthetic tests |
 | PDF/CSV/XLSX/image support | In development | Verification works; complex PDF/OCR limited |
 | Source-linked review | Functional | UI and service tests; browser e2e pending |
@@ -15,6 +15,7 @@
 | test1 enrichment | Designed | Local fallback tested; snapshot mapping pending |
 | Draft IC memo | Functional | Approved facts and source appendix |
 | Optional local model | Designed | Loopback restriction; no generation adapter yet |
-| Audit history | Tested | Hash-chain checks |
+| Audit history | Tested | Serialized hash chain and tamper verifier |
+| Backup/restore drill | Tested | Manifest hashes and SQLite integrity in temporary restore |
 | Accessibility | In development | Semantic/responsive UI; automated review pending |
 | Security/performance/restore hardening | Not started | Required before production claim |

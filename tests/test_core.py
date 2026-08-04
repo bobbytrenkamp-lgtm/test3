@@ -4,6 +4,7 @@ import hashlib
 import html
 import io
 import json
+import sqlite3
 import tempfile
 import unittest
 import zipfile
@@ -17,7 +18,7 @@ from test3.auth import hash_password, verify_password
 from test3.backup import create_backup, verify_backup
 from test3.classification import classify
 from test3.db import Database
-from test3.extraction import Candidate, extract_selectable_pdf_text, extract_text_candidates, parse_csv, parse_xlsx, process
+from test3.extraction import Candidate, extract_selectable_pdf_text, extract_text_candidates, normalize_value, parse_csv, parse_xlsx, process
 from test3.field_registry import FIELD_BY_NAME, FIELD_REGISTRY, applicable_fields
 from test3.normalization import date, number
 from test3.ollama import validate_local_endpoint
@@ -145,6 +146,12 @@ class ExtractionTests(unittest.TestCase):
         rate = next(item for item in extract_text_candidates("Discount Rate: 7.5", category="appraisal") if item.field == "discount_rate")
         self.assertIsNone(rate.normalized)
         self.assertLessEqual(rate.confidence, 0.45)
+
+    def test_basis_points_normalization_round_trips_in_review_units(self):
+        spread = next(item for item in extract_text_candidates("Credit Spread: 350 bps", category="debt_quote") if item.field == "loan_spread")
+        self.assertEqual(spread.normalized, "0.035")
+        field = FIELD_BY_NAME["loan_spread"]
+        self.assertEqual(normalize_value(spread.normalized, field.value_type, field.unit), "0.035")
 
     def test_classification(self):
         self.assertEqual(classify("Fictional Rent Roll.csv")[0], "rent_roll")
@@ -323,6 +330,55 @@ class ServiceTests(unittest.TestCase):
     def test_organization_isolation(self):
         with self.assertRaises(LookupError): self.service.deal(self.deal_id, "other-org")
 
+    def test_review_decisions_are_append_only_and_source_value_is_immutable(self):
+        self.service.upload(self.user["organization_id"], self.user["id"], self.deal_id, "fictional.csv", b"Property Name\nOriginal Plaza\n")
+        candidate = self.service.deal(self.deal_id, self.user["organization_id"])["values"][0]
+        result = self.service.review_value(self.user["organization_id"], self.user["id"], candidate["id"], "approved", "Reviewed Plaza", "Source checked")
+        reviewed = next(item for item in self.service.deal(self.deal_id, self.user["organization_id"])["values"] if item["id"] == candidate["id"])
+        self.assertEqual(reviewed["normalized_value"], "Reviewed Plaza")
+        self.assertEqual(reviewed["extracted_normalized_value"], "Original Plaza")
+        self.assertEqual(reviewed["latest_decision_id"], result["decision_id"])
+        with self.service.db.connect() as connection:
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute("UPDATE review_decisions SET comments='changed' WHERE id=?", (result["decision_id"],))
+        self.assertEqual(self.service.db.verify_review_chain(self.user["organization_id"]), (True, None))
+
+    def test_manual_assumption_review_supersedes_prior_controlling_value(self):
+        first = self.service.create_assumption(self.user["organization_id"], self.user["id"], self.deal_id, {"field_name":"discount_rate", "proposed_value":"0.08", "rationale":"Fictional committee case"})
+        self.service.review_assumption(self.user["organization_id"], self.user["id"], first["id"], "approved", "0.08", "Approved base case")
+        second = self.service.create_assumption(self.user["organization_id"], self.user["id"], self.deal_id, {"field_name":"discount_rate", "proposed_value":"0.09", "rationale":"Fictional downside case"})
+        decision = self.service.review_assumption(self.user["organization_id"], self.user["id"], second["id"], "approved", "0.09", "Approved replacement")
+        self.assertEqual(decision["superseded"], [first["id"]])
+        values = {item["id"]: item for item in self.service.deal(self.deal_id, self.user["organization_id"])["values"]}
+        self.assertEqual(values[first["id"]]["review_status"], "superseded")
+        self.assertEqual(values[second["id"]]["review_status"], "approved")
+        exported = self.service.export(self.user["organization_id"], self.user["id"], self.deal_id, "test2")
+        source = next(item for item in exported["supportingSources"] if item["field"] == "discount_rate")
+        self.assertEqual(source["sourceType"], "user_entered")
+        self.assertIsNone(source["documentId"])
+        self.assertEqual(source["rationale"], "Fictional downside case")
+
+    def test_manual_assumption_requires_registered_field_and_rationale(self):
+        with self.assertRaisesRegex(ValueError, "registered field"):
+            self.service.create_assumption(self.user["organization_id"], self.user["id"], self.deal_id, {"field_name":"invented", "proposed_value":"1", "rationale":"No"})
+        with self.assertRaisesRegex(ValueError, "rationale"):
+            self.service.create_assumption(self.user["organization_id"], self.user["id"], self.deal_id, {"field_name":"discount_rate", "proposed_value":"0.08", "rationale":""})
+
+    def test_registered_manual_assumption_cannot_be_approved_with_invalid_type(self):
+        assumption = self.service.create_assumption(self.user["organization_id"], self.user["id"], self.deal_id, {"field_name":"discount_rate", "proposed_value":"7.5", "rationale":"Ambiguous fictional input"})
+        with self.assertRaisesRegex(ValueError, "registered rate type"):
+            self.service.review_assumption(self.user["organization_id"], self.user["id"], assumption["id"], "approved", "7.5", "Cannot approve")
+        value = next(item for item in self.service.deal(self.deal_id, self.user["organization_id"])["values"] if item["id"] == assumption["id"])
+        self.assertEqual(value["review_status"], "needs_review")
+
+    def test_review_chain_tampering_is_detected_if_database_controls_are_bypassed(self):
+        assumption = self.service.create_assumption(self.user["organization_id"], self.user["id"], self.deal_id, {"field_name":"discount_rate", "proposed_value":"0.08", "rationale":"Fictional case"})
+        decision = self.service.review_assumption(self.user["organization_id"], self.user["id"], assumption["id"], "approved", "0.08", "Approved")
+        with self.service.db.connect() as connection:
+            connection.execute("DROP TRIGGER review_decisions_no_update")
+            connection.execute("UPDATE review_decisions SET comments='tampered' WHERE id=?", (decision["decision_id"],))
+        self.assertEqual(self.service.db.verify_review_chain(self.user["organization_id"]), (False, decision["decision_id"]))
+
     def test_audit_chain(self):
         self.service.create_deal(self.user["organization_id"], self.user["id"], {"name":"Second Fictional Deal"})
         with self.service.db.connect() as connection:
@@ -346,6 +402,7 @@ class ServiceTests(unittest.TestCase):
         create_backup(Path(self.temp.name), destination)
         report = verify_backup(destination)
         self.assertTrue(report["valid"])
+        self.assertEqual(report["format"], "test3-backup/2.0")
         self.assertEqual(report["counts"]["documents"], 1)
         self.assertGreaterEqual(report["fileCount"], 2)
         with self.assertRaisesRegex(ValueError, "overwrite"):

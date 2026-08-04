@@ -35,7 +35,7 @@ class Candidate:
     currency: str | None = None
 
 
-def _normalize(raw: str, value_type: str, unit: str | None) -> str | None:
+def normalize_value(raw: str, value_type: str, unit: str | None) -> str | None:
     if value_type == "text":
         return raw.strip() or None
     if value_type == "date":
@@ -47,7 +47,12 @@ def _normalize(raw: str, value_type: str, unit: str | None) -> str | None:
         return None
     if value_type == "rate":
         if unit == "basis_points":
-            numeric /= 10_000
+            # Source patterns capture basis points, while review forms display the
+            # normalized fraction. Values already in [0, 1] must round-trip.
+            if numeric > 1:
+                numeric /= 10_000
+            if numeric < 0 or numeric > 1:
+                return None
         elif unit == "decimal_fraction":
             if "%" in raw:
                 numeric /= 100
@@ -64,7 +69,7 @@ def extract_text_candidates(text: str, page: int = 1, method: str = "determinist
             if not match:
                 continue
             raw = match.group(1).strip()[:500]
-            normalized = _normalize(raw, field.value_type, field.unit)
+            normalized = normalize_value(raw, field.value_type, field.unit)
             start, end = max(0, match.start() - 60), min(len(text), match.end() + 60)
             confidence = field.confidence if normalized is not None else min(field.confidence, 0.45)
             candidates.append(Candidate(field.name, raw, normalized, page, text[start:end].strip(), confidence, method, unit=field.unit, currency=field.currency))

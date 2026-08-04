@@ -147,7 +147,13 @@ def test2_export(
         },
         "test2PortableModel": portable,
         "supportingSources": [
-            {"documentId": item["document_id"], "sha256": item.get("document_sha256"), "page": item.get("page_number"), "field": item["field_name"]}
+            {
+                "sourceType": item.get("source_kind", "document"),
+                "documentId": item.get("document_id"),
+                "sha256": item.get("document_sha256"),
+                "page": item.get("page_number"), "field": item["field_name"],
+                **({"rationale": item.get("rationale") or item.get("source_excerpt")} if item.get("source_kind") == "user_entered" else {}),
+            }
             for item in approved if item.get("review_status") == "approved"
         ],
     }
@@ -164,5 +170,5 @@ def test1_enrichment(address: dict, local_snapshot: dict | None = None) -> dict:
 
 
 def diligence_summary(deal: dict, approved: list[dict], findings: list[dict]) -> dict:
-    facts = [{"statement": f"{item['field_name'].replace('_', ' ').title()}: {item.get('normalized_value')}", "source": {"documentId": item["document_id"], "page": item.get("page_number"), "excerptHash": item.get("source_text_hash")}} for item in approved if item.get("review_status") == "approved"]
+    facts = [{"statement": f"{item['field_name'].replace('_', ' ').title()}: {item.get('normalized_value')}", "source": {"sourceType": item.get("source_kind", "document"), "documentId": item.get("document_id"), "page": item.get("page_number"), "excerptHash": item.get("source_text_hash")}} for item in approved if item.get("review_status") == "approved"]
     return {"title": f"DRAFT — {deal['name']} diligence summary", "draft": True, "legalNotice": "Diligence support only; lease and legal items require qualified review.", "executiveSummary": "This draft includes approved facts only. Missing information is not inferred.", "approvedFacts": facts, "keyDiscrepancies": findings, "sourceAppendix": [fact["source"] for fact in facts]}

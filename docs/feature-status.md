@@ -11,12 +11,12 @@
 | Governed field registry | Tested | 36+ typed/category-scoped fields with unit, currency and downstream semantics |
 | Source-linked review | Functional | Rendered page and normalized source-area highlight; browser e2e pending |
 | Reconciliation center | Tested | 19 deterministic rules |
-| Approved assumptions | Functional | Approved-only query/UI |
+| Approval governance and manual assumptions | Tested | Immutable source values, typed approvals, append-only/hash-chained decisions and explicit supersession |
 | test2 export | Tested, minimal | Real `cre-platform-model` shape passed test2's own `parseModelInput`; non-ready packages are explicitly blocked |
 | test1 enrichment | Designed | Local fallback tested; snapshot mapping pending |
 | Draft IC memo | Functional | Approved facts and source appendix |
 | Optional local model | Designed | Loopback restriction; no generation adapter yet |
-| Audit history | Tested | Serialized hash chain and tamper verifier |
+| Audit history | Tested | Independent serialized audit and review-decision hash chains with tamper verifiers |
 | Backup/restore drill | Tested | Manifest hashes and SQLite integrity in temporary restore |
 | Accessibility | In development | Semantic/responsive UI; automated review pending |
 | Security/performance/restore hardening | Not started | Required before production claim |

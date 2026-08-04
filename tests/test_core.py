@@ -155,6 +155,7 @@ class HttpSecurityTests(unittest.TestCase):
                 response = connection.getresponse()
                 bootstrap = json.loads(response.read())
                 self.assertEqual(response.status, 200)
+                self.assertNotIn("session_token_hash", bootstrap["user"])
                 connection.request("POST", "/api/signout", headers={"Cookie": cookie, "X-CSRF-Token": bootstrap["user"]["csrf_token"]})
                 response = connection.getresponse()
                 response.read()
@@ -426,7 +427,7 @@ class Test1SnapshotTests(unittest.TestCase):
         app_data = self.root / "app"
         service = Service(app_data, test1_data_dir=self.root)
         user = service.seed()
-        deal_id = service.bootstrap()["deals"][0]["id"]
+        deal_id = service.bootstrap(user)["deals"][0]["id"]
         before = service.export(user["organization_id"], user["id"], deal_id, "test1")
         self.assertEqual(before["status"], "input_required")
         assumption = service.create_assumption(user["organization_id"], user["id"], deal_id, {"field_name":"county_fips", "proposed_value":"51107", "rationale":"Fictional official parcel record"})
@@ -440,7 +441,7 @@ class Test1SnapshotTests(unittest.TestCase):
     def test_invalid_county_fips_cannot_be_approved(self):
         service = Service(self.root / "fips-app", test1_data_dir=self.root)
         user = service.seed()
-        deal_id = service.bootstrap()["deals"][0]["id"]
+        deal_id = service.bootstrap(user)["deals"][0]["id"]
         assumption = service.create_assumption(user["organization_id"], user["id"], deal_id, {"field_name":"county_fips", "proposed_value":"ABCDE", "rationale":"Invalid fictional value"})
         with self.assertRaisesRegex(ValueError, "registered fips type"):
             service.review_assumption(user["organization_id"], user["id"], assumption["id"], "approved", "ABCDE", "No")
@@ -451,7 +452,7 @@ class ServiceTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.service = Service(Path(self.temp.name), max_upload_bytes=100_000)
         self.user = self.service.seed()
-        self.deal_id = self.service.bootstrap()["deals"][0]["id"]
+        self.deal_id = self.service.bootstrap(self.user)["deals"][0]["id"]
 
     def tearDown(self):
         self.temp.cleanup()
@@ -465,6 +466,27 @@ class ServiceTests(unittest.TestCase):
         export = self.service.export(self.user["organization_id"], self.user["id"], self.deal_id, "test2")
         self.assertEqual(export["mappingDiagnostics"]["approvedFieldCount"], 1)
         self.assertEqual(export["sourceDocumentHashes"], [hashlib.sha256(b"Property Name,Asking Price\nFictional Plaza,10000000\n").hexdigest()])
+
+    def test_institutional_admin_initialization_and_rotation_revoke_sessions(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            service = Service(Path(temporary))
+            self.assertFalse(service.has_users())
+            initialized = service.initialize_admin("Example Local Partners", "ADMIN@EXAMPLE.TEST", "Avery Admin", "a-unique-local-password")
+            self.assertEqual(initialized["email"], "admin@example.test")
+            self.assertTrue(service.has_users())
+            with self.assertRaisesRegex(ValueError, "first-run"):
+                service.initialize_admin("Another", "other@example.test", "Other", "another-local-password")
+            with service.db.connect() as connection:
+                user = connection.execute("SELECT * FROM users WHERE id=?", (initialized["id"],)).fetchone()
+                self.assertTrue(verify_password("a-unique-local-password", user["password_hash"]))
+                connection.execute("INSERT INTO sessions VALUES(?,?,?,?,?,?)", ("session", hashlib.sha256(b"token").hexdigest(), "csrf", user["id"], "2999-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00"))
+            result = service.reset_local_password("admin@example.test", "a-replaced-local-password")
+            self.assertTrue(result["sessions_revoked"])
+            with service.db.connect() as connection:
+                user = connection.execute("SELECT * FROM users WHERE id=?", (initialized["id"],)).fetchone()
+                self.assertTrue(verify_password("a-replaced-local-password", user["password_hash"]))
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM sessions").fetchone()[0], 0)
+            self.assertEqual(service.db.verify_audit_chain(initialized["organization_id"]), (True, None))
 
     def test_duplicate_detection(self):
         content = b"Tenant,Rent\nExample,100\n"

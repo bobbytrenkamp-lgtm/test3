@@ -148,7 +148,6 @@ class Handler(SimpleHTTPRequestHandler):
         try:
             parts = urlparse(self.path).path.strip("/").split("/")
             if parts == ["api", "signin"]:
-                self.service.seed()
                 payload = self._payload()
                 email = str(payload.get("email", "")).strip().lower()
                 address_key = self.client_address[0]
@@ -230,7 +229,10 @@ def main():
     test1_data = os.getenv("TEST3_TEST1_DATA_DIR")
     Handler.service = Service(data_dir, int(os.getenv("TEST3_MAX_UPLOAD_BYTES", str(50 * 1024 * 1024))), Path(test1_data) if test1_data else None)
     Handler.secure_cookie = os.getenv("TEST3_SECURE_COOKIE", "0") == "1"
-    Handler.service.seed()
+    if os.getenv("TEST3_DEMO_MODE", "0") == "1":
+        Handler.service.seed()
+    elif not Handler.service.has_users():
+        raise SystemExit("No local administrator exists. Run test3-init-admin --email you@example.test, or explicitly set TEST3_DEMO_MODE=1 for fictional demonstration data.")
     server = ThreadingHTTPServer((host, port), Handler)
     print(f"test3 is running locally at http://{host}:{port}")
     print("ZERO-COST CHECK PASSED: No application component can create a charge for the repository owner.")

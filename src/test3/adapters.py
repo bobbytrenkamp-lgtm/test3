@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from uuid import NAMESPACE_URL, uuid5
 
+from .test1_snapshot import enrich as enrich_test1_snapshot
+
 
 TEST2_PROPERTY_TYPES = frozenset(
     {
@@ -160,13 +162,7 @@ def test2_export(
 
 
 def test1_enrichment(address: dict, local_snapshot: dict | None = None) -> dict:
-    if not local_snapshot:
-        return {"status": "unavailable", "verified": False, "coverage": "missing", "message": "No local test1 snapshot was configured; deal workflow remains available.", "inputs": address, "results": {}}
-    key = address.get("county_fips")
-    result = local_snapshot.get(str(key)) if key else None
-    if result is None:
-        return {"status": "no_match", "verified": False, "coverage": "incomplete", "inputs": address, "results": {}}
-    return {"status": "matched", "verified": bool(result.get("verified")), "coverage": result.get("coverage", "sample"), "inputs": address, "results": result}
+    return enrich_test1_snapshot(address, local_snapshot)
 
 
 def diligence_summary(deal: dict, approved: list[dict], findings: list[dict]) -> dict:

@@ -15,15 +15,17 @@ from .extraction import normalize_value, process
 from .field_registry import FIELD_BY_NAME
 from .reconciliation import as_dicts, reconcile
 from .security import sha256_bytes, validate_upload
+from .test1_snapshot import Test1SnapshotError, load_snapshot
 
 
 class Service:
-    def __init__(self, data_dir: Path, max_upload_bytes: int = 50 * 1024 * 1024):
+    def __init__(self, data_dir: Path, max_upload_bytes: int = 50 * 1024 * 1024, test1_data_dir: Path | None = None):
         self.data_dir = data_dir.resolve()
         self.upload_dir = self.data_dir / "uploads"
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         self.db = Database(self.data_dir / "test3.db")
         self.max_upload_bytes = max_upload_bytes
+        self.test1_data_dir = test1_data_dir.resolve() if test1_data_dir else None
 
     def seed(self) -> dict:
         with self.db.connect() as connection:
@@ -279,8 +281,21 @@ class Service:
         elif kind == "memo":
             result = diligence_summary(snapshot["deal"], approved, snapshot["findings"])
         elif kind == "test1":
-            result = test1_enrichment({"address": snapshot["deal"]["address"]})
+            approved_values = {item["field_name"]: item.get("normalized_value") for item in approved}
+            inputs = {
+                "address": snapshot["deal"]["address"],
+                "county_fips": approved_values.get("county_fips"),
+                "state": approved_values.get("state") or snapshot["deal"].get("state"),
+                "municipality": approved_values.get("municipality"),
+                "parcel_id": approved_values.get("parcel_id"),
+            }
+            try:
+                local_snapshot = load_snapshot(self.test1_data_dir) if self.test1_data_dir else None
+                result = test1_enrichment(inputs, local_snapshot)
+            except Test1SnapshotError as error:
+                result = {"status": "invalid_snapshot", "verified": False, "coverage": "missing", "inputs": inputs, "results": {}, "networkRequests": 0, "message": str(error)}
         else:
             raise ValueError("Unknown export kind")
-        self.db.audit(organization_id, user_id, f"export.{kind}", "deal", deal_id, {"approved_count": len(approved)}, deal_id)
+        result_hash = hashlib.sha256(json.dumps(result, sort_keys=True, default=str).encode()).hexdigest()
+        self.db.audit(organization_id, user_id, f"export.{kind}", "deal", deal_id, {"approved_count": len(approved), "result_sha256": result_hash, "contract": result.get("schemaVersion") or result.get("status")}, deal_id)
         return result

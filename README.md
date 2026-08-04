@@ -17,6 +17,8 @@
 
 This is an early functional release, not production-ready. Scanned files use optional locally installed Tesseract; without it they remain visibly queued for manual review. Lease outputs are diligence support, not legal conclusions.
 
+Optional jurisdiction context can read a local test1 clone/export. Set `TEST3_TEST1_DATA_DIR` to its `data` directory and approve a five-digit `county_fips` assumption. The adapter never geocodes, fetches citations, or makes a network request.
+
 ## Run locally
 
 Requires Python 3.11+. Installation downloads only audited, pinned, open-source local-processing packages; no package needs an account or paid service.

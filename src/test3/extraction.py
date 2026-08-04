@@ -38,6 +38,8 @@ class Candidate:
 def normalize_value(raw: str, value_type: str, unit: str | None) -> str | None:
     if value_type == "text":
         return raw.strip() or None
+    if value_type == "fips":
+        return raw.strip() if re.fullmatch(r"\d{5}", raw.strip()) else None
     if value_type == "date":
         return date(raw)[0]
     numeric = number(raw)

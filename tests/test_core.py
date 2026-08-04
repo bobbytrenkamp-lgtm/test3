@@ -26,6 +26,7 @@ from test3.permissions import require
 from test3.reconciliation import reconcile
 from test3.security import detect_mime, safe_filename, sanitize_text, sha256_bytes, validate_upload
 from test3.service import Service
+from test3.test1_snapshot import Test1SnapshotError, load_snapshot
 
 
 def synthetic_xlsx() -> bytes:
@@ -49,6 +50,20 @@ def synthetic_pdf(stream: bytes = b"BT /F1 12 Tf 72 720 Td (Property Name: Examp
     for offset in offsets[1:]: output.extend(f"{offset:010d} 00000 n \n".encode())
     output.extend(f"trailer\n<< /Size {len(objects)+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode())
     return bytes(output)
+
+
+def synthetic_test1_data(root: Path) -> None:
+    datasets = {
+        "platform_metadata.json": {"_schema":"platform_metadata_v1", "_generated_at":"2026-08-01T00:00:00Z", "methodology_version":"1.0", "coverage":{"counties_researched":1}, "disclaimers":["Fictional data; verify primary sources."]},
+        "map_data.json": {"generated_at":"2026-08-01T00:00:00Z", "source_last_updated":"2026-07-31", "counties":{"51107":{"name":"Example County", "state":"Virginia", "level":3, "types":["data_center"], "title":"Fictional rule", "description":"Fictional policy description", "effective_date":"2026-01-01", "status":"active", "last_reviewed":"2026-07-31", "confidence":"high", "pipeline_verified":False, "sources":[{"label":"Example County official source", "url":"https://example.gov/policy"}]}}},
+        "political_risk.json": {"meta":{"last_updated":"2026-07-31"}, "scores":[{"fips":"51107", "risk_score":4, "score_label":"Elevated", "evidence_summary":"Fictional evidence", "confidence":"medium", "signal_count":1, "last_updated":"2026-07-31", "signals":[{"label":"Official hearing", "source_url":"https://example.gov/hearing"}]}]},
+        "water_stress.json": {"_last_updated":"2024-01", "_disclaimer":"Approximate fictional water data", "_sources":["Public source note"], "water_stress":{"51107":3}},
+        "tax_incentives.json": {"_last_updated":"2026-07-31", "tax_incentives":[{"state":"VA", "program_name":"Fictional incentive", "incentive_type":"Grant", "min_investment_m":100, "notes":"Verify", "fips_list":["51107"]}]},
+        "facilities_index.json": [{"facility_id":"fictional-1", "name":"Example Facility", "operator":"Example Operator", "county_fips":"51107", "operational_status":"operational", "capacity_mw_known":25.5, "confidence_score":0.8}],
+        "state_regulations.json": {"_last_updated":"2026-07-31", "states":{"51":{"name":"Virginia", "abbr":"VA", "level":1, "status":"active", "summary":"Fictional state context", "types":["data_center"], "sources":[{"label":"Virginia official source", "url":"https://example.virginia.gov/rule"}]}}},
+    }
+    for filename, value in datasets.items():
+        (root / filename).write_text(json.dumps(value), encoding="utf-8")
 
 
 class SecurityTests(unittest.TestCase):
@@ -299,6 +314,78 @@ class AdapterTests(unittest.TestCase):
     def test_local_model_rejects_external_hosts(self):
         self.assertEqual(validate_local_endpoint("http://127.0.0.1:11434"), "http://127.0.0.1:11434")
         with self.assertRaises(ValueError): validate_local_endpoint("https://models.example.com")
+
+
+class Test1SnapshotTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        synthetic_test1_data(self.root)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_actual_static_directory_shapes_load_with_integrity(self):
+        snapshot = load_snapshot(self.root)
+        self.assertEqual(snapshot["schemaVersion"], "test1-local-data-directory/1.0")
+        self.assertEqual(snapshot["sourceLastUpdated"], "2026-07-31")
+        self.assertEqual(len(snapshot["integrity"]["map_data.json"]["sha256"]), 64)
+
+    def test_enrichment_is_cited_conservative_and_network_free(self):
+        result = test1_enrichment({"county_fips":"51107", "address":"100 Fictional Street"}, load_snapshot(self.root))
+        self.assertEqual(result["status"], "matched")
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["networkRequests"], 0)
+        self.assertEqual(result["results"]["policy"]["citations"][0]["url"], "https://example.gov/policy")
+        self.assertEqual(result["results"]["waterStress"]["label"], "High")
+        self.assertEqual(result["results"]["facilities"]["knownCapacityMw"], "25.5")
+        self.assertIn(result["snapshot"]["freshness"]["status"], {"current", "stale"})
+        self.assertEqual(result["snapshot"]["datasetDates"]["waterStress"], "2024-01")
+
+    def test_enrichment_requires_approved_quality_fips_input(self):
+        result = test1_enrichment({"county_fips":None}, load_snapshot(self.root))
+        self.assertEqual(result["status"], "input_required")
+        self.assertEqual(result["coverage"], "missing")
+        self.assertEqual(result["results"], {})
+
+    def test_state_only_context_is_not_claimed_as_county_match(self):
+        result = test1_enrichment({"county_fips":"51001"}, load_snapshot(self.root))
+        self.assertEqual(result["status"], "state_only")
+        self.assertEqual(result["coverage"], "state_only")
+        self.assertIsNone(result["results"]["policy"])
+
+    def test_invalid_test1_schema_fails_explicitly(self):
+        (self.root / "platform_metadata.json").write_text(json.dumps({"_schema":"unknown"}), encoding="utf-8")
+        with self.assertRaisesRegex(Test1SnapshotError, "metadata schema"):
+            load_snapshot(self.root)
+
+    def test_duplicate_json_keys_are_rejected(self):
+        (self.root / "platform_metadata.json").write_text('{"_schema":"platform_metadata_v1","_schema":"other"}', encoding="utf-8")
+        with self.assertRaisesRegex(Test1SnapshotError, "duplicate key"):
+            load_snapshot(self.root)
+
+    def test_service_uses_only_reviewed_county_fips_and_local_directory(self):
+        app_data = self.root / "app"
+        service = Service(app_data, test1_data_dir=self.root)
+        user = service.seed()
+        deal_id = service.bootstrap()["deals"][0]["id"]
+        before = service.export(user["organization_id"], user["id"], deal_id, "test1")
+        self.assertEqual(before["status"], "input_required")
+        assumption = service.create_assumption(user["organization_id"], user["id"], deal_id, {"field_name":"county_fips", "proposed_value":"51107", "rationale":"Fictional official parcel record"})
+        pending = service.export(user["organization_id"], user["id"], deal_id, "test1")
+        self.assertEqual(pending["status"], "input_required")
+        service.review_assumption(user["organization_id"], user["id"], assumption["id"], "approved", "51107", "Checked fictional source")
+        matched = service.export(user["organization_id"], user["id"], deal_id, "test1")
+        self.assertEqual(matched["status"], "matched")
+        self.assertEqual(matched["results"]["countyFips"], "51107")
+
+    def test_invalid_county_fips_cannot_be_approved(self):
+        service = Service(self.root / "fips-app", test1_data_dir=self.root)
+        user = service.seed()
+        deal_id = service.bootstrap()["deals"][0]["id"]
+        assumption = service.create_assumption(user["organization_id"], user["id"], deal_id, {"field_name":"county_fips", "proposed_value":"ABCDE", "rationale":"Invalid fictional value"})
+        with self.assertRaisesRegex(ValueError, "registered fips type"):
+            service.review_assumption(user["organization_id"], user["id"], assumption["id"], "approved", "ABCDE", "No")
 
 
 class ServiceTests(unittest.TestCase):

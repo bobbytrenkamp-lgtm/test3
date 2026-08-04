@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+SCHEMA_VERSION = 1
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -34,6 +35,8 @@ CREATE TRIGGER IF NOT EXISTS reconciliation_runs_no_delete BEFORE DELETE ON reco
 CREATE TABLE IF NOT EXISTS findings(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), deal_id TEXT NOT NULL REFERENCES deals(id), rule_code TEXT NOT NULL, severity TEXT NOT NULL, explanation TEXT NOT NULL, compared_values_json TEXT NOT NULL, source_documents_json TEXT NOT NULL, page_references_json TEXT NOT NULL, suggested_next_step TEXT NOT NULL, resolution_status TEXT NOT NULL CHECK(resolution_status IN ('open','resolved','superseded')), resolution_notes TEXT, created_at TEXT NOT NULL, reconciliation_run_id TEXT REFERENCES reconciliation_runs(id), superseded_at TEXT);
 CREATE TRIGGER IF NOT EXISTS findings_no_delete BEFORE DELETE ON findings BEGIN SELECT RAISE(ABORT, 'findings are retained for reconciliation history'); END;
 CREATE TABLE IF NOT EXISTS audit_events(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), deal_id TEXT, actor_id TEXT REFERENCES users(id), action TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT, details_json TEXT NOT NULL, previous_hash TEXT, event_hash TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS audit_events_no_update BEFORE UPDATE ON audit_events BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS audit_events_no_delete BEFORE DELETE ON audit_events BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END;
 """
 
 
@@ -42,6 +45,9 @@ class Database:
         self.path = path
         path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as connection:
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+            if version > SCHEMA_VERSION:
+                raise RuntimeError(f"Database schema version {version} is newer than supported version {SCHEMA_VERSION}")
             connection.executescript(SCHEMA)
             columns = {row[1] for row in connection.execute("PRAGMA table_info(sessions)")}
             if columns and "token_hash" not in columns:
@@ -60,6 +66,7 @@ class Database:
                 connection.execute("ALTER TABLE documents ADD COLUMN original_purged_by TEXT REFERENCES users(id)")
             if "original_purge_reason" not in document_columns:
                 connection.execute("ALTER TABLE documents ADD COLUMN original_purge_reason TEXT")
+            connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
 
     @contextmanager
     def connect(self):
@@ -115,3 +122,17 @@ class Database:
                 return False, row["id"]
             previous = row["decision_hash"]
         return True, None
+
+    def health(self) -> dict:
+        with self.connect() as connection:
+            quick_check = connection.execute("PRAGMA quick_check").fetchone()[0]
+            foreign_key_errors = connection.execute("PRAGMA foreign_key_check").fetchall()
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+        return {
+            "quickCheck": quick_check,
+            "foreignKeyErrors": len(foreign_key_errors),
+            "schemaVersion": version,
+            "supportedSchemaVersion": SCHEMA_VERSION,
+            "schemaCurrent": version == SCHEMA_VERSION,
+            "ok": quick_check == "ok" and not foreign_key_errors and version == SCHEMA_VERSION,
+        }

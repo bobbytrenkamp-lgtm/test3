@@ -2,6 +2,10 @@
 
 Date: 2026-08-04
 
+## Readiness-integrity update
+
+SQLite now has an explicit governed schema version and rejects future databases. Audit events are preventively append-only. The authenticated administrator operations probe validates database/FK/schema health, both hash chains, every active original hash, purged tombstones and interrupted purge staging with no network requests. The suite is 60 tests. Next: deterministic local load/concurrency harness, repeat restore evidence, and automated browser accessibility/security review.
+
 ## Retention-control update
 
 A reauthenticated administrator can now purge only the integrity-verified uploaded original while preserving a document tombstone and immutable purge event. Wrong credentials, repeat operations, unsafe/missing paths and content-integrity mismatches fail closed. Retrieval returns 410. The new retention policy explicitly distinguishes this from full-case or backup/media erasure. Next: database schema/version health, integrity readiness probes and load/concurrency evidence.

@@ -13,5 +13,9 @@ Python standard-library service
 
 The runtime binds only to `127.0.0.1` by default. Exact-pinned permissively licensed packages perform PDF rendering/text extraction, image validation and XLSX parsing entirely locally. Original bytes are stored under generated UUID names and never interpreted as code. Spreadsheet formulas are retained for review but never executed. Browser text is escaped and the server applies a restrictive content-security policy.
 
+SQLite `PRAGMA user_version` is the compatibility boundary. Version `1` is the governed baseline, including additive migration of legacy session, finding and document-retention columns. Runtime initialization rejects a database whose version is newer than the installed code instead of attempting an unsafe downgrade.
+
+An authenticated administrator may call `GET /api/operations/integrity`. The local-only probe runs SQLite quick/foreign-key/schema checks, verifies the independent audit and review hash chains, streams SHA-256 over each retained original, validates purged tombstones and reports interrupted purge-staging files. It makes zero network requests and returns `ok: false` for any discrepancy.
+
 Production/network use is intentionally blocked pending hardened authentication, CSRF controls and a security review. Static GitHub Pages may host documentation/UI demonstrations, but cannot provide private persistence or document processing; the full application remains local.
 

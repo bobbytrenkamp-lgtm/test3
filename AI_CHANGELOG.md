@@ -33,3 +33,10 @@
 - Kept rejected and pending values out of both the model and supporting-source manifest.
 - Executed the fictional minimal model through test2's own `parseModelInput` implementation without adding a runtime dependency.
 - Honored test2's supply-chain policy when its disposable dependency install rejected newly published lockfile entries; no policy was relaxed.
+
+## 2026-08-04 — extraction governance tranche
+
+- Replaced the ten-field global pattern map with a typed, category-scoped institutional field registry.
+- Added deterministic rate, basis-point, integer and date normalization plus registry-derived units and currencies.
+- Added category-negative tests so unrelated document types do not emit misleading candidates.
+- Preserved tabular row identity and the mandatory human-review boundary.

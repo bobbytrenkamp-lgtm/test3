@@ -18,7 +18,8 @@
 | Optional local model | Designed | Loopback restriction; no generation adapter yet |
 | Audit history | Tested | Independent serialized audit and review-decision hash chains with tamper verifiers |
 | Operational integrity/readiness | Tested | Admin-only DB/schema/FK, chain, streamed-original and purge-staging probe; zero network requests |
-| Backup/restore drill | Tested | Manifest hashes and SQLite integrity in temporary restore |
+| Backup/restore drill | Tested | Format 3 schema/table contract, manifest hashes, SQLite integrity and application-open readiness in disposable restore |
+| Bounded concurrency/load | Tested | Two 100-operation/8-worker exact-count runs, zero failures; see resilience evidence |
 | Original-document retention/purge | Tested | Admin reauthentication, integrity verification, byte deletion, HTTP 410 and immutable tombstone; backups/history unaffected |
 | Accessibility | In development | Semantic/responsive UI; automated review pending |
-| Security/performance/restore hardening | In development | Auth/retention/schema/readiness/restore controls tested; measured load, accessibility and recovery evidence remain |
+| Security/performance/restore hardening | In development | Auth/retention/schema/readiness, measured bounded load and application-open restore tested; accessibility/recovery operations remain |

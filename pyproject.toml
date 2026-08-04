@@ -19,6 +19,7 @@ dependencies = [
 [project.scripts]
 test3 = "test3.api:main"
 test3-init-admin = "test3.admin:main"
+test3-load-probe = "test3.load_probe:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

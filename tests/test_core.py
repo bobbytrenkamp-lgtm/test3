@@ -24,6 +24,7 @@ from test3.classification import classify
 from test3.db import Database
 from test3.extraction import Candidate, extract_selectable_pdf_text, extract_text_candidates, normalize_value, parse_csv, parse_xlsx, process
 from test3.field_registry import FIELD_BY_NAME, FIELD_REGISTRY, applicable_fields
+from test3.load_probe import run_probe
 from test3.normalization import date, number
 from test3.ollama import validate_local_endpoint
 from test3.permissions import require
@@ -194,6 +195,17 @@ class HttpSecurityTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 worker.join(timeout=5)
+
+
+class ResilienceTests(unittest.TestCase):
+    def test_concurrent_local_workload_has_exact_counts_and_valid_chains(self):
+        report = run_probe(operations=8, workers=4)
+        self.assertTrue(report["ok"])
+        self.assertEqual(report["completed"], 8)
+        self.assertEqual(report["failures"], [])
+        self.assertEqual(report["networkRequests"], 0)
+        self.assertTrue(report["restoreDrillPassed"])
+        self.assertEqual(report["counts"], {"deals": 9, "documents": 8, "auditEvents": 17})
 
 
 class NormalizationTests(unittest.TestCase):
@@ -660,7 +672,9 @@ class ServiceTests(unittest.TestCase):
         create_backup(Path(self.temp.name), destination)
         report = verify_backup(destination)
         self.assertTrue(report["valid"])
-        self.assertEqual(report["format"], "test3-backup/2.0")
+        self.assertEqual(report["format"], "test3-backup/3.0")
+        self.assertEqual(report["schemaVersion"], 1)
+        self.assertTrue(report["restoredOperationalIntegrity"])
         self.assertEqual(report["counts"]["documents"], 1)
         self.assertGreaterEqual(report["fileCount"], 2)
         with self.assertRaisesRegex(ValueError, "overwrite"):

@@ -4,5 +4,7 @@ Tests use fictional bytes and temporary directories. Expected hashes, decimals, 
 
 Readiness tests also assert the governed SQLite schema version, fail-closed rejection of future schemas, database/foreign-key health, preventive audit-event triggers, hash-chain detection after deliberate trigger bypass, streamed upload integrity and an authenticated zero-network operations probe.
 
+The bounded concurrency probe uses 1..32 workers and 1..1000 operations, always against a newly created temporary directory. A CI-sized 8-operation regression checks exact deal/document/audit counts, chain/storage health and a real application-open restore. The recorded 100-operation/8-worker runs and limitations are in `docs/resilience-evidence.md`.
+
 Not yet sufficient for production: browser accessibility/e2e automation, complex PDF corpus benchmarks, OCR failure matrix, load tests, restore drill and independent penetration review.
 

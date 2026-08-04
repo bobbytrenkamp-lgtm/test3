@@ -1,5 +1,13 @@
 # AI changelog
 
+## 2026-08-04 — measured concurrency and application-open recovery
+
+- Added a code-bounded local-only concurrent workload using temporary fictional deals/documents and exact persistence/audit assertions.
+- Upgraded backup manifests to format 3.0 with governed schema/table contract and current-application restore integrity checks.
+- Added a CI-sized concurrency/backup/restore regression and ran two 100-operation, 8-worker probes with zero failures.
+- Recorded latency, throughput, backup/restore timings, exact counts, environment and limitations without claiming general production capacity.
+- Added no dependency or service; temporary load and recovery processing makes zero network requests.
+
 ## 2026-08-04 — schema and operational readiness integrity
 
 - Established governed SQLite schema version 1 and fail-closed rejection of databases created by newer application code.

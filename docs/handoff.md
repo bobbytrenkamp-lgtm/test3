@@ -28,5 +28,9 @@ No automated test or smoke-test failure is open. Complex/scanned PDF extraction,
 
 Add optional local Tesseract and a mature permissively licensed local PDF parser only after a version-specific license audit. Then run the generated fictional package through a real test2 import fixture and add browser accessibility/e2e coverage.
 
+## Security tranche update
+
+PR #1 established the foundation. The next tranche adds role/CSRF enforcement, hashed sessions, audit verification, archive-bomb limits and backup/restore drills. The suite is now 30 tests; live HTTP checks return 401 without authentication, 401 without CSRF and 201 with the valid local session/CSRF pair.
+
 ZERO-COST CHECK PASSED: No application component can create a charge for the repository owner.
 

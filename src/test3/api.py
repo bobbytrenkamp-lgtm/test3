@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
+import secrets
 import sys
 from datetime import datetime, timedelta, timezone
 from http.cookies import SimpleCookie
@@ -13,6 +15,7 @@ from urllib.parse import parse_qs, urlparse
 from .service import Service
 from .auth import session_token, verify_password
 from .db import now
+from .permissions import require
 
 ROOT = Path(__file__).resolve().parents[2]
 WEB = ROOT / "web"
@@ -43,10 +46,16 @@ class Handler(SimpleHTTPRequestHandler):
         if not token:
             raise PermissionError("Sign in required")
         with self.service.db.connect() as connection:
-            user = connection.execute("SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id=? AND s.expires_at>?", (token.value, now())).fetchone()
+            token_hash = hashlib.sha256(token.value.encode()).hexdigest()
+            user = connection.execute("SELECT u.*,s.csrf_token FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?", (token_hash, now())).fetchone()
         if not user:
             raise PermissionError("Session expired")
-        return {key: user[key] for key in ("id", "organization_id", "email", "display_name", "role")}
+        return {key: user[key] for key in ("id", "organization_id", "email", "display_name", "role", "csrf_token")}
+
+    def _authorize_post(self, user: dict, permission: str):
+        if not secrets.compare_digest(self.headers.get("X-CSRF-Token", ""), user["csrf_token"]):
+            raise PermissionError("Invalid CSRF token")
+        require(user["role"], permission)
 
     def _payload(self):
         length = int(self.headers.get("Content-Length", "0"))
@@ -66,8 +75,6 @@ class Handler(SimpleHTTPRequestHandler):
                 deal_id = parts[2]
                 if len(parts) == 3:
                     return self._json(200, self.service.deal(deal_id, user["organization_id"]))
-                if len(parts) == 5 and parts[3] == "export":
-                    return self._json(200, self.service.export(user["organization_id"], user["id"], deal_id, parts[4]))
             if parsed.path.startswith("/api/documents/"):
                 user = self._identity()
                 document_id = parsed.path.rsplit("/", 1)[-1]
@@ -102,26 +109,35 @@ class Handler(SimpleHTTPRequestHandler):
                     user = connection.execute("SELECT * FROM users WHERE lower(email)=lower(?)", (str(payload.get("email", "")),)).fetchone()
                     if not user or not verify_password(str(payload.get("password", "")), user["password_hash"]):
                         raise PermissionError("Invalid local credentials")
-                    token = session_token()
+                    token, csrf = session_token(), session_token()
                     expires = (datetime.now(timezone.utc) + timedelta(hours=12)).isoformat()
-                    connection.execute("INSERT INTO sessions VALUES(?,?,?,?)", (token, user["id"], expires, now()))
+                    connection.execute("DELETE FROM sessions WHERE expires_at<=?", (now(),))
+                    connection.execute("INSERT INTO sessions VALUES(?,?,?,?,?,?)", (secrets.token_hex(16), hashlib.sha256(token.encode()).hexdigest(), csrf, user["id"], expires, now()))
                 cookie = f"test3_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200"
                 return self._json(200, {"signedIn": True}, cookie)
             user = self._identity()
             if parts == ["api", "deals"]:
+                self._authorize_post(user, "deal.create")
                 return self._json(201, self.service.create_deal(user["organization_id"], user["id"], self._payload()))
             if len(parts) == 4 and parts[:2] == ["api", "deals"] and parts[3] == "upload":
+                self._authorize_post(user, "document.upload")
                 filename = self.headers.get("X-Filename", "upload")
                 length = int(self.headers.get("Content-Length", "0"))
                 content = self.rfile.read(length)
                 return self._json(201, self.service.upload(user["organization_id"], user["id"], parts[2], filename, content))
             if len(parts) == 4 and parts[:2] == ["api", "deals"] and parts[3] == "reconcile":
+                self._authorize_post(user, "reconcile.run")
                 return self._json(200, self.service.run_reconciliation(user["organization_id"], user["id"], parts[2]))
             if len(parts) == 4 and parts[:2] == ["api", "values"] and parts[3] == "review":
+                self._authorize_post(user, "value.review")
                 payload = self._payload()
                 return self._json(200, self.service.review_value(user["organization_id"], user["id"], parts[2], payload.get("status"), payload.get("normalized_value"), payload.get("comments", "")))
             if len(parts) == 4 and parts[:2] == ["api", "findings"] and parts[3] == "resolve":
+                self._authorize_post(user, "finding.resolve")
                 return self._json(200, self.service.resolve_finding(user["organization_id"], user["id"], parts[2], self._payload().get("notes", "")))
+            if len(parts) == 5 and parts[:2] == ["api", "deals"] and parts[3] == "export":
+                self._authorize_post(user, "export.generate")
+                return self._json(200, self.service.export(user["organization_id"], user["id"], parts[2], parts[4]))
             return self._json(404, {"error": "Route not found"})
         except PermissionError as error:
             return self._json(401, {"error": str(error)})

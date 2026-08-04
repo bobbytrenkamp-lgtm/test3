@@ -49,3 +49,12 @@
 - Added typed approval validation and explicit supersession of the prior controlling value.
 - Included assumption and decision counts in backup restore verification.
 - Replaced native prompt interactions with labeled review/resolution forms and completed a clean-console browser workflow.
+
+## 2026-08-04 — test1 local snapshot tranche
+
+- Implemented a strict reader for test1's actual static metadata, policy, political-risk, water, incentive, facility and state-regulation files.
+- Added per-file hashes/byte counts, duplicate-key rejection, source/dataset freshness and bounded facility summaries.
+- Required an approved typed county FIPS and kept all unavailable/unresearched states explicit.
+- Proved compatibility against test1 commit `aa8ab706…` with zero network requests and conservative verification semantics.
+- Redistributed no test1 code or data because the source repository has no license file.
+- Completed the configured browser path with six context cards, visible freshness/limitations/citations and a clean console.

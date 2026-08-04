@@ -1,0 +1,11 @@
+.jurisdiction-panel { padding: 24px; }
+.jurisdiction-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.jurisdiction-card { padding: 18px; border: 1px solid var(--line); border-radius: 7px; }
+.jurisdiction-card h2, .jurisdiction-card h3 { margin-top: 0; }
+.jurisdiction-card p, .jurisdiction-card li { color: var(--muted); font-size: 11px; line-height: 1.55; }
+.jurisdiction-wide { grid-column: 1 / -1; }
+.citation-url { overflow-wrap: anywhere; color: var(--green); font-family: ui-monospace, monospace; font-size: 10px; }
+@media (max-width: 700px) {
+  .jurisdiction-grid { grid-template-columns: 1fr; }
+  .jurisdiction-wide { grid-column: auto; }
+}

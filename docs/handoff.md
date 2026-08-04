@@ -2,6 +2,10 @@
 
 Date: 2026-08-04
 
+## Retention-control update
+
+A reauthenticated administrator can now purge only the integrity-verified uploaded original while preserving a document tombstone and immutable purge event. Wrong credentials, repeat operations, unsafe/missing paths and content-integrity mismatches fail closed. Retrieval returns 410. The new retention policy explicitly distinguishes this from full-case or backup/media erasure. Next: database schema/version health, integrity readiness probes and load/concurrency evidence.
+
 ## Administrator-bootstrap update
 
 Normal runtime no longer creates or recreates a known credential. A first-run operator initializes an application-local administrator through `test3-init-admin`; password input is non-echoing and absent from arguments/environment/logs. Explicit demo mode is now the only path to the fictional seed identity. Rotation revokes every session. Next: controlled document/deal retention and deletion without compromising immutable governance history.

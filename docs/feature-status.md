@@ -18,5 +18,6 @@
 | Optional local model | Designed | Loopback restriction; no generation adapter yet |
 | Audit history | Tested | Independent serialized audit and review-decision hash chains with tamper verifiers |
 | Backup/restore drill | Tested | Manifest hashes and SQLite integrity in temporary restore |
+| Original-document retention/purge | Tested | Admin reauthentication, integrity verification, byte deletion, HTTP 410 and immutable tombstone; backups/history unaffected |
 | Accessibility | In development | Semantic/responsive UI; automated review pending |
 | Security/performance/restore hardening | Not started | Required before production claim |

@@ -482,6 +482,33 @@ class ServiceTests(unittest.TestCase):
         self.assertFalse(valid)
         self.assertEqual(broken_id, event["id"])
 
+    def test_reconciliation_runs_retain_and_supersede_finding_history(self):
+        for field_name, value in (("asking_price", "10000000"), ("broker_stated_noi", "500000"), ("broker_stated_cap_rate", "0.06")):
+            assumption = self.service.create_assumption(
+                self.user["organization_id"], self.user["id"], self.deal_id,
+                {"field_name": field_name, "proposed_value": value, "rationale": "Fictional source"},
+            )
+            self.service.review_assumption(self.user["organization_id"], self.user["id"], assumption["id"], "approved", value, "Checked")
+        self.assertEqual(len(self.service.run_reconciliation(self.user["organization_id"], self.user["id"], self.deal_id)), 1)
+        first = self.service.deal(self.deal_id, self.user["organization_id"])["findings"][0]
+        self.assertEqual(first["resolution_status"], "open")
+
+        self.service.run_reconciliation(self.user["organization_id"], self.user["id"], self.deal_id)
+        history = self.service.deal(self.deal_id, self.user["organization_id"])["findings"]
+        statuses = {item["id"]: item["resolution_status"] for item in history}
+        self.assertEqual(statuses[first["id"]], "superseded")
+        self.assertEqual(sum(status == "open" for status in statuses.values()), 1)
+        with self.service.db.connect() as connection:
+            runs = connection.execute("SELECT * FROM reconciliation_runs WHERE deal_id=? ORDER BY rowid", (self.deal_id,)).fetchall()
+            self.assertEqual(len(runs), 2)
+            self.assertEqual(len(runs[0]["input_sha256"]), 64)
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute("DELETE FROM findings WHERE id=?", (first["id"],))
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute("UPDATE reconciliation_runs SET finding_count=0 WHERE id=?", (runs[0]["id"],))
+        with self.assertRaisesRegex(ValueError, "Only an open finding"):
+            self.service.resolve_finding(self.user["organization_id"], self.user["id"], first["id"], "Too late")
+
     def test_backup_and_temporary_restore_drill(self):
         content = b"Tenant,Rent\nExample,100\n"
         self.service.upload(self.user["organization_id"], self.user["id"], self.deal_id, "rent-roll.csv", content)

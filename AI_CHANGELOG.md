@@ -1,5 +1,12 @@
 # AI changelog
 
+## 2026-08-04 — reconciliation history integrity
+
+- Replaced destructive reconciliation refreshes with immutable runs and retained finding supersession.
+- Added exact input hashes, database immutability triggers, stale-resolution rejection, migration support and regression coverage.
+- Updated the analyst UI to distinguish open, resolved and superseded findings.
+- Confirmed the zero-cost and permissive-license guards; no service, account or dependency was added.
+
 ## 2026-08-04
 
 - Audited empty `test3` and read-only shallow snapshots of `test1` and `test2`.

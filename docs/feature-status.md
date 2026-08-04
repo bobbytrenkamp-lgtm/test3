@@ -10,7 +10,7 @@
 | PDF/CSV/XLSX/image support | Tested | Local mature parsers; Tesseract optional and unavailable state tested |
 | Governed field registry | Tested | 40 typed/category-scoped fields with unit, currency and downstream semantics |
 | Source-linked review | Functional | Rendered page and normalized source-area highlight; browser e2e pending |
-| Reconciliation center | Tested | 19 deterministic rules |
+| Reconciliation center | Tested | 19 deterministic rules; immutable input-hashed runs and retained supersession history |
 | Approval governance and manual assumptions | Tested | Immutable source values, typed approvals, append-only/hash-chained decisions and explicit supersession |
 | test2 export | Tested, minimal | Real `cre-platform-model` shape passed test2's own `parseModelInput`; non-ready packages are explicitly blocked |
 | test1 enrichment | Tested, optional | Actual seven-file test1 data directory loaded by hash with freshness/citations; approved FIPS required; no networking |

@@ -25,7 +25,11 @@ CREATE TABLE IF NOT EXISTS manual_assumptions(id TEXT PRIMARY KEY, organization_
 CREATE TABLE IF NOT EXISTS review_decisions(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), deal_id TEXT NOT NULL REFERENCES deals(id), actor_id TEXT NOT NULL REFERENCES users(id), entity_type TEXT NOT NULL CHECK(entity_type IN ('extracted_value','manual_assumption')), entity_id TEXT NOT NULL, decision TEXT NOT NULL CHECK(decision IN ('approved','rejected','needs_review')), proposed_normalized_value TEXT, comments TEXT NOT NULL, previous_hash TEXT, decision_hash TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TRIGGER IF NOT EXISTS review_decisions_no_update BEFORE UPDATE ON review_decisions BEGIN SELECT RAISE(ABORT, 'review decisions are append-only'); END;
 CREATE TRIGGER IF NOT EXISTS review_decisions_no_delete BEFORE DELETE ON review_decisions BEGIN SELECT RAISE(ABORT, 'review decisions are append-only'); END;
-CREATE TABLE IF NOT EXISTS findings(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), deal_id TEXT NOT NULL REFERENCES deals(id), rule_code TEXT NOT NULL, severity TEXT NOT NULL, explanation TEXT NOT NULL, compared_values_json TEXT NOT NULL, source_documents_json TEXT NOT NULL, page_references_json TEXT NOT NULL, suggested_next_step TEXT NOT NULL, resolution_status TEXT NOT NULL, resolution_notes TEXT, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS reconciliation_runs(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), deal_id TEXT NOT NULL REFERENCES deals(id), actor_id TEXT NOT NULL REFERENCES users(id), rule_engine_version TEXT NOT NULL, input_sha256 TEXT NOT NULL, finding_count INTEGER NOT NULL, created_at TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS reconciliation_runs_no_update BEFORE UPDATE ON reconciliation_runs BEGIN SELECT RAISE(ABORT, 'reconciliation runs are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS reconciliation_runs_no_delete BEFORE DELETE ON reconciliation_runs BEGIN SELECT RAISE(ABORT, 'reconciliation runs are append-only'); END;
+CREATE TABLE IF NOT EXISTS findings(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), deal_id TEXT NOT NULL REFERENCES deals(id), rule_code TEXT NOT NULL, severity TEXT NOT NULL, explanation TEXT NOT NULL, compared_values_json TEXT NOT NULL, source_documents_json TEXT NOT NULL, page_references_json TEXT NOT NULL, suggested_next_step TEXT NOT NULL, resolution_status TEXT NOT NULL CHECK(resolution_status IN ('open','resolved','superseded')), resolution_notes TEXT, created_at TEXT NOT NULL, reconciliation_run_id TEXT REFERENCES reconciliation_runs(id), superseded_at TEXT);
+CREATE TRIGGER IF NOT EXISTS findings_no_delete BEFORE DELETE ON findings BEGIN SELECT RAISE(ABORT, 'findings are retained for reconciliation history'); END;
 CREATE TABLE IF NOT EXISTS audit_events(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), deal_id TEXT, actor_id TEXT REFERENCES users(id), action TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT, details_json TEXT NOT NULL, previous_hash TEXT, event_hash TEXT NOT NULL, created_at TEXT NOT NULL);
 """
 
@@ -41,6 +45,11 @@ class Database:
                 # Sessions are deliberately ephemeral; invalidate legacy plaintext-token sessions.
                 connection.execute("DROP TABLE sessions")
                 connection.execute("CREATE TABLE sessions(id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, csrf_token TEXT NOT NULL, user_id TEXT NOT NULL REFERENCES users(id), expires_at TEXT NOT NULL, created_at TEXT NOT NULL)")
+            finding_columns = {row[1] for row in connection.execute("PRAGMA table_info(findings)")}
+            if "reconciliation_run_id" not in finding_columns:
+                connection.execute("ALTER TABLE findings ADD COLUMN reconciliation_run_id TEXT REFERENCES reconciliation_runs(id)")
+            if "superseded_at" not in finding_columns:
+                connection.execute("ALTER TABLE findings ADD COLUMN superseded_at TEXT")
 
     @contextmanager
     def connect(self):

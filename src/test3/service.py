@@ -46,7 +46,7 @@ class Service:
             deals = [dict(row) for row in connection.execute("SELECT * FROM deals WHERE organization_id=? ORDER BY updated_at DESC", (user["organization_id"],))]
             for deal in deals:
                 deal["document_count"] = connection.execute("SELECT COUNT(*) FROM documents WHERE deal_id=?", (deal["id"],)).fetchone()[0]
-                deal["finding_count"] = connection.execute("SELECT COUNT(*) FROM findings WHERE deal_id=? AND resolution_status!='resolved'", (deal["id"],)).fetchone()[0]
+                deal["finding_count"] = connection.execute("SELECT COUNT(*) FROM findings WHERE deal_id=? AND resolution_status='open'", (deal["id"],)).fetchone()[0]
         return {
             "user": user, "deals": deals, "zeroCost": True, "localOnly": True,
             "manualAssumptionFields": [
@@ -250,12 +250,15 @@ class Service:
             values[f"{row['field_name']}__document"] = document["original_name"] if document else "User-entered assumption"
             values[f"{row['field_name']}__page"] = row.get("page_number")
         results = as_dicts(reconcile(values))
+        input_hash = hashlib.sha256(json.dumps(values, sort_keys=True, default=str).encode()).hexdigest()
+        run_id, created = str(uuid.uuid4()), now()
         with self.db.connect() as connection:
-            connection.execute("DELETE FROM findings WHERE deal_id=? AND organization_id=? AND resolution_status='open'", (deal_id, organization_id))
-            created = now()
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("UPDATE findings SET resolution_status='superseded', superseded_at=? WHERE deal_id=? AND organization_id=? AND resolution_status='open'", (created, deal_id, organization_id))
+            connection.execute("INSERT INTO reconciliation_runs VALUES(?,?,?,?,?,?,?,?)", (run_id, organization_id, deal_id, user_id, "1.0", input_hash, len(results), created))
             for item in results:
-                connection.execute("INSERT INTO findings VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (str(uuid.uuid4()), organization_id, deal_id, item["rule_code"], item["severity"], item["explanation"], json.dumps(item["compared_values"]), json.dumps(item["source_documents"]), json.dumps(item["page_references"]), item["suggested_next_step"], "open", None, created))
-        self.db.audit(organization_id, user_id, "reconciliation.completed", "deal", deal_id, {"finding_count": len(results), "rule_engine": "1.0"}, deal_id)
+                connection.execute("INSERT INTO findings(id,organization_id,deal_id,rule_code,severity,explanation,compared_values_json,source_documents_json,page_references_json,suggested_next_step,resolution_status,resolution_notes,created_at,reconciliation_run_id,superseded_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (str(uuid.uuid4()), organization_id, deal_id, item["rule_code"], item["severity"], item["explanation"], json.dumps(item["compared_values"]), json.dumps(item["source_documents"]), json.dumps(item["page_references"]), item["suggested_next_step"], "open", None, created, run_id, None))
+        self.db.audit(organization_id, user_id, "reconciliation.completed", "reconciliation_run", run_id, {"finding_count": len(results), "rule_engine": "1.0", "input_sha256": input_hash}, deal_id)
         return results
 
     def resolve_finding(self, organization_id: str, user_id: str, finding_id: str, notes: str) -> dict:
@@ -265,6 +268,8 @@ class Service:
             finding = connection.execute("SELECT * FROM findings WHERE id=? AND organization_id=?", (finding_id, organization_id)).fetchone()
             if not finding:
                 raise LookupError("Finding not found")
+            if finding["resolution_status"] != "open":
+                raise ValueError("Only an open finding can be resolved")
             connection.execute("UPDATE findings SET resolution_status='resolved', resolution_notes=? WHERE id=?", (notes[:4000], finding_id))
         self.db.audit(organization_id, user_id, "finding.resolved", "finding", finding_id, {"notes": notes}, finding["deal_id"])
         return {"id": finding_id, "resolution_status": "resolved"}

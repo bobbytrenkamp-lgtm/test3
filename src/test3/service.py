@@ -27,6 +27,40 @@ class Service:
         self.max_upload_bytes = max_upload_bytes
         self.test1_data_dir = test1_data_dir.resolve() if test1_data_dir else None
 
+    def has_users(self) -> bool:
+        with self.db.connect() as connection:
+            return connection.execute("SELECT 1 FROM users LIMIT 1").fetchone() is not None
+
+    def initialize_admin(self, organization_name: str, email: str, display_name: str, password: str) -> dict:
+        organization_name, email, display_name = organization_name.strip(), email.strip().lower(), display_name.strip()
+        if not organization_name or not display_name or "@" not in email or len(email) > 254:
+            raise ValueError("Organization name, display name and a valid local administrator email are required")
+        if len(password) < 16:
+            raise ValueError("Institutional administrator passwords must be at least 16 characters")
+        org_id, user_id, created = str(uuid.uuid4()), str(uuid.uuid4()), now()
+        with self.db.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if connection.execute("SELECT 1 FROM users LIMIT 1").fetchone():
+                raise ValueError("A local user already exists; initialization is a first-run operation")
+            connection.execute("INSERT INTO organizations VALUES(?,?,?)", (org_id, organization_name[:200], created))
+            connection.execute("INSERT INTO users VALUES(?,?,?,?,?,?,?)", (user_id, org_id, email, display_name[:200], "admin", hash_password(password), created))
+        self.db.audit(org_id, user_id, "organization.initialized", "organization", org_id, {"local_only": True})
+        return {"id": user_id, "organization_id": org_id, "email": email, "display_name": display_name, "role": "admin"}
+
+    def reset_local_password(self, email: str, password: str) -> dict:
+        if len(password) < 16:
+            raise ValueError("Institutional administrator passwords must be at least 16 characters")
+        with self.db.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            users = connection.execute("SELECT * FROM users WHERE lower(email)=? LIMIT 2", (email.strip().lower(),)).fetchall()
+            if len(users) != 1:
+                raise ValueError("The local email must identify exactly one user")
+            user = users[0]
+            connection.execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(password), user["id"]))
+            connection.execute("DELETE FROM sessions WHERE user_id=?", (user["id"],))
+        self.db.audit(user["organization_id"], user["id"], "user.local_password_reset", "user", user["id"], {"sessions_revoked": True})
+        return {"id": user["id"], "email": user["email"], "sessions_revoked": True}
+
     def seed(self) -> dict:
         with self.db.connect() as connection:
             existing = connection.execute("SELECT id FROM organizations LIMIT 1").fetchone()
@@ -40,15 +74,17 @@ class Service:
         self.db.audit(org_id, user_id, "deal.created", "deal", deal_id, {"fictional": True}, deal_id)
         return {"id": user_id, "organization_id": org_id, "email": "analyst@example.test", "display_name": "Casey Analyst", "role": "admin"}
 
-    def bootstrap(self, user: dict | None = None) -> dict:
-        user = user or self.seed()
+    def bootstrap(self, user: dict) -> dict:
         with self.db.connect() as connection:
             deals = [dict(row) for row in connection.execute("SELECT * FROM deals WHERE organization_id=? ORDER BY updated_at DESC", (user["organization_id"],))]
             for deal in deals:
                 deal["document_count"] = connection.execute("SELECT COUNT(*) FROM documents WHERE deal_id=?", (deal["id"],)).fetchone()[0]
                 deal["finding_count"] = connection.execute("SELECT COUNT(*) FROM findings WHERE deal_id=? AND resolution_status='open'", (deal["id"],)).fetchone()[0]
+        public_user = {key: user[key] for key in ("id", "organization_id", "email", "display_name", "role") if key in user}
+        if "csrf_token" in user:
+            public_user["csrf_token"] = user["csrf_token"]
         return {
-            "user": user, "deals": deals, "zeroCost": True, "localOnly": True,
+            "user": public_user, "deals": deals, "zeroCost": True, "localOnly": True,
             "manualAssumptionFields": [
                 {"name": field.name, "label": field.label, "unit": field.unit, "currency": field.currency}
                 for field in FIELD_BY_NAME.values()

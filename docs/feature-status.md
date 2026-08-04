@@ -5,7 +5,7 @@
 | Feature | Status | Evidence / limitation |
 |---|---|---|
 | Deal pipeline and fictional seed | Tested | Local service tests |
-| Local sign-in, sessions, CSRF and roles | Tested | PBKDF2, uniform-cost checks, dual-scope lockouts, hashed opaque sessions, revocation, CSRF and roles; identity bootstrap/TLS deferred |
+| Local sign-in, sessions, CSRF and roles | Tested | Fail-closed non-echoing admin bootstrap, explicit demo mode, PBKDF2, uniform-cost checks, lockouts, hashed sessions, rotation/revocation, CSRF and roles; TLS/federation deferred |
 | Secure upload metadata/hash/duplicates | Tested | Synthetic tests |
 | PDF/CSV/XLSX/image support | Tested | Local mature parsers; Tesseract optional and unavailable state tested |
 | Governed field registry | Tested | 40 typed/category-scoped fields with unit, currency and downstream semantics |

@@ -1,5 +1,14 @@
 # AI changelog
 
+## 2026-08-04 — institutional local administrator bootstrap
+
+- Removed implicit demo-credential creation from normal startup and sign-in.
+- Added fail-closed first-run initialization through a non-echoing, confirmation-based terminal prompt with a 16-character minimum.
+- Added local password rotation with complete session revocation and hash-chained audit events.
+- Kept fictional seed data behind explicit `TEST3_DEMO_MODE=1`; removed prefilled browser credentials.
+- Documented the local component in the cost/billing audit; it has no account, network call, dependency or billing mechanism.
+- Removed an internal session-token hash from the browser bootstrap projection and added a non-disclosure regression assertion.
+
 ## 2026-08-04 — local authentication and session hardening
 
 - Added deterministic process-local sign-in lockouts at account and loopback-address scopes and equal-cost unknown-account password checks.

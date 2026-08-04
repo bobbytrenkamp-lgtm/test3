@@ -26,12 +26,13 @@ Requires Python 3.11+. Installation downloads only audited, pinned, open-source 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install .
+.\.venv\Scripts\test3-init-admin.exe --email you@example.test
 .\.venv\Scripts\test3.exe
 ```
 
-Open `http://127.0.0.1:8765`. Stop with Ctrl+C.
+The initialization command prompts twice without echo and never accepts a password argument. Open `http://127.0.0.1:8765`. Stop with Ctrl+C. To rotate an unambiguous local user's password and revoke all sessions, rerun the initializer with `--reset-password`.
 
-The fictional development sign-in is `analyst@example.test` / `fictional-demo`. Do not use this credential pattern with real documents; hardened network/multi-user operation is deferred.
+For a fictional demonstration only, set `TEST3_DEMO_MODE=1` before first startup; this explicitly creates `analyst@example.test` / `fictional-demo` and a fictional deal. Never use demo mode or that known credential with real documents. Non-loopback/network operation remains blocked.
 
 ## Verify
 

@@ -16,9 +16,11 @@ Confidential documents, approved assumptions, identities and audit history are s
 | Path traversal/overwrite | basename sanitization, UUID storage, resolved-parent check | Platform fuzzing |
 | Stored XSS | UI escaping and CSP | Automated browser payload suite |
 | SQL injection | Parameterized SQLite statements | Static query review |
-| Session theft/CSRF | PBKDF2 passwords, uniform-cost unknown-account checks, per-account and per-address sign-in lockouts, random opaque sessions stored as hashes, HttpOnly/SameSite cookies, per-session CSRF token and explicit server-side sign-out | TLS and institutional identity bootstrap remain required before any network exposure; server refuses non-loopback binding |
+| Session theft/CSRF | Non-echoing first-run local administrator bootstrap, PBKDF2 passwords, uniform-cost unknown-account checks, per-account and per-address sign-in lockouts, random opaque sessions stored as hashes, HttpOnly/SameSite cookies, per-session CSRF token, explicit server-side sign-out and local password rotation with full revocation | TLS and federated identity remain required before any network exposure; server refuses non-loopback binding |
 
 Protected JSON, static and document responses carry a restrictive same-origin CSP, anti-framing, no-sniff, no-referrer and browser-permission-denial headers. JSON bodies are capped at 1 MiB and uploads are rejected from declared length before allocation when over the configured limit. Original filenames in `Content-Disposition` are UTF-8 percent encoded. `TEST3_SECURE_COOKIE=1` is available only for an operator who has explicitly placed the loopback service behind local TLS; direct HTTP operation must retain `0`.
+
+Normal startup fails closed until `test3-init-admin` creates a local administrator. The password is read twice through `getpass`, is never a command argument or environment setting, and must contain at least 16 characters. The well-known fictional identity is created only when `TEST3_DEMO_MODE=1` is explicitly selected. Password rotation invalidates every session for that user.
 | External transmission | No telemetry, hosted API or remote model; local endpoint validation | Egress-deny deployment guide |
 | Sensitive logging | Metadata-only request log; no content/key logging | Redaction audit |
 | Backup/deletion | Manifested local backup and temporary restore drill | Encryption and controlled deletion workflow |

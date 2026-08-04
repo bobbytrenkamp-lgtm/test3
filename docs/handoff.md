@@ -2,6 +2,10 @@
 
 Date: 2026-08-04
 
+## Administrator-bootstrap update
+
+Normal runtime no longer creates or recreates a known credential. A first-run operator initializes an application-local administrator through `test3-init-admin`; password input is non-echoing and absent from arguments/environment/logs. Explicit demo mode is now the only path to the fictional seed identity. Rotation revokes every session. Next: controlled document/deal retention and deletion without compromising immutable governance history.
+
 ## Authentication/session hardening update
 
 Local sign-in now applies account- and address-scoped lockouts, performs full PBKDF2 work for unknown accounts and rejects ambiguous duplicate emails. Sign-out deletes the hashed server-side session and clears the browser cookie; a live HTTP test proves replay fails. Security headers now apply to every response. The next control is an explicit institutional first-run administrator bootstrap so the fictional demonstration credential is never the operational default.

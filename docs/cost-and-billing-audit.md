@@ -6,6 +6,7 @@ Audit date: 2026-08-04. “Possibility of charges” covers this repository’s 
 |---|---|---|---|---|---|---|---|---|---|
 | Python 3.11+ | Local runtime | Python Software Foundation | No | No | Local resources | None | N/A | Approved | PSF-2.0; open source, local |
 | SQLite | Local metadata DB | Public domain / Python stdlib | No | No | Local disk | None | Flat files | Approved | Public domain; no service |
+| Local administrator bootstrap | First-run identity and password rotation | Python stdlib/getpass + SQLite | No external account | No | Local disk | None; no billing mechanism | OS-local access control | Approved | Original MIT code; password never enters args/env/logs; no network |
 | Browser HTML/CSS/JS | Analyst UI/PDF display | Local browser | No | No | Local resources | None | N/A | Approved | No hosted dependency |
 | Local test1 snapshot reader | Optional jurisdiction context | User-supplied static files on local disk | No | No | Local disk/RAM | None; no overages or billing mechanism | No enrichment / manual research | Approved with constraint | Original MIT-licensed adapter; no test1 code/data redistributed because test1 has no repository license; no network request |
 | Git/GitHub public repo | Source collaboration | GitHub | Owner already has account | No new method | Repository plan limits | Workflow does not enable billing; owner must keep repository public/free | Local Git | Approved with constraint | Existing repository functionality only |

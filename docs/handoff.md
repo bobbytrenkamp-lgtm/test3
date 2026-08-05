@@ -2,6 +2,10 @@
 
 Date: 2026-08-04
 
+## Purge crash-recovery update
+
+Original-byte purge now writes a durable bounded sidecar before same-volume staging. On startup, exact database/path/size/hash checks restore uncommitted bytes or finish deletion after a committed tombstone; uncertain artifacts remain untouched and fail readiness. Both crash boundaries are simulated in the 62-test suite and produce hash-chained recovery events. Next: formal full-spec gap matrix and implementation of the highest remaining product-coverage gaps.
+
 ## Browser accessibility/security update
 
 A real Chromium audit at desktop and 390×844 fixed signed-out control reachability, mobile sign-out, keyboard upload, low-contrast text and cache coherence. Synthetic markup rendered only as text, mobile overflow was zero, session revocation restored isolated/focused sign-in state and browser warning/error logs were empty. CI now runs a dependency-free accessibility contract guard. Exact evidence and limitations are in `docs/browser-accessibility-security-evidence.md`. Next: requirement-by-requirement institutional gap audit and interrupted-operation recovery.

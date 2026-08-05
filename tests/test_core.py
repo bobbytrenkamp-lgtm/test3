@@ -549,6 +549,35 @@ class ServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "already purged"):
             self.service.purge_original_document(self.user["organization_id"], self.user["id"], uploaded["id"], "Duplicate purge request")
 
+    def test_purge_staging_recovers_uncommitted_and_finishes_committed_work(self):
+        content = b"Tenant,Rent\nRecovery Example,200\n"
+        uploaded = self.service.upload(self.user["organization_id"], self.user["id"], self.deal_id, "recovery.csv", content)
+        document = next(item for item in self.service.deal(self.deal_id, self.user["organization_id"])["documents"] if item["id"] == uploaded["id"])
+        original = self.service.upload_dir / self.user["organization_id"] / self.deal_id / document["stored_name"]
+        staging = self.service.data_dir / ".purge-staging"
+        staging.mkdir(exist_ok=True)
+        uncommitted_id = "11111111-1111-1111-1111-111111111111"
+        metadata = {"purge_id": uncommitted_id, "organization_id": self.user["organization_id"], "deal_id": self.deal_id, "document_id": uploaded["id"], "stored_name": document["stored_name"], "sha256": document["sha256"], "size_bytes": document["size_bytes"]}
+        original.replace(staging / f"{uncommitted_id}.bin")
+        (staging / f"{uncommitted_id}.json").write_text(json.dumps(metadata), encoding="utf-8")
+        recovered = Service(self.service.data_dir, max_upload_bytes=100_000)
+        self.assertEqual(original.read_bytes(), content)
+        self.assertFalse((staging / f"{uncommitted_id}.bin").exists())
+        self.assertFalse((staging / f"{uncommitted_id}.json").exists())
+
+        result = recovered.purge_original_document(self.user["organization_id"], self.user["id"], uploaded["id"], "Authorized retention expiry")
+        committed_metadata = {**metadata, "purge_id": result["purge_id"]}
+        (staging / f"{result['purge_id']}.bin").write_bytes(content)
+        (staging / f"{result['purge_id']}.json").write_text(json.dumps(committed_metadata), encoding="utf-8")
+        restarted = Service(self.service.data_dir, max_upload_bytes=100_000)
+        self.assertFalse((staging / f"{result['purge_id']}.bin").exists())
+        self.assertFalse((staging / f"{result['purge_id']}.json").exists())
+        self.assertTrue(restarted.operational_integrity(self.user["organization_id"])["ok"])
+        with restarted.db.connect() as connection:
+            actions = [row[0] for row in connection.execute("SELECT action FROM audit_events WHERE entity_id=? ORDER BY rowid", (uploaded["id"],))]
+        self.assertIn("document.purge_uncommitted_restored", actions)
+        self.assertIn("document.purge_cleanup_completed", actions)
+
     def test_organization_isolation(self):
         with self.assertRaises(LookupError): self.service.deal(self.deal_id, "other-org")
 

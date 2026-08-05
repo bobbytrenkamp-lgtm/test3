@@ -8,5 +8,7 @@ The bounded concurrency probe uses 1..32 workers and 1..1000 operations, always 
 
 The dependency-free accessibility guard runs in CI over static semantics and CSS contracts. Real Chromium evidence covers authentication isolation/transitions, keyboard upload, responsive navigation/overflow, computed contrast, stored-markup escaping, session revocation and browser logs; see `docs/browser-accessibility-security-evidence.md` for exact results and limitations.
 
+Destructive-operation recovery tests simulate both crash boundaries: bytes staged before a database commit are hash-verified and restored on a new `Service` instance, while verified bytes left after a committed tombstone are deleted. Both paths must remove their sidecars, preserve readiness and append the expected recovery audit action.
+
 Not yet sufficient for production: browser accessibility/e2e automation, complex PDF corpus benchmarks, OCR failure matrix, load tests, restore drill and independent penetration review.
 

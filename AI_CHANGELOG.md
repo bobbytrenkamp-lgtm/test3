@@ -1,5 +1,13 @@
 # AI changelog
 
+## 2026-08-04 — destructive purge crash recovery
+
+- Added a durable bounded sidecar before original-byte staging, without copying document content or the purge reason into metadata.
+- Added startup reconciliation that validates database identity, safe paths, size and SHA-256 before restoring uncommitted purges or finishing committed cleanup.
+- Leaves malformed/mismatched/ambiguous artifacts untouched so readiness continues to fail visibly instead of guessing.
+- Added clean-restart simulations for both crash boundaries and hash-chained automatic recovery actions.
+- Added no service or dependency; recovery is local filesystem/SQLite processing only.
+
 ## 2026-08-04 — real-browser accessibility and client-security hardening
 
 - Used the in-app browser skill against the exact loopback app at desktop and 390×844 mobile sizes with fictional data only.

@@ -21,5 +21,7 @@ An authenticated administrator may call `GET /api/operations/integrity`. The loc
 
 Backup format `test3-backup/3.0` binds the governed schema version and modern governance-table contract into the manifest. Restore verification checks paths, lengths and hashes, SQLite integrity/table counts, then opens the disposable restore through current application code and runs operational integrity for every organization.
 
+Original-byte purge uses a durable same-volume sidecar state machine. Startup recovery validates the sidecar, database tombstone, path, size and hash before either restoring an uncommitted original or deleting bytes from a committed purge. Ambiguous artifacts are never guessed away and remain visible through readiness failure.
+
 Production/network use is intentionally blocked pending hardened authentication, CSRF controls and a security review. Static GitHub Pages may host documentation/UI demonstrations, but cannot provide private persistence or document processing; the full application remains local.
 

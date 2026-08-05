@@ -34,6 +34,68 @@ class Service:
         self.db = Database(self.data_dir / "test3.db")
         self.max_upload_bytes = max_upload_bytes
         self.test1_data_dir = test1_data_dir.resolve() if test1_data_dir else None
+        self._recover_purge_staging()
+
+    @staticmethod
+    def _strict_json(path: Path) -> dict:
+        def pairs(items):
+            result = {}
+            for key, value in items:
+                if key in result:
+                    raise ValueError("duplicate staging metadata key")
+                result[key] = value
+            return result
+        if path.stat().st_size > 16_384:
+            raise ValueError("staging metadata exceeds safety limit")
+        value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=pairs)
+        if not isinstance(value, dict):
+            raise ValueError("staging metadata must be an object")
+        return value
+
+    def _recover_purge_staging(self) -> None:
+        staging_root = (self.data_dir / ".purge-staging").resolve()
+        if not staging_root.is_dir():
+            return
+        for metadata_path in sorted(staging_root.glob("*.json")):
+            try:
+                metadata = self._strict_json(metadata_path)
+                required = {"purge_id", "organization_id", "deal_id", "document_id", "stored_name", "sha256", "size_bytes"}
+                if set(metadata) != required or metadata_path.stem != metadata["purge_id"]:
+                    raise ValueError("staging metadata contract mismatch")
+                staged = (staging_root / f"{metadata['purge_id']}.bin").resolve()
+                original = (self.upload_dir / metadata["organization_id"] / metadata["deal_id"] / metadata["stored_name"]).resolve()
+                if staging_root not in staged.parents or self.upload_dir.resolve() not in original.parents:
+                    raise ValueError("unsafe staged or original path")
+                with self.db.connect() as connection:
+                    document = connection.execute("SELECT * FROM documents WHERE id=? AND organization_id=? AND deal_id=?", (metadata["document_id"], metadata["organization_id"], metadata["deal_id"])).fetchone()
+                    purge = connection.execute("SELECT id FROM document_purges WHERE id=? AND document_id=?", (metadata["purge_id"], metadata["document_id"])).fetchone()
+                if not document or document["stored_name"] != metadata["stored_name"] or document["sha256"] != metadata["sha256"] or document["size_bytes"] != metadata["size_bytes"]:
+                    raise ValueError("staging metadata does not match the document tombstone")
+                committed = purge is not None and document["original_purged_at"] is not None
+                if staged.is_file():
+                    if staged.stat().st_size != metadata["size_bytes"] or _sha256_file(staged) != metadata["sha256"]:
+                        raise ValueError("staged original failed size or SHA-256 verification")
+                    if committed:
+                        staged.unlink()
+                        action = "document.purge_cleanup_completed"
+                    elif original.exists():
+                        if original.stat().st_size != metadata["size_bytes"] or _sha256_file(original) != metadata["sha256"]:
+                            raise ValueError("original path conflicts with uncommitted staged bytes")
+                        staged.unlink()
+                        action = "document.purge_duplicate_staging_removed"
+                    else:
+                        original.parent.mkdir(parents=True, exist_ok=True)
+                        staged.replace(original)
+                        action = "document.purge_uncommitted_restored"
+                elif committed or original.is_file():
+                    action = "document.purge_metadata_cleaned"
+                else:
+                    raise ValueError("both staged and original bytes are missing for an uncommitted purge")
+                metadata_path.unlink()
+                self.db.audit(metadata["organization_id"], None, action, "document", metadata["document_id"], {"purge_id": metadata["purge_id"], "automatic_recovery": True}, metadata["deal_id"])
+            except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+                # Leave uncertain artifacts untouched. The integrity endpoint reports them.
+                continue
 
     def has_users(self) -> bool:
         with self.db.connect() as connection:
@@ -206,7 +268,13 @@ class Service:
         purge_id, created = str(uuid.uuid4()), now()
         staging_root = (self.data_dir / ".purge-staging").resolve()
         staging_root.mkdir(parents=True, exist_ok=True)
-        staged = staging_root / purge_id
+        staged = staging_root / f"{purge_id}.bin"
+        metadata_path = staging_root / f"{purge_id}.json"
+        metadata = {"purge_id": purge_id, "organization_id": organization_id, "deal_id": document["deal_id"], "document_id": document_id, "stored_name": document["stored_name"], "sha256": document["sha256"], "size_bytes": document["size_bytes"]}
+        with metadata_path.open("x", encoding="utf-8") as stream:
+            json.dump(metadata, stream, sort_keys=True)
+            stream.flush()
+            os.fsync(stream.fileno())
         path.replace(staged)
         try:
             with self.db.connect() as connection:
@@ -216,13 +284,19 @@ class Service:
                     raise ValueError("The document purge state changed; no purge was completed")
                 connection.execute("UPDATE documents SET original_purged_at=?,original_purged_by=?,original_purge_reason=?,processing_status='purged' WHERE id=?", (created, user_id, reason[:4000], document_id))
                 connection.execute("INSERT INTO document_purges VALUES(?,?,?,?,?,?,?,?,?)", (purge_id, organization_id, document["deal_id"], document_id, user_id, document["sha256"], document["size_bytes"], reason[:4000], created))
-                staged.unlink()
         except Exception:
             if staged.exists() and not path.exists():
                 staged.replace(path)
+            metadata_path.unlink(missing_ok=True)
             raise
+        cleanup_pending = False
+        try:
+            staged.unlink()
+            metadata_path.unlink()
+        except OSError:
+            cleanup_pending = True
         self.db.audit(organization_id, user_id, "document.original_purged", "document", document_id, {"purge_id": purge_id, "sha256": document["sha256"], "size": document["size_bytes"], "reason": reason[:4000]}, document["deal_id"])
-        return {"id": document_id, "original_purged_at": created, "purge_id": purge_id, "metadata_retained": True}
+        return {"id": document_id, "original_purged_at": created, "purge_id": purge_id, "metadata_retained": True, "cleanup_pending": cleanup_pending}
 
     def operational_integrity(self, organization_id: str) -> dict:
         database = self.db.health()

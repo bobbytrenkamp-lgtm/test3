@@ -11,11 +11,13 @@
 - Mature local PDF/XLSX/image extraction with source-page bounding boxes and optional local Tesseract OCR
 - Side-by-side source review with approve, edit and reject actions
 - 19 deterministic reconciliation controls
-- Approved-only `test2` JSON adapter, test1 unavailable-state adapter and draft source-linked memo
+- Approved-only, parser-validated bounded `test2` JSON adapter; local test1 snapshot adapter; immutable 18-section source-linked memo
+- Immutable semantic rent-roll, operations, lease and debt rows with exact source-cell membership and analyst review navigation
+- Optional, explicitly invoked loopback-only Ollama JSON provider whose output remains candidate-only
 - SQLite audit history with a hash chain
 - No required account, credentials, hosted API, telemetry or document transmission
 
-This is an early functional release, not production-ready. Scanned files use optional locally installed Tesseract; without it they remain visibly queued for manual review. Lease outputs are diligence support, not legal conclusions.
+This is an institutionally controlled **local first-usable release**, not a network-production deployment. Its documented deterministic workflow, governance, recovery, bounded load and accessibility scope are tested; advanced extraction/mapping breadth and external production certification remain explicit limitations. Scanned files use optional locally installed Tesseract; without it they remain visibly queued for manual review. Lease outputs are diligence support, not legal conclusions.
 
 Optional jurisdiction context can read a local test1 clone/export. Set `TEST3_TEST1_DATA_DIR` to its `data` directory and approve a five-digit `county_fips` assumption. The adapter never geocodes, fetches citations, or makes a network request.
 

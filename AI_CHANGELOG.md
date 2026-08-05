@@ -171,3 +171,10 @@
 - Added an analyst table for semantic entity type, canonical fields, document/source row and derived review state.
 - Linked each entity to a constituent cell in the exact source viewer without adding a row-level approval bypass.
 - Extended the live first-release response assertion to require rent-roll and operating semantic records.
+
+## 2026-08-04 — semantic export and release-hardening tranches
+
+- Mapped fully approved, schema-complete semantic spaces, tenants, leases, expenses and debt into test2, with per-row fail-closed diagnostics and real parser evidence at audited test2 commit `9a0581e`.
+- Expanded category-scoped fictional header aliases and added negative tests preventing cross-category semantic assignment.
+- Added an opt-in loopback-only Ollama probe/JSON-generation interface with redirect blocking, prompt bounds, structured validation, required provenance metadata and candidate-only outputs.
+- Re-ran complete local and GitHub CI gates after each focused pull request and updated the final institutional-readiness boundary.

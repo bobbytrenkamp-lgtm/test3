@@ -2,6 +2,10 @@
 
 Date: 2026-08-04
 
+## Authoritative institutional gap audit
+
+`docs/institutional-readiness-audit.md` is now the authoritative completion matrix. Infrastructure, zero-cost controls, test1, minimal test2, readiness, retention, load/restore and bounded browser accessibility are evidenced. The full objective is not complete: reconciliation inputs are not consistently reachable from runtime fields, semantic tabular extraction/spreadsheet source viewing is partial, exports are not persisted/versioned artifacts, and the memo/test2 mappings are minimal. P0 begins with a canonical reconciliation field contract and one automated OM + rent-roll + T-12 first-release workflow.
+
 ## Purge crash-recovery update
 
 Original-byte purge now writes a durable bounded sidecar before same-volume staging. On startup, exact database/path/size/hash checks restore uncommitted bytes or finish deletion after a committed tombstone; uncertain artifacts remain untouched and fail readiness. Both crash boundaries are simulated in the 62-test suite and produce hash-chained recovery events. Next: formal full-spec gap matrix and implementation of the highest remaining product-coverage gaps.
@@ -47,7 +51,7 @@ Reconciliation reruns no longer delete discrepancies. Every run is immutable and
 
 ## Current failures and limitations
 
-No automated test or smoke-test failure is open. Complex/scanned PDF extraction, optional local Tesseract, test1 snapshot mapping, actual test2 import execution, hardened multi-user/network authentication, browser e2e/accessibility automation, load testing and restore testing remain incomplete. Therefore the project is not production-ready and direct test2 compatibility is not claimed.
+No automated gate is failing. The remaining blockers are product-coverage gaps, not the previously listed test1/test2/load/browser work: canonical runtime reconciliation inputs, semantic table models and spreadsheet source viewing, persisted export versions, complete memo sections and a single three-document first-release E2E. Network binding remains intentionally refused; optional local Tesseract/model capabilities are not required for deterministic core use. The project is not production-ready.
 
 ## Verification performed
 

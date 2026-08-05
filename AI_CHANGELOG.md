@@ -1,5 +1,12 @@
 # AI changelog
 
+## 2026-08-04 — institutional requirement gap audit
+
+- Re-evaluated every original product/security/testing/release area against current code, tests, CI, adapter and browser evidence.
+- Identified that isolated reconciliation-rule tests do not prove runtime reachability and that semantic tables, persisted exports, expanded test2 entities and the full IC memo remain incomplete.
+- Replaced stale roadmap statuses with evidence-bounded current states and added a ranked P0/P1/P2 backlog.
+- Kept the project explicitly not production-ready; no code path, dependency or external service was added.
+
 ## 2026-08-04 — destructive purge crash recovery
 
 - Added a durable bounded sidecar before original-byte staging, without copying document content or the purge reason into metadata.

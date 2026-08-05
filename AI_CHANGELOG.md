@@ -166,3 +166,8 @@
 - Bound every semantic record to its document/version/source row, canonical SHA-256 and exact extracted-cell IDs.
 - Derived entity approval from all constituent append-only cell decisions, preventing row-level approval bypass.
 - Added semantic integrity verification, schema version 3 and backward-readable backup format 5.0.
+## 2026-08-04 — semantic entity review surface tranche
+
+- Added an analyst table for semantic entity type, canonical fields, document/source row and derived review state.
+- Linked each entity to a constituent cell in the exact source viewer without adding a row-level approval bypass.
+- Extended the live first-release response assertion to require rent-roll and operating semantic records.

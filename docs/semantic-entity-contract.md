@@ -7,3 +7,5 @@ Every record stores organization/deal/document/version/category, entity type, on
 Semantic approval is derived rather than independently editable. A record is `approved` only when all constituent cells are approved through the existing append-only review-decision chain; any rejected cell makes it rejected, and every other combination remains `needs_review`. This prevents a row-level shortcut around human cell review.
 
 The initial deterministic header contract covers required rent-roll identity/area/dates/rent/options/status fields, operating account/classification/monthly/annual values, lease premises/rent/recovery/options/rights fields and debt lender/rate/leverage/fee/reserve/extension fields. Missing headers remain missing and are never replaced with zero.
+
+The analyst semantic-row table shows canonical fields, source document/row and derived state. “Open source cell” navigates to the first constituent value in the exact PDF/image/table source viewer; reviewers continue to approve or reject the individual source cells rather than bypassing them at row level.

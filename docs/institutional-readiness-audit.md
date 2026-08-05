@@ -16,7 +16,7 @@ The project has a strong zero-cost local foundation and meaningful controls, but
 | PDF/XLSX/CSV/PNG/JPEG support | Proven, bounded | MIME/signature checks, PDFium/openpyxl/Pillow, optional local Tesseract, corrupt/unsafe tests | No extraction-accuracy benchmark; OCR requires separately installed local executable |
 | Secure ingestion and original preservation | Proven | Independent MIME, size/archive limits, SHA-256, duplicate constraint, UUID paths, processing versions, no macro execution, purge/recovery, explicit malware-unavailable state | No actual malware engine by design; full-media erasure remains operator duty |
 | Complete extraction provenance model | Mostly proven | Deal/document/version/category/raw/normalized/unit/currency/page/bbox/excerpt/hash/method/version/confidence/validation/review/reviewer/comment/supersession columns | Spreadsheet coordinates are logical cells, not a rendered exact-source viewer; dynamic row fields lack governed semantic types |
-| Required OM/rent-roll/operations/lease/debt extractions | Mostly proven | 57 governed scalars plus immutable source-cell-backed rent-roll, operating account/period, lease schedule/options/rights and debt-term rows; derived approval, integrity and bounded downstream mappings | Broader header corpus and multi-sheet ingestion remain bounded |
+| Required OM/rent-roll/operations/lease/debt extractions | Mostly proven | 57 governed scalars plus immutable source-cell-backed rent-roll, operating account/period, lease schedule/options/rights and debt-term rows; category-scoped common header aliases, negative-boundary tests, derived approval, integrity and bounded downstream mappings | Corpus remains fictional and XLSX ingestion remains first-worksheet-only |
 | Exact click-through source review | Proven for supported source semantics | PDF/image page rendering and normalized bounding-box evidence; bounded non-executing CSV/XLSX table endpoint and highlighted logical cell navigation; excerpt fallback | Tabular view is intentionally logical rather than pixel-identical and covers the first XLSX worksheet |
 | Human approval and controlling-source governance | Proven | Typed approvals, rejection rationale, append-only decision chain, explicit supersession, approved-only export | Dynamic unregistered table cells can be reviewed but lack downstream semantic governance |
 | Nineteen deterministic reconciliation rules | Mostly proven | All scalar inputs are registry-governed; a real approval/service workflow persists sixteen named findings; date comparison is type-correct; immutable input-hashed runs retain supersession/resolution; combined HTTP workflow is proven | Some structured-list rules remain outside semantic-row reconciliation |
@@ -40,7 +40,7 @@ The project has a strong zero-cost local foundation and meaningful controls, but
 
 ### P1 — semantic diligence coverage
 
-1. Expand fictional header/category-negative coverage for the governed semantic entities; approved bounded mappings are now parser-validated.
+1. Continue expanding the fictional semantic corpus only from reviewed examples; common header aliases and category-negative boundaries are now tested.
 2. Extend current first-worksheet XLSX navigation only if multi-sheet semantic ingestion is added; do not claim pixel-identical rendering.
 3. Expand scalar registry coverage across every explicitly required named extraction, with positive/category-negative fixtures.
 4. Add advanced test2 mappings only with approved source semantics and execute each new shape through the real parser fixture.

@@ -30,6 +30,7 @@ from test3.ollama import validate_local_endpoint
 from test3.permissions import require
 from test3.reconciliation import RECONCILIATION_SCALAR_FIELDS, reconcile
 from test3.security import detect_mime, safe_filename, sanitize_text, sha256_bytes, validate_upload
+from test3.semantic import derive_entities
 from test3.service import Service
 from test3.test1_snapshot import Test1SnapshotError, load_snapshot
 
@@ -486,6 +487,45 @@ class ReconciliationTests(unittest.TestCase):
     def test_tenant_variation_is_suggestion_not_merge(self):
         findings = reconcile({"tenant_names":["Example Holdings LLC","Example Holding LLC"]})
         self.assertEqual(findings[0].rule_code, "TENANT_NAME_VARIATION")
+
+
+class SemanticHeaderContractTests(unittest.TestCase):
+    @staticmethod
+    def cells(headers_and_values):
+        return [
+            {"id": f"cell-{index}", "field_name": f"row.2.{header}", "raw_value": value, "normalized_value": value}
+            for index, (header, value) in enumerate(headers_and_values, 1)
+        ]
+
+    def test_rent_roll_header_variants_map_to_canonical_fields(self):
+        entities = derive_entities("rent_roll", self.cells([
+            ("tenant_legal_name", "Fictional Tenant LLC"), ("suite_no", "410"),
+            ("rsf", "12000"), ("lease_start", "2025-01-01"), ("lease_end", "2030-12-31"),
+        ]))
+        self.assertEqual(len(entities), 1)
+        self.assertEqual(entities[0]["data"], {"tenant_name":"Fictional Tenant LLC", "suite":"410", "rentable_area":"12000", "lease_commencement":"2025-01-01", "lease_expiration":"2030-12-31"})
+
+    def test_operating_statement_header_variants_map_to_canonical_fields(self):
+        t12 = derive_entities("t12_operating_statement", self.cells([("line_item", "Insurance"), ("category", "expense"), ("t12_total", "90000")]))
+        historical = derive_entities("historical_operating_statement", self.cells([("account_name", "Taxes"), ("account_classification", "expense"), ("year_total", "120000")]))
+        self.assertEqual(t12[0]["data"]["annual_total"], "90000")
+        self.assertEqual(historical[0]["data"]["account_label"], "Taxes")
+
+    def test_lease_and_debt_header_variants_map_to_canonical_fields(self):
+        lease = derive_entities("commercial_lease", self.cells([("lessee", "Fictional Tenant"), ("leased_premises", "Suite 8"), ("rsf", "8000"), ("lease_start", "2026-01-01"), ("lease_end", "2031-12-31"), ("initial_base_rent", "28"), ("rent_basis", "per_area_per_year"), ("status", "occupied")]))
+        debt = derive_entities("debt_quote", self.cells([("lender_name", "Fictional Bank"), ("commitment", "5000000"), ("closing_date", "2026-01-01"), ("loan_type", "acquisition"), ("interest_rate_type", "fixed"), ("fixed_rate", "0.06"), ("term_months", "60")]))
+        self.assertEqual(lease[0]["data"]["premises"], "Suite 8")
+        self.assertEqual(lease[0]["data"]["base_rent_basis"], "per_area_per_year")
+        self.assertEqual(debt[0]["data"]["loan_amount"], "5000000")
+        self.assertEqual(debt[0]["data"]["funding_date"], "2026-01-01")
+
+    def test_headers_never_cross_document_category_boundaries(self):
+        rent_cells = self.cells([("tenant_legal_name", "Fictional Tenant LLC"), ("rsf", "12000")])
+        self.assertEqual(derive_entities("offering_memorandum", rent_cells), [])
+        self.assertEqual(derive_entities("debt_quote", rent_cells), [])
+        account_cells = self.cells([("line_item", "Insurance"), ("t12_total", "90000")])
+        self.assertEqual(derive_entities("rent_roll", account_cells), [])
+        self.assertEqual(derive_entities("unknown", account_cells), [])
 
 
 class AdapterTests(unittest.TestCase):

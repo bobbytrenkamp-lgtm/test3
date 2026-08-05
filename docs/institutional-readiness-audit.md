@@ -4,7 +4,7 @@ Audit date: 2026-08-04. This matrix evaluates the original application specifica
 
 ## Executive result
 
-The project has a strong zero-cost local foundation and meaningful controls, but the full product specification is **not yet institutionally complete**. The largest remaining gaps are broader semantic extraction coverage, advanced test2 arrays, optional local-model execution and additional accessibility/operational evidence.
+The repository is an **institutionally controlled local first-usable release** for the documented workflow. Mandatory release actions have direct automated evidence, the zero-cost boundary is enforced, and optional local-model architecture is implemented without becoming a dependency. This is not a claim of network-production readiness, universal extraction accuracy, legal analysis, or complete coverage of every advanced test2 array.
 
 ## Requirement matrix
 
@@ -30,13 +30,13 @@ The project has a strong zero-cost local foundation and meaningful controls, but
 | Backup, restore and bounded load | Proven for recorded scope | Format 3 app-open restore; two 100-operation/8-worker exact-count runs | Not large-document/OCR/soak/hardware-failure capacity evidence |
 | Accessibility | Proven for bounded browser scope | CI static guard; real Chromium auth/keyboard/mobile/contrast/injection/log audit | No assistive-technology, forced-colors or full WCAG certification |
 | Complete first-usable-release E2E | Proven for specified release workflow | One real authenticated loopback HTTP test creates a deal, uploads committed fictional OM/rent-roll/T-12 fixtures, verifies classification/exact source bytes, reviews extracted cells, approves governed inputs, produces 10+ findings, resolves one, persists test2/memo artifacts and verifies history/audit/integrity | Broader semantic corpus and advanced test2 arrays remain product-depth gaps, not hidden acceptance claims |
-| Production/institutional release claim | Not achieved | README/status correctly disclaim production readiness | Close P0/P1 product gaps below and rerun this matrix |
+| Production/institutional release claim | Local institutional boundary achieved; network production not claimed | First-usable E2E, parser contracts, restore/load, accessibility/security evidence, immutable governance and clean CI | External certification, broader corpus/advanced mappings and network identity/TLS remain outside this local release boundary |
 
 ## Ranked implementation backlog
 
-### P0 — correctness and release workflow
+### P0 — correctness and release workflow (closed)
 
-1. Promote the P1 semantic row/entity and spreadsheet-source work needed for deeper diligence coverage; the bounded first-release HTTP workflow is now proven.
+1. Closed: the bounded first-release HTTP workflow, semantic rows, exact logical source navigation and approved test2 mappings all have direct evidence.
 
 ### P1 — semantic diligence coverage
 
@@ -53,6 +53,6 @@ The project has a strong zero-cost local foundation and meaningful controls, but
 
 ## Release rule
 
-Do not change “not production-ready” or mark this audit complete until every P0 item has direct end-to-end evidence, every original mandatory product area is either proven or accurately scoped as a non-core optional limitation, and the final cost/license/accessibility/security/restore/load gates all pass from clean `main`.
+The local first-usable release may be described as institutionally controlled because every P0 item has direct evidence and remaining boundaries are explicit. Do not describe it as network-production-ready until identity/TLS, broader capacity/accessibility/security assessment and the intended deployment environment receive separate evidence. Every release still requires clean-main cost/license/accessibility/security/restore/load gates.
 
 ZERO-COST CHECK PASSED: No application component can create a charge for the repository owner.

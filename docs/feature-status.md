@@ -20,6 +20,6 @@
 | Operational integrity/readiness | Tested | Admin-only DB/schema/FK, chain, streamed-original and purge-staging probe; zero network requests |
 | Backup/restore drill | Tested | Format 3 schema/table contract, manifest hashes, SQLite integrity and application-open readiness in disposable restore |
 | Bounded concurrency/load | Tested | Two 100-operation/8-worker exact-count runs, zero failures; see resilience evidence |
-| Original-document retention/purge | Tested | Admin reauthentication, integrity verification, byte deletion, HTTP 410 and immutable tombstone; backups/history unaffected |
+| Original-document retention/purge | Tested | Admin reauthentication, durable staging, startup rollback/finish recovery, integrity verification, HTTP 410 and immutable tombstone; backups/history unaffected |
 | Accessibility | Tested, bounded | CI static guard plus real Chromium auth/keyboard/mobile/contrast audit; assistive-tech/zoom/forced-colors certification remains |
-| Security/performance/restore hardening | In development | Auth/retention/schema/readiness, measured bounded load, application-open restore and browser security/accessibility tested; interrupted-operation recovery remains |
+| Security/performance/restore hardening | In development | Auth/retention/schema/readiness, purge crash recovery, measured bounded load, application-open restore and browser security/accessibility tested; final gap audit remains |

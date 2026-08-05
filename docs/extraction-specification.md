@@ -10,3 +10,5 @@ Every candidate stores document/version/category, raw and normalized values, reg
 
 XLSX formulas, macros, external links and embedded scripts are never evaluated. Macro-enabled workbooks are rejected by independent archive inspection. PDF/image bounding boxes use normalized top-left coordinates for rendered-page highlighting. Tabular rows retain source-specific `row.<row>.<header>` names so repeated tenants and periods are never collapsed into a single scalar. No benchmark or accuracy claim is made.
 
+CSV/XLSX source review uses an authenticated, bounded logical table view: at most 500 rows, 200 columns per row and 20,000 visible cells. The stored cell coordinate selects and outlines the exact escaped cell. The endpoint reports truncation and formula non-execution; XLSX viewing currently covers the first worksheet and does not claim pixel-identical formatting.
+

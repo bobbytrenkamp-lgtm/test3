@@ -154,3 +154,9 @@
 - Proved the complete defined analyst workflow through real authenticated loopback HTTP routes and a fresh database.
 - Required exact source retrieval, review decisions, eleven reachable discrepancies, resolution, immutable test2/memo artifacts, audit actions and final operational integrity.
 - Documented the acceptance boundary: scalar assumptions are governed, while deeper semantic table models remain an explicit P1 gap.
+## 2026-08-04 — tabular source navigation tranche
+
+- Added an authenticated, organization-scoped CSV/XLSX table source endpoint using existing guarded local parsers.
+- Bounded previews to 500 rows, 200 columns and 20,000 cells with explicit truncation and formula non-execution metadata.
+- Rendered escaped cells in the analyst source pane and highlighted the exact stored logical coordinate.
+- Added live HTTP coverage for all three CSV release fixtures and a fictional XLSX source.

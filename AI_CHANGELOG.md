@@ -142,3 +142,9 @@
 - Added per-deal/kind versioning, actor/schema metadata, append-only triggers and organization-scoped history/retrieval APIs.
 - Extended operational integrity and backup format 4.0 to cover artifact presence and hash validity.
 - Updated the browser to acknowledge the locally saved artifact version while preserving content rendering.
+## 2026-08-04 — complete IC memo tranche
+
+- Replaced the minimal five-element summary with stable `test3-ic-memo/2.0` coverage of all 18 required areas.
+- Limited factual sections to approved values with local document/page links or user-entered rationale.
+- Added received/missing sources, explicit missing sections, excluded-value disclosures, deterministic diligence questions/risks and cautiously labeled review steps.
+- Rendered the complete schema with escaped content and local links inside the analyst interface; memo artifacts remain deterministic and local.

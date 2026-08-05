@@ -81,3 +81,6 @@ All scalar reconciliation keys now belong to the 57-field governed registry. `RE
 ## Immutable export artifact update
 
 Schema version 2 and backup format 4.0 now preserve every generated test1/test2/memo payload with independent canonical content and approval-snapshot hashes, per-kind version, schema, actor and UTC time. Append-only triggers, scoped retrieval/history, live HTTP coverage and operational re-hashing are implemented. The next P0 item is the complete IC memo inside this artifact envelope, followed by the combined fictional OM/rent-roll/T-12 release workflow.
+## Complete IC memo update
+
+The deterministic `test3-ic-memo/2.0` artifact now contains all 18 required sections. Approved facts link to local documents/pages, unapproved values are isolated as unverified, missing source/section states are explicit, and risks/questions/possible review steps derive only from open deterministic findings. The next P0 is the single fictional OM + rent roll + T-12 HTTP workflow; semantic tabular entities and spreadsheet cell viewing are its remaining prerequisites.

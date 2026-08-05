@@ -4,7 +4,7 @@ Audit date: 2026-08-04. This matrix evaluates the original application specifica
 
 ## Executive result
 
-The project has a strong zero-cost local foundation and meaningful controls, but the full product specification is **not yet institutionally complete**. The largest remaining gaps are product coverage rather than infrastructure: semantic tabular extraction, runtime-reachable reconciliation inputs, persisted/versioned exports, the complete IC memo, and a single automated first-usable-release workflow using three document types.
+The project has a strong zero-cost local foundation and meaningful controls, but the full product specification is **not yet institutionally complete**. The largest remaining gaps are semantic tabular extraction/source navigation, expanded test2 entity mappings and a single automated first-usable-release workflow using three document types.
 
 ## Requirement matrix
 
@@ -23,7 +23,7 @@ The project has a strong zero-cost local foundation and meaningful controls, but
 | Professional 12-area analyst UX | Partial | All named navigation areas represented; real desktop/mobile/security/accessibility evidence | Deal overview/processing are folded into other views; spreadsheet source review and some screens remain minimal |
 | test2 approved-only package | Partial, honestly bounded | Minimal property model passed actual test2 `parseModelInput`; approved-only provenance tested; every generation is an immutable versioned/hash-verified artifact with approval snapshot and history | Buildings/spaces/tenants/leases/rent steps/recoveries/expenses/capital/debt/scenarios are not mapped |
 | test1 optional read-only enrichment | Proven, optional | Actual seven-file local snapshot parsed by hash with approved FIPS, dates/citations/coverage and zero requests | Upstream test1 has no license, so no code/data redistribution; user supplies local files |
-| Full reviewable IC memo | Partial | Draft flag, approved facts, discrepancies and source appendix | Most required sections (sources missing, operations, rollover, debt, risks/mitigants, unverified statements) are absent |
+| Full reviewable IC memo | Proven, deterministic | Stable 18-section schema; approved facts link to local sources; missing/unverified states, operations/rollover/debt areas, deterministic risks/questions, cautiously labeled review steps and deduplicated appendix; immutable versioned artifact tests | Narrative quality is intentionally bounded without a local model; absent information remains explicit rather than invented |
 | Optional local-model provider | Designed only | Loopback URL validation and honest unavailable state | No probe/generation/metadata persistence or structured-output validation; optional core workflows do not depend on it |
 | Security/privacy threat coverage | Strong but bounded | Loopback refusal, auth/CSRF/roles/lockouts/revocation, CSP/escaping, archive limits, audit integrity, retention, backup/restore, browser injection test | No federated identity/TLS network mode (network binding intentionally refused), malware scan, built-in backup encryption or formal external penetration test |
 | Audit integrity and operational readiness | Proven, local | Preventive triggers, independent audit/review verifiers, schema/FK/DB/file/tombstone checks, crash recovery | Hash chains are local, not externally anchored; this is explicitly not claimed otherwise |
@@ -37,8 +37,7 @@ The project has a strong zero-cost local foundation and meaningful controls, but
 ### P0 — correctness and release workflow
 
 1. Complete the HTTP/three-document release workflow around the now-proven canonical scalar contract and sixteen-rule approved service workflow; connect structured list rules to semantic entities.
-2. Complete required IC memo content within the now-persisted immutable export artifact contract.
-3. Add fictional OM, rent-roll and T-12 fixtures that exercise classification, semantic extraction, source review, approvals, reconciliation, resolution, export, memo and audit.
+2. Add fictional OM, rent-roll and T-12 fixtures that exercise classification, semantic extraction, source review, approvals, reconciliation, resolution, export, memo and audit.
 
 ### P1 — semantic diligence coverage
 

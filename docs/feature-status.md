@@ -14,7 +14,7 @@
 | Approval governance and manual assumptions | Tested | Immutable source values, typed approvals, append-only/hash-chained decisions and explicit supersession |
 | test2 export | Tested, minimal | Real `cre-platform-model` shape passed test2's own `parseModelInput`; non-ready packages are explicitly blocked |
 | test1 enrichment | Tested, optional | Actual seven-file test1 data directory loaded by hash with freshness/citations; approved FIPS required; no networking |
-| Draft IC memo | Functional, minimal | Approved facts, discrepancies and source appendix; full required section set remains |
+| Draft IC memo | Tested | Stable 18-section schema; approved-only source-linked facts, missing/unverified states, deterministic risks/questions, qualified-review labels, source appendix and immutable artifact history |
 | Optional local model | Designed | Loopback restriction; no generation adapter yet |
 | Audit history | Tested | Independent serialized audit and review-decision hash chains with tamper verifiers |
 | Operational integrity/readiness | Tested | Admin-only DB/schema/FK, chain, streamed-original and purge-staging probe; zero network requests |

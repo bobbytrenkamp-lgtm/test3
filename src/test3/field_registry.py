@@ -87,6 +87,7 @@ FIELD_REGISTRY: tuple[FieldSpec, ...] = (
     _spec("forecast_start_date", "Forecast start date", "date", r"(?i)forecast start(?: date)?\s*[: ]+([A-Za-z0-9, /.-]+)", ("offering_memorandum", "appraisal"), export_target="forecast.startDate"),
     _spec("forecast_months", "Forecast months", "integer", r"(?i)forecast (?:term|period|months)\s*[: ]+([0-9]+)\s*months?", ("offering_memorandum", "appraisal"), unit="months", export_target="forecast.months"),
     _spec("discount_rate", "Discount rate", "rate", r"(?i)discount rate\s*[: ]+([0-9.]+%?)", ("appraisal",), unit="decimal_fraction", export_target="valuation.discountRate"),
+    _spec("market_rent_growth", "Market rent growth", "signed_rate", r"(?i)market rent growth\s*[: ]+([-0-9.]+%?)", ("offering_memorandum", "appraisal"), unit="decimal_fraction", export_target="growthCurves"),
 )
 
 

@@ -36,7 +36,10 @@ def create_backup(data_dir: Path, destination: Path) -> Path:
         upload_root = data_dir / "uploads"
         if upload_root.exists():
             files.extend((path, path.relative_to(data_dir).as_posix()) for path in upload_root.rglob("*") if path.is_file())
-        manifest = {"format": "test3-backup/5.0", "schemaVersion": SCHEMA_VERSION, "createdAt": datetime.now(timezone.utc).isoformat(), "files": {name: {"sha256": _hash(path), "bytes": path.stat().st_size} for path, name in files}}
+        market_root = data_dir / "market-data"
+        if market_root.exists():
+            files.extend((path, path.relative_to(data_dir).as_posix()) for path in market_root.rglob("*") if path.is_file())
+        manifest = {"format": "test3-backup/6.0", "schemaVersion": SCHEMA_VERSION, "createdAt": datetime.now(timezone.utc).isoformat(), "files": {name: {"sha256": _hash(path), "bytes": path.stat().st_size} for path, name in files}}
         with zipfile.ZipFile(destination, "x", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
             for path, name in files:
                 archive.write(path, name)
@@ -52,7 +55,7 @@ def verify_backup(archive_path: Path, max_expanded_bytes: int = 2 * 1024 * 1024 
         if any(Path(info.filename).is_absolute() or ".." in Path(info.filename).parts for info in infos):
             raise ValueError("Backup contains an unsafe path")
         manifest = json.loads(archive.read("manifest.json"))
-        if manifest.get("format") not in ("test3-backup/1.0", "test3-backup/2.0", "test3-backup/3.0", "test3-backup/4.0", "test3-backup/5.0"):
+        if manifest.get("format") not in ("test3-backup/1.0", "test3-backup/2.0", "test3-backup/3.0", "test3-backup/4.0", "test3-backup/5.0", "test3-backup/6.0"):
             raise ValueError("Unsupported backup format")
         root = Path(temporary)
         archive.extractall(root)
@@ -82,12 +85,16 @@ def verify_backup(archive_path: Path, max_expanded_bytes: int = 2 * 1024 * 1024 
                     raise ValueError("Backup database does not match its 4.0 schema/table contract")
             if manifest["format"] == "test3-backup/5.0":
                 count_tables += ("manual_assumptions", "review_decisions", "reconciliation_runs", "document_purges", "export_artifacts", "semantic_entities")
-                if manifest.get("schemaVersion") != SCHEMA_VERSION or not set(count_tables).issubset(available):
+                if manifest.get("schemaVersion") != 3 or not set(count_tables).issubset(available):
                     raise ValueError("Backup database does not match its 5.0 schema/table contract")
+            if manifest["format"] == "test3-backup/6.0":
+                count_tables += ("manual_assumptions", "review_decisions", "reconciliation_runs", "document_purges", "export_artifacts", "semantic_entities", "data_source_snapshots", "market_observations", "model_artifacts", "assumption_runs", "assumption_evidence", "assumption_decision_context")
+                if manifest.get("schemaVersion") != SCHEMA_VERSION or not set(count_tables).issubset(available):
+                    raise ValueError("Backup database does not match its 6.0 schema/table contract")
             counts = {table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in count_tables if table in available}
             organization_ids = [row[0] for row in connection.execute("SELECT id FROM organizations")]
         operational = []
-        if manifest["format"] in ("test3-backup/3.0", "test3-backup/4.0", "test3-backup/5.0"):
+        if manifest["format"] in ("test3-backup/3.0", "test3-backup/4.0", "test3-backup/5.0", "test3-backup/6.0"):
             from .service import Service
             restored = Service(root)
             operational = [restored.operational_integrity(organization_id) for organization_id in organization_ids]

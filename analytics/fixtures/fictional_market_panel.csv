@@ -1,0 +1,5 @@
+period,market_id,market_name,property_type,source,source_date,source_reference,usage_rights,county_fips,rent_growth_12m,vacancy_rate,lease_comp_count
+2024-01-01,EXAMPLE,Fictional Metro,office,Fictional generator,2024-02-01,local://fictional,MIT fixture only,00000,0.018,0.120,24
+2024-04-01,EXAMPLE,Fictional Metro,office,Fictional generator,2024-05-01,local://fictional,MIT fixture only,00000,0.021,0.118,27
+2024-07-01,EXAMPLE,Fictional Metro,office,Fictional generator,2024-08-01,local://fictional,MIT fixture only,00000,0.024,0.115,29
+2024-10-01,EXAMPLE,Fictional Metro,office,Fictional generator,2024-11-01,local://fictional,MIT fixture only,00000,0.026,0.112,31

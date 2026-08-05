@@ -1,5 +1,11 @@
 # AI changelog
 
+## 2026-08-05 — Assumption Intelligence Engine
+
+- Added additive schema version 4 for immutable market evidence, model artifacts, candidate runs, evidence links, and analyst decision context.
+- Added bounded local market CSV import, Test1 economic normalization, rent-growth fallback/confidence logic, analyst approval integration, Test2 sidecar/mapping, backup format 6, UI, offline base-R pipeline, tests, and governance documentation.
+- Preserved the absolute zero-cost constraint; no external runtime, account, credential, or billable service was added.
+
 ## 2026-08-04 — institutional requirement gap audit
 
 - Re-evaluated every original product/security/testing/release area against current code, tests, CI, adapter and browser evidence.

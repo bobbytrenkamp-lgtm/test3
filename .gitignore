@@ -10,5 +10,6 @@ dist/
 data/*.db
 data/uploads/
 data/exports/
+data/market-data/
 !data/.gitkeep
 

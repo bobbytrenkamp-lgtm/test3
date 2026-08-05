@@ -8,7 +8,7 @@
 | Local sign-in, sessions, CSRF and roles | Tested | Fail-closed non-echoing admin bootstrap, explicit demo mode, PBKDF2, uniform-cost checks, lockouts, hashed sessions, rotation/revocation, CSRF and roles; TLS/federation deferred |
 | Secure upload metadata/hash/duplicates | Tested | Synthetic tests |
 | PDF/CSV/XLSX/image support | Tested | Local mature parsers; Tesseract optional and unavailable state tested |
-| Governed field registry | Tested | 40 typed/category-scoped fields with unit, currency and downstream semantics |
+| Governed field registry | Tested | 57 typed/category-scoped fields with unit, currency and downstream semantics; every scalar reconciliation input is covered |
 | Source-linked review | Functional, partial | PDF/image rendered-page browser evidence; CSV/XLSX exact cell/sheet viewer remains |
 | Reconciliation center | Tested | 19 deterministic rules; immutable input-hashed runs and retained supersession history |
 | Approval governance and manual assumptions | Tested | Immutable source values, typed approvals, append-only/hash-chained decisions and explicit supersession |

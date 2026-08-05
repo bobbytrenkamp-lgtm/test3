@@ -74,3 +74,6 @@ The exact dependency set (pypdfium2 5.12.1, Pillow 12.3.0, openpyxl 3.1.5, defus
 
 ZERO-COST CHECK PASSED: No application component can create a charge for the repository owner.
 
+## 2026-08-04 canonical reconciliation contract
+
+All scalar reconciliation keys now belong to the 57-field governed registry. `RECONCILIATION_SCALAR_FIELDS` is checked against `FIELD_BY_NAME`, and the service regression approves 31 assumptions through append-only decisions before asserting sixteen persisted findings. Lease dates are normalized ISO strings and no longer pass through decimal parsing. Structured row/list rules and the combined three-document HTTP release workflow remain open work; do not describe the entire reconciliation requirement as complete yet.

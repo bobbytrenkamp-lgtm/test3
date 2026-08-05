@@ -28,7 +28,7 @@ from test3.load_probe import run_probe
 from test3.normalization import date, number
 from test3.ollama import validate_local_endpoint
 from test3.permissions import require
-from test3.reconciliation import reconcile
+from test3.reconciliation import RECONCILIATION_SCALAR_FIELDS, reconcile
 from test3.security import detect_mime, safe_filename, sanitize_text, sha256_bytes, validate_upload
 from test3.service import Service
 from test3.test1_snapshot import Test1SnapshotError, load_snapshot
@@ -231,6 +231,9 @@ class ExtractionTests(unittest.TestCase):
         self.assertIn("loan_amount", debt_names)
         self.assertNotIn("tenant_name", debt_names)
 
+    def test_every_scalar_reconciliation_input_is_governed(self):
+        self.assertEqual(RECONCILIATION_SCALAR_FIELDS - FIELD_BY_NAME.keys(), set())
+
     def test_registry_normalizes_rates_dates_and_metadata(self):
         candidates = extract_text_candidates(
             "Discount Rate: 7.5%\nMarket Value: $12,500,000",
@@ -341,12 +344,12 @@ class ReconciliationTests(unittest.TestCase):
     def test_ten_or_more_checks_can_fire(self):
         values = {
             "rent_roll_occupied_area":"80","rent_roll_total_area":"100","occupancy":"90","rentable_square_feet":"120",
-            "rent_roll_annualized_rent":"100","operating_rental_revenue":"200","calculated_noi":"50","operating_statement_noi":"60",
-            "historical_noi":"100","pro_forma_noi":"130","lease_expiration":"2026","rent_roll_expiration":"2027",
+            "rent_roll_annualized_rent":"100","operating_rental_revenue":"200","calculated_noi":"50","reported_noi":"60",
+            "historical_noi":"100","pro_forma_noi":"130","lease_expiration_date":"2026-12-31","rent_roll_expiration":"2027-12-31",
             "lease_current_rent":"10","rent_roll_current_rent":"12","lease_area":"100","rent_roll_lease_area":"110",
-            "om_unit_count":"10","rent_roll_unit_count":"11","asking_price":"1000","loi_price":"900","psa_price":"800",
+            "unit_count":"10","rent_roll_unit_count":"11","asking_price":"1000","loi_price":"900","psa_price":"800",
             "capex_line_item_total":"100","capex_stated_total":"120","calculated_ltv":"0.7","stated_ltv":"0.8",
-            "calculated_ltc":"0.6","stated_ltc":"0.7","calculated_all_in_rate":"0.06","stated_interest_rate":"0.07",
+            "calculated_ltc":"0.6","stated_ltc":"0.7","calculated_all_in_rate":"0.06","interest_rate":"0.07",
             "operating_periods":["Jan"]*11,"row_identifiers":["A","A"],"expected_row_count":"10","actual_row_count":"9","ocr_values":["l,OOO"]}
         self.assertGreaterEqual(len(reconcile(values)), 10)
 
@@ -693,6 +696,44 @@ class ServiceTests(unittest.TestCase):
                 connection.execute("UPDATE reconciliation_runs SET finding_count=0 WHERE id=?", (runs[0]["id"],))
         with self.assertRaisesRegex(ValueError, "Only an open finding"):
             self.service.resolve_finding(self.user["organization_id"], self.user["id"], first["id"], "Too late")
+
+    def test_ten_rules_are_reachable_through_approved_service_values(self):
+        approved_values = {
+            "rent_roll_occupied_area": "80", "rent_roll_total_area": "100", "occupancy": "0.90",
+            "rentable_square_feet": "120", "rent_roll_annualized_rent": "100",
+            "operating_rental_revenue": "200", "calculated_noi": "50", "reported_noi": "60",
+            "historical_noi": "100", "pro_forma_noi": "130", "lease_expiration_date": "2026-12-31",
+            "rent_roll_expiration": "2027-12-31", "lease_current_rent": "10",
+            "rent_roll_current_rent": "12", "lease_area": "100", "rent_roll_lease_area": "110",
+            "unit_count": "10", "rent_roll_unit_count": "11", "asking_price": "1000", "loi_price": "900",
+            "psa_price": "800", "capex_line_item_total": "100", "capex_stated_total": "120",
+            "calculated_ltv": "0.70", "stated_ltv": "0.80", "calculated_ltc": "0.60",
+            "stated_ltc": "0.70", "calculated_all_in_rate": "0.06", "interest_rate": "0.07",
+            "expected_row_count": "10", "actual_row_count": "9",
+        }
+        for field_name, value in approved_values.items():
+            assumption = self.service.create_assumption(
+                self.user["organization_id"], self.user["id"], self.deal_id,
+                {"field_name": field_name, "proposed_value": value, "rationale": "Fictional governed source"},
+            )
+            self.service.review_assumption(
+                self.user["organization_id"], self.user["id"], assumption["id"], "approved", value, "Checked against fictional source",
+            )
+
+        results = self.service.run_reconciliation(self.user["organization_id"], self.user["id"], self.deal_id)
+        codes = {item["rule_code"] for item in results}
+        expected_codes = {
+            "OCCUPANCY_AREA", "AREA_OM_VS_RENT_ROLL", "RENT_VS_OPERATIONS", "NOI_LINE_ITEMS",
+            "NOI_HISTORICAL_VS_PRO_FORMA", "LEASE_DATES", "LEASE_RENT", "LEASE_AREA", "UNIT_COUNT",
+            "PRICE_OM_VS_LOI", "PRICE_LOI_VS_PSA", "CAPEX_TOTAL", "DEBT_LTV", "DEBT_LTC",
+            "ALL_IN_RATE", "DROPPED_ROWS",
+        }
+        self.assertTrue(expected_codes <= codes)
+        self.assertGreaterEqual(len(results), 10)
+        findings = self.service.deal(self.deal_id, self.user["organization_id"])["findings"]
+        self.assertEqual(len(findings), len(results))
+        self.assertTrue(all(item["resolution_status"] == "open" for item in findings))
+        self.assertTrue(all(item["source_documents"] == ["User-entered assumption"] for item in findings))
 
     def test_backup_and_temporary_restore_drill(self):
         content = b"Tenant,Rent\nExample,100\n"

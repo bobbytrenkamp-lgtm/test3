@@ -501,7 +501,7 @@ class Service:
             document = documents_by_id.get(item.get("document_id"))
             item["document_sha256"] = document["sha256"] if document else None
         if kind == "test2":
-            result = test2_export(snapshot["deal"], approved, snapshot["findings"])
+            result = test2_export(snapshot["deal"], approved, snapshot["findings"], snapshot["entities"])
         elif kind == "memo":
             result = diligence_summary(snapshot["deal"], approved, snapshot["findings"], snapshot["documents"], snapshot["values"])
         elif kind == "test1":

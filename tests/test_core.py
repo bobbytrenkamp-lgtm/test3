@@ -518,6 +518,48 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(portable["model"]["property"]["rentableArea"], "125000")
         self.assertNotIn("acquisitionPrice", portable["model"]["valuation"])
 
+    def test_export_maps_only_complete_approved_semantic_entities(self):
+        approved = self.approved + [
+            {"field_name":"forecast_start_date","normalized_value":"2026-01-01","review_status":"approved","document_id":"doc-2"},
+            {"field_name":"forecast_months","normalized_value":"120","review_status":"approved","document_id":"doc-2"},
+            {"field_name":"discount_rate","normalized_value":"0.075","review_status":"approved","document_id":"doc-2"},
+        ]
+        entities = [
+            {"id":"rr-1", "entity_type":"rent_roll_record", "review_status":"approved", "data":{"tenant_name":"Fictional Tenant LLC", "suite":"200", "rentable_area":"12500", "lease_commencement":"2025-01-01", "lease_expiration":"2030-12-31", "current_rent":"31.50", "rent_unit":"per_area_per_year", "occupancy_status":"occupied"}},
+            {"id":"op-1", "entity_type":"operating_account_period", "review_status":"approved", "data":{"account_label":"Repairs and maintenance", "account_classification":"expense", "annual_total":"85000"}},
+            {"id":"debt-1", "entity_type":"debt_term_record", "review_status":"approved", "data":{"lender":"Fictional Local Bank", "loan_amount":"7000000", "funding_date":"2026-01-01", "debt_type":"acquisition", "rate_type":"fixed", "interest_rate":"0.061", "term":"60"}},
+            {"id":"rr-pending", "entity_type":"rent_roll_record", "review_status":"needs_review", "data":{"tenant_name":"Unreviewed"}},
+            {"id":"rr-incomplete", "entity_type":"rent_roll_record", "review_status":"approved", "data":{"tenant_name":"Incomplete"}},
+        ]
+        result = test2_export(self.deal, approved, [], entities)
+        model = result["test2PortableModel"]["model"]
+        self.assertEqual(len(model["spaces"]), 1)
+        self.assertEqual(len(model["tenants"]), 1)
+        self.assertEqual(len(model["leases"]), 1)
+        self.assertEqual(len(model["expenses"]), 1)
+        self.assertEqual(len(model["debt"]), 1)
+        self.assertEqual(model["leases"][0]["baseRentBasis"], "per_area_per_year")
+        self.assertEqual(model["expenses"][0]["method"], "fixed_annual")
+        self.assertEqual(model["debt"][0]["fixedRate"], "0.061")
+        self.assertNotIn("initialFunding", model["debt"][0])
+        self.assertEqual(result["mappingDiagnostics"]["mappedSemanticEntityCount"], 3)
+        self.assertEqual(result["mappingDiagnostics"]["skippedSemanticEntityCount"], 2)
+        reasons = {item["entityId"]: item.get("reason") for item in result["mappingDiagnostics"]["semanticEntities"]}
+        self.assertEqual(reasons["rr-pending"], "entity is not fully approved")
+        self.assertIn("required value", reasons["rr-incomplete"])
+
+    def test_export_rejects_unsupported_semantic_enums_without_blocking_base_model(self):
+        approved = self.approved + [
+            {"field_name":"forecast_start_date","normalized_value":"2026-01-01","review_status":"approved","document_id":"doc-2"},
+            {"field_name":"forecast_months","normalized_value":"120","review_status":"approved","document_id":"doc-2"},
+            {"field_name":"discount_rate","normalized_value":"0.075","review_status":"approved","document_id":"doc-2"},
+        ]
+        entities = [{"id":"rr-unsafe", "entity_type":"rent_roll_record", "review_status":"approved", "data":{"tenant_name":"Fictional", "suite":"1", "rentable_area":"100", "lease_commencement":"2025-01-01", "lease_expiration":"2030-01-01", "current_rent":"10", "rent_unit":"dollars", "occupancy_status":"active"}}]
+        result = test2_export(self.deal, approved, [], entities)
+        self.assertTrue(result["mappingDiagnostics"]["importReady"])
+        self.assertEqual(result["test2PortableModel"]["model"]["leases"], [])
+        self.assertEqual(result["mappingDiagnostics"]["semanticEntities"][0]["reason"], "rent basis is missing or unsupported")
+
     def test_export_rejects_percent_style_discount_rate(self):
         approved = self.approved + [
             {"field_name":"forecast_start_date","normalized_value":"2026-01-01","review_status":"approved","document_id":"doc-2"},

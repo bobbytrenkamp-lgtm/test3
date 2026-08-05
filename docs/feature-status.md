@@ -12,7 +12,7 @@
 | Source-linked review | Functional, partial | PDF/image rendered-page browser evidence; CSV/XLSX exact cell/sheet viewer remains |
 | Reconciliation center | Tested | 19 deterministic rules; immutable input-hashed runs and retained supersession history |
 | Approval governance and manual assumptions | Tested | Immutable source values, typed approvals, append-only/hash-chained decisions and explicit supersession |
-| test2 export | Tested, minimal | Real `cre-platform-model` shape passed test2's own `parseModelInput`; non-ready packages are explicitly blocked |
+| test2 export | Tested, bounded | Minimal and expanded `cre-platform-model` shapes passed test2's own `parseModelInput`; fully approved rows map to spaces/tenants/leases/expenses/debt with fail-closed row diagnostics; advanced arrays remain intentionally unmapped |
 | test1 enrichment | Tested, optional | Actual seven-file test1 data directory loaded by hash with freshness/citations; approved FIPS required; no networking |
 | Draft IC memo | Tested | Stable 18-section schema; approved-only source-linked facts, missing/unverified states, deterministic risks/questions, qualified-review labels, source appendix and immutable artifact history |
 | Optional local model | Designed | Loopback restriction; no generation adapter yet |
@@ -26,4 +26,4 @@
 | Immutable export artifacts | Tested | Per-kind versions, canonical content/approval hashes, actor/schema metadata, append-only database guards, scoped retrieval/history, readiness and backup coverage |
 | First usable release E2E | Tested | Live authenticated HTTP workflow with committed fictional OM/rent-roll/T-12 fixtures, exact source retrieval/review, 10+ findings, resolution, immutable exports/memo, audit and integrity |
 | CSV/XLSX exact logical source view | Tested | Authenticated bounded table endpoint, escaped cell rendering, selected-coordinate highlight and explicit no-formula execution; first worksheet only |
-| Governed semantic table entities | Tested | Immutable rent-roll, operating account/period, lease schedule/options and debt-term rows with hashes, exact source-cell membership, derived approval, analyst row/source UI and readiness/backup coverage |
+| Governed semantic table entities | Tested | Immutable rent-roll, operating account/period, lease schedule/options and debt-term rows with hashes, exact source-cell membership, derived approval, analyst row/source UI, bounded test2 mappings and readiness/backup coverage |

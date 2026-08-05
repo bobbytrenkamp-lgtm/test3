@@ -21,5 +21,5 @@
 | Backup/restore drill | Tested | Format 3 schema/table contract, manifest hashes, SQLite integrity and application-open readiness in disposable restore |
 | Bounded concurrency/load | Tested | Two 100-operation/8-worker exact-count runs, zero failures; see resilience evidence |
 | Original-document retention/purge | Tested | Admin reauthentication, integrity verification, byte deletion, HTTP 410 and immutable tombstone; backups/history unaffected |
-| Accessibility | In development | Semantic/responsive UI; automated review pending |
-| Security/performance/restore hardening | In development | Auth/retention/schema/readiness, measured bounded load and application-open restore tested; accessibility/recovery operations remain |
+| Accessibility | Tested, bounded | CI static guard plus real Chromium auth/keyboard/mobile/contrast audit; assistive-tech/zoom/forced-colors certification remains |
+| Security/performance/restore hardening | In development | Auth/retention/schema/readiness, measured bounded load, application-open restore and browser security/accessibility tested; interrupted-operation recovery remains |

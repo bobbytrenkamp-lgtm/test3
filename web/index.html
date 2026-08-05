@@ -5,14 +5,14 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="Local-first commercial real estate diligence workspace">
   <title>test3 · Diligence Workspace</title>
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/styles.css?v=0.1.0">
   <link rel="stylesheet" href="/signin.css">
   <link rel="stylesheet" href="/source-viewer.css">
   <link rel="stylesheet" href="/forms.css">
   <link rel="stylesheet" href="/jurisdiction.css">
 </head>
 <body>
-  <a class="skip-link" href="#main">Skip to workspace</a>
+  <a class="skip-link" href="#main" inert aria-hidden="true">Skip to workspace</a>
   <section id="signin" class="signin" aria-labelledby="signin-title">
     <form id="signin-form" class="signin-card">
       <span class="brand-mark">t3</span><p class="eyebrow">LOCAL WORKSPACE</p><h1 id="signin-title">Sign in to test3</h1>
@@ -22,12 +22,12 @@
       <button class="primary" type="submit">Sign in locally</button><small>Initialize locally with test3-init-admin. Fictional credentials require explicit demo mode.</small>
     </form>
   </section>
-  <header class="topbar">
+  <header class="topbar" inert aria-hidden="true">
     <div class="brand"><span class="brand-mark">t3</span><span>test3</span><small>DEAL DILIGENCE</small></div>
     <div class="privacy"><span class="status-dot"></span> Local-only · No external transmission</div>
-    <button id="user-menu" class="user-chip" aria-label="Current user">CA</button>
+    <button id="top-signout" class="user-chip" aria-label="Sign out current user">—</button>
   </header>
-  <div class="shell">
+  <div class="shell" inert aria-hidden="true">
     <nav class="sidebar" aria-label="Primary navigation">
       <button class="nav-item active" data-view="pipeline"><span>▦</span> Deal pipeline</button>
       <button class="nav-item" data-view="documents"><span>▤</span> Document room</button>
@@ -48,7 +48,7 @@
         <div class="panel"><div class="panel-head"><h2>Current deals</h2><input id="deal-search" type="search" placeholder="Search deals" aria-label="Search deals"></div><div id="deal-list" class="deal-list"><p class="empty">Loading local workspace…</p></div></div>
       </section>
       <section id="documents" class="view" aria-labelledby="documents-title">
-        <div class="page-head"><div><p class="eyebrow">SOURCE ROOM</p><h1 id="documents-title">Document room</h1><p id="documents-subtitle">Originals are preserved with SHA-256 provenance.</p></div><label class="primary upload-label">Upload document<input id="upload" type="file" accept=".pdf,.csv,.xlsx,.png,.jpg,.jpeg" multiple></label></div>
+        <div class="page-head"><div><p class="eyebrow">SOURCE ROOM</p><h1 id="documents-title">Document room</h1><p id="documents-subtitle">Originals are preserved with SHA-256 provenance.</p></div><div><button id="upload-trigger" class="primary" type="button">Upload document</button><input id="upload" type="file" accept=".pdf,.csv,.xlsx,.png,.jpg,.jpeg" multiple hidden></div></div>
         <div class="notice"><strong>Malware scanning:</strong> not available in this local release. Files are never executed; macros and formulas are not evaluated.</div>
         <div class="panel"><div class="panel-head"><h2>Source documents</h2><span id="document-count" class="badge">0 files</span></div><div id="document-list" class="document-grid"></div></div>
       </section>
@@ -69,6 +69,6 @@
   <dialog id="review-dialog"><form method="dialog" id="review-form"><div class="dialog-head"><h2 id="review-dialog-title">Review value</h2><button value="cancel" aria-label="Close">×</button></div><label>Normalized value<input name="normalized_value" id="review-normalized" maxlength="1000"></label><label>Review rationale<textarea name="comments" id="review-comments" maxlength="2000"></textarea></label><div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button value="default" class="primary" id="submit-review">Record decision</button></div></form></dialog>
   <dialog id="resolution-dialog"><form method="dialog" id="resolution-form"><div class="dialog-head"><h2>Resolve finding</h2><button value="cancel" aria-label="Close">×</button></div><label>Controlling source and resolution rationale<textarea name="notes" id="resolution-notes" required maxlength="4000"></textarea></label><div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button value="default" class="primary" id="submit-resolution">Record resolution</button></div></form></dialog>
   <dialog id="purge-dialog"><form method="dialog" id="purge-form"><div class="dialog-head"><h2>Purge original document bytes</h2><button value="cancel" aria-label="Close">×</button></div><p class="form-note"><strong id="purge-document-name"></strong><br>This cannot be undone. Provenance metadata, extracted records, decisions and audit history remain. Existing backups are not changed.</p><label>Specific purge reason<textarea id="purge-reason" required minlength="12" maxlength="4000"></textarea></label><label>Current administrator password<input id="purge-password" type="password" required autocomplete="current-password"></label><div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button value="default" class="primary" id="submit-purge">Purge original bytes</button></div></form></dialog>
-  <script src="/app.js" defer></script>
+  <script src="/app.js?v=0.1.0" defer></script>
 </body>
 </html>

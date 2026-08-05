@@ -1,5 +1,13 @@
 # AI changelog
 
+## 2026-08-04 — real-browser accessibility and client-security hardening
+
+- Used the in-app browser skill against the exact loopback app at desktop and 390×844 mobile sizes with fictional data only.
+- Fixed signed-out workspace reachability, missing mobile sign-out, keyboard-inaccessible upload, low-contrast helper text and mixed cached asset revisions.
+- Verified semantic heading/control structure, no horizontal mobile overflow, sampled contrast (minimum 4.73:1), inert stored injection strings, session revocation and empty warning/error logs.
+- Added a dependency-free CI accessibility guard for semantics, references, labeling, alt text, auth isolation, focus and reduced-motion contracts.
+- Recorded reproducible evidence and limitations; no hosted accessibility scanner, external service or new dependency was added.
+
 ## 2026-08-04 — measured concurrency and application-open recovery
 
 - Added a code-bounded local-only concurrent workload using temporary fictional deals/documents and exact persistence/audit assertions.

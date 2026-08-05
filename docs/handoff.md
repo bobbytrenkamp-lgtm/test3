@@ -90,3 +90,6 @@ One live authenticated HTTP regression now proves the entire defined first-relea
 ## Tabular source navigation update
 
 CSV and first-worksheet XLSX candidates now open a bounded, non-executing logical table view with exact selected-cell highlighting. The endpoint is authenticated/organization-scoped and reports truncation plus formula non-execution. Next: semantic rent-roll, operating-period/account, lease-schedule/option and debt-term entities; the table viewer is now available to support their review.
+## Semantic diligence entity update
+
+Schema version 3 and backup format 5 now preserve immutable rent-roll, operating-account/period, lease-schedule/options and debt-term entities. Each row is hash-bound to exact source cells and becomes approved only when all those cells are approved through the existing decision chain. Operational integrity verifies hashes and membership. Next: expose semantic rows in the analyst UI and map approved entities into real test2 arrays with parser evidence.

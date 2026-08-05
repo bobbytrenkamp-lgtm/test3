@@ -15,6 +15,7 @@ from .extraction import normalize_value, process
 from .field_registry import FIELD_BY_NAME
 from .reconciliation import as_dicts, reconcile
 from .security import sha256_bytes, validate_upload
+from .semantic import derive_entities
 from .test1_snapshot import Test1SnapshotError, load_snapshot
 
 
@@ -168,6 +169,7 @@ class Service:
                 raise LookupError("Deal not found")
             documents = [dict(row) for row in connection.execute("SELECT * FROM documents WHERE deal_id=? AND organization_id=? ORDER BY uploaded_at DESC", (deal_id, organization_id))]
             values = [dict(row) for row in connection.execute("SELECT * FROM extracted_values WHERE deal_id=? AND organization_id=? ORDER BY created_at", (deal_id, organization_id))]
+            entities = [dict(row) for row in connection.execute("SELECT * FROM semantic_entities WHERE deal_id=? AND organization_id=? ORDER BY document_id,source_row", (deal_id, organization_id))]
             assumptions = [dict(row) for row in connection.execute("SELECT * FROM manual_assumptions WHERE deal_id=? AND organization_id=? ORDER BY created_at", (deal_id, organization_id))]
             decisions = [dict(row) for row in connection.execute("SELECT * FROM review_decisions WHERE deal_id=? AND organization_id=? ORDER BY rowid", (deal_id, organization_id))]
             findings = [dict(row) for row in connection.execute("SELECT * FROM findings WHERE deal_id=? AND organization_id=? ORDER BY created_at DESC", (deal_id, organization_id))]
@@ -202,7 +204,14 @@ class Service:
         for finding in findings:
             for key in ("compared_values_json", "source_documents_json", "page_references_json"):
                 finding[key.removesuffix("_json")] = json.loads(finding.pop(key))
-        return {"deal": dict(deal), "documents": documents, "values": values, "findings": findings, "audit": audit, "review_decisions": decisions}
+        status_by_value = {item["id"]: item["review_status"] for item in values}
+        for entity in entities:
+            entity["data"] = json.loads(entity.pop("data_json"))
+            source_ids = json.loads(entity.pop("source_value_ids_json"))
+            entity["source_value_ids"] = source_ids
+            statuses = [status_by_value.get(source_id, "missing") for source_id in source_ids]
+            entity["review_status"] = "approved" if statuses and all(status == "approved" for status in statuses) else ("rejected" if any(status == "rejected" for status in statuses) else "needs_review")
+        return {"deal": dict(deal), "documents": documents, "values": values, "entities": entities, "findings": findings, "audit": audit, "review_decisions": decisions}
 
     def create_deal(self, organization_id: str, user_id: str, payload: dict) -> dict:
         name = str(payload.get("name", "")).strip()
@@ -242,12 +251,17 @@ class Service:
         with self.db.connect() as connection:
             connection.execute("INSERT INTO documents(id,organization_id,deal_id,original_name,stored_name,detected_mime,category,sha256,size_bytes,uploader_id,uploaded_at,processing_status,malware_scan_status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (document_id, organization_id, deal_id, safe_name, stored_name, mime, category, digest, len(content), user_id, created, status, "not_available"))
             connection.execute("INSERT INTO document_versions VALUES(?,?,?,?,?)", (str(uuid.uuid4()), document_id, 1, "test3-deterministic/2.0", created))
+            inserted_cells = []
             for candidate in candidates:
                 value_id = str(uuid.uuid4())
                 source_hash = hashlib.sha256(candidate.excerpt.encode()).hexdigest()
                 connection.execute("INSERT INTO extracted_values(id,organization_id,deal_id,document_id,document_version,document_category,field_name,raw_value,normalized_value,unit,currency,page_number,bbox_json,source_excerpt,source_text_hash,extraction_method,extractor_version,confidence,validation_status,review_status,reviewer_id,reviewed_at,comments,superseded_value_id,final_approved_value_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (value_id, organization_id, deal_id, document_id, 1, category, candidate.field, candidate.raw, candidate.normalized, candidate.unit, candidate.currency, candidate.page, json.dumps(candidate.bbox) if candidate.bbox else None, candidate.excerpt, source_hash, candidate.method, "2.0", candidate.confidence, "valid" if candidate.normalized is not None else "needs_review", "needs_review", None, None, error, None, None, created))
+                inserted_cells.append({"id": value_id, "field_name": candidate.field, "raw_value": candidate.raw, "normalized_value": candidate.normalized})
+            entities = derive_entities(category, inserted_cells)
+            for entity in entities:
+                connection.execute("INSERT INTO semantic_entities VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (str(uuid.uuid4()), organization_id, deal_id, document_id, 1, category, entity["entity_type"], entity["source_row"], entity["data_json"], entity["data_sha256"], json.dumps(entity["source_value_ids"]), "semantic-table/1.0", created))
         self.db.audit(organization_id, user_id, "document.uploaded", "document", document_id, {"sha256": digest, "size": len(content), "mime": mime, "category": category, "processing": status, "warning": error}, deal_id)
-        return {"id": document_id, "category": category, "status": status, "sha256": digest, "candidates": len(candidates), "warning": error}
+        return {"id": document_id, "category": category, "status": status, "sha256": digest, "candidates": len(candidates), "semanticEntities": len(entities), "warning": error}
 
     def purge_original_document(self, organization_id: str, user_id: str, document_id: str, reason: str) -> dict:
         reason = str(reason or "").strip()
@@ -305,6 +319,8 @@ class Service:
         with self.db.connect() as connection:
             documents = connection.execute("SELECT deal_id,stored_name,sha256,size_bytes,original_purged_at FROM documents WHERE organization_id=?", (organization_id,)).fetchall()
             artifacts = connection.execute("SELECT id,content_json,content_sha256,approval_snapshot_json,approval_snapshot_sha256 FROM export_artifacts WHERE organization_id=?", (organization_id,)).fetchall()
+            semantic_entities = connection.execute("SELECT id,deal_id,document_id,data_json,data_sha256,source_value_ids_json FROM semantic_entities WHERE organization_id=?", (organization_id,)).fetchall()
+            extracted_membership = {(row["id"], row["deal_id"], row["document_id"]) for row in connection.execute("SELECT id,deal_id,document_id FROM extracted_values WHERE organization_id=?", (organization_id,)).fetchall()}
         storage = {"activeOriginals": 0, "purgedTombstones": 0, "missingActiveOriginals": 0, "integrityMismatches": 0, "unexpectedPurgedOriginals": 0, "unsafePaths": 0}
         upload_root = self.upload_dir.resolve()
         for document in documents:
@@ -333,7 +349,18 @@ class Service:
             for item in artifacts
         )
         artifact_integrity = {"count": len(artifacts), "hashMismatches": artifact_mismatches}
-        return {"ok": database["ok"] and audit_valid and review_valid and storage_ok and artifact_mismatches == 0, "checkedAt": now(), "database": database, "chains": chains, "storage": storage, "exports": artifact_integrity, "purgeStagingFiles": staging_files, "networkRequests": 0}
+        semantic_hash_mismatches, semantic_source_mismatches = 0, 0
+        for entity in semantic_entities:
+            if hashlib.sha256(entity["data_json"].encode()).hexdigest() != entity["data_sha256"]:
+                semantic_hash_mismatches += 1
+            try:
+                source_ids = json.loads(entity["source_value_ids_json"])
+                if not isinstance(source_ids, list) or not source_ids or any((source_id, entity["deal_id"], entity["document_id"]) not in extracted_membership for source_id in source_ids):
+                    semantic_source_mismatches += 1
+            except (json.JSONDecodeError, TypeError):
+                semantic_source_mismatches += 1
+        semantic_integrity = {"count": len(semantic_entities), "hashMismatches": semantic_hash_mismatches, "sourceMismatches": semantic_source_mismatches}
+        return {"ok": database["ok"] and audit_valid and review_valid and storage_ok and artifact_mismatches == 0 and semantic_hash_mismatches == 0 and semantic_source_mismatches == 0, "checkedAt": now(), "database": database, "chains": chains, "storage": storage, "exports": artifact_integrity, "semanticEntities": semantic_integrity, "purgeStagingFiles": staging_files, "networkRequests": 0}
 
     def review_value(self, organization_id: str, user_id: str, value_id: str, status: str, normalized_value: str | None, comments: str = "") -> dict:
         normalized_value = None if normalized_value is None else str(normalized_value)

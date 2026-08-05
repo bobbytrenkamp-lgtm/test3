@@ -160,3 +160,9 @@
 - Bounded previews to 500 rows, 200 columns and 20,000 cells with explicit truncation and formula non-execution metadata.
 - Rendered escaped cells in the analyst source pane and highlighted the exact stored logical coordinate.
 - Added live HTTP coverage for all three CSV release fixtures and a fictional XLSX source.
+## 2026-08-04 — semantic diligence entity tranche
+
+- Added immutable governed rent-roll, operating account/period, lease schedule/options and debt-term row entities.
+- Bound every semantic record to its document/version/source row, canonical SHA-256 and exact extracted-cell IDs.
+- Derived entity approval from all constituent append-only cell decisions, preventing row-level approval bypass.
+- Added semantic integrity verification, schema version 3 and backward-readable backup format 5.0.

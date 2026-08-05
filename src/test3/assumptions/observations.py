@@ -41,6 +41,8 @@ def parse_market_panel(content: bytes) -> tuple[dict, list[dict], list[dict]]:
         row = {str(key).strip(): (value.strip() if isinstance(value, str) else value) for key, value in source_row.items()}
         row_errors = []
         try:
+            if any(str(value or "").lstrip().startswith(("=", "+", "@")) for value in source_row.values()):
+                raise ValueError("row contains a prohibited spreadsheet formula")
             row["period"] = iso_date(row.get("period"), "period")
             row["source_date"] = iso_date(row.get("source_date"), "source_date")
             row["county_fips"] = validate_county_fips(row.get("county_fips"))

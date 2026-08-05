@@ -18,9 +18,12 @@ from .security import sha256_bytes, validate_upload
 from .semantic import derive_entities
 from .test1_snapshot import Test1SnapshotError, load_snapshot
 from .assumptions.observations import parse_market_panel, rows_to_observations, canonical_hash
-from .assumptions.rent_growth import recommend_market_rent_growth
 from .assumptions.artifacts import load_artifact
 from .assumptions.test1_economic import load_test1_economic
+from .assumptions.recommend import recommend
+from .assumptions.catalog import BY_NAME, public_catalog
+from .assumptions.profiling import profile_observations
+from .assumptions.analysis import benchmark_matrix, correlation_matrix
 
 
 def _sha256_file(path: Path) -> str:
@@ -162,6 +165,7 @@ class Service:
             public_user["csrf_token"] = user["csrf_token"]
         return {
             "user": public_user, "deals": deals, "zeroCost": True, "localOnly": True,
+            "assumptionCatalog": public_catalog(),
             "manualAssumptionFields": [
                 {"name": field.name, "label": field.label, "unit": field.unit, "currency": field.currency}
                 for field in FIELD_BY_NAME.values()
@@ -219,25 +223,35 @@ class Service:
             entity["review_status"] = "approved" if statuses and all(status == "approved" for status in statuses) else ("rejected" if any(status == "rejected" for status in statuses) else "needs_review")
         with self.db.connect() as connection:
             runs = [dict(row) for row in connection.execute("SELECT * FROM assumption_runs WHERE deal_id=? AND organization_id=? ORDER BY created_at DESC", (deal_id, organization_id))]
-            snapshots = [dict(row) for row in connection.execute("SELECT * FROM data_source_snapshots WHERE deal_id=? AND organization_id=? ORDER BY created_at DESC", (deal_id, organization_id))]
-            observations = [dict(row) for row in connection.execute("SELECT o.* FROM market_observations o JOIN data_source_snapshots s ON s.id=o.snapshot_id WHERE o.organization_id=? AND s.deal_id=? ORDER BY o.observation_date", (organization_id, deal_id))]
+            snapshots = [dict(row) for row in connection.execute("SELECT * FROM data_source_snapshots WHERE (deal_id=? OR deal_id IS NULL) AND organization_id=? ORDER BY created_at DESC", (deal_id, organization_id))]
+            observations = [dict(row) for row in connection.execute("SELECT o.* FROM market_observations o JOIN data_source_snapshots s ON s.id=o.snapshot_id WHERE o.organization_id=? AND (s.deal_id=? OR s.deal_id IS NULL) ORDER BY o.observation_date", (organization_id, deal_id))]
             decision_contexts = [dict(row) for row in connection.execute("SELECT * FROM assumption_decision_context WHERE deal_id=? AND organization_id=? ORDER BY created_at DESC", (deal_id, organization_id))]
         for run in runs:
             for key in ("evidence_snapshot_ids_json", "input_features_json", "confidence_components_json", "limitations_json"):
                 run[key.removesuffix("_json")] = json.loads(run.pop(key))
-        return {"deal": dict(deal), "documents": documents, "values": values, "entities": entities, "findings": findings, "audit": audit, "review_decisions": decisions, "assumption_runs": runs, "data_source_snapshots": snapshots, "market_observations": observations, "assumption_decision_contexts": decision_contexts}
+        return {"deal": dict(deal), "documents": documents, "values": values, "entities": entities, "findings": findings, "audit": audit, "review_decisions": decisions, "assumption_runs": runs, "data_source_snapshots": snapshots, "market_observations": observations, "data_profile": profile_observations(observations), "benchmark_matrix": benchmark_matrix(observations), "correlation_matrix": correlation_matrix(observations), "assumption_decision_contexts": decision_contexts}
 
-    def import_market_panel(self, organization_id: str, user_id: str, deal_id: str, filename: str, content: bytes, metadata: dict) -> dict:
+    def import_market_panel(self, organization_id: str, user_id: str, deal_id: str | None, filename: str, content: bytes, metadata: dict) -> dict:
         parsed, rows, errors = parse_market_panel(content)
         if not rows:
             raise ValueError("Market panel contains no valid observations")
         required = ("source_name", "source_version", "as_of_date", "licensing_notes")
         if any(not str(metadata.get(key, "")).strip() for key in required):
             raise ValueError("Source name, version, as-of date and licensing notes are required")
+        try:
+            datetime.strptime(str(metadata["as_of_date"]), "%Y-%m-%d")
+        except ValueError as error:
+            raise ValueError("Source as-of date must use YYYY-MM-DD") from error
+        if metadata.get("freshness_state", "unknown") not in ("current", "stale", "unknown"):
+            raise ValueError("Freshness state must be current, stale or unknown")
         snapshot_id, created = str(uuid.uuid4()), now()
+        with self.db.connect() as connection:
+            if connection.execute("SELECT 1 FROM data_source_snapshots WHERE organization_id=? AND (deal_id=? OR (deal_id IS NULL AND ? IS NULL)) AND content_sha256=?", (organization_id, deal_id, deal_id, parsed["fileSha256"])).fetchone():
+                raise ValueError("This exact market panel was already imported for the deal")
         stored_name = f"{snapshot_id}.csv"
-        destination = (self.market_data_dir / organization_id / deal_id / stored_name).resolve()
-        expected = (self.market_data_dir / organization_id / deal_id).resolve()
+        storage_scope = deal_id or "_global"
+        destination = (self.market_data_dir / organization_id / storage_scope / stored_name).resolve()
+        expected = (self.market_data_dir / organization_id / storage_scope).resolve()
         if expected not in destination.parents:
             raise ValueError("Unsafe market-data storage path")
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -247,7 +261,7 @@ class Service:
         property_types = sorted({row.get("property_type") for row in rows})
         with self.db.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            if not connection.execute("SELECT 1 FROM deals WHERE id=? AND organization_id=?", (deal_id, organization_id)).fetchone():
+            if deal_id and not connection.execute("SELECT 1 FROM deals WHERE id=? AND organization_id=?", (deal_id, organization_id)).fetchone():
                 raise LookupError("Deal not found")
             connection.execute("INSERT INTO data_source_snapshots VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (snapshot_id, organization_id, deal_id, "market_panel", str(metadata["source_name"])[:200], str(metadata["source_version"])[:100], str(metadata["as_of_date"]), created, json.dumps({filename: parsed["fileSha256"]}, sort_keys=True), parsed["schemaVersion"], json.dumps(coverage), "market", json.dumps(property_types), str(metadata["licensing_notes"])[:2000], str(metadata.get("freshness_state", "unknown")), "partial" if errors else "valid", user_id, parsed["fileSha256"], stored_name, created))
             for item in observations:
@@ -255,24 +269,29 @@ class Service:
         self.db.audit(organization_id, user_id, "market_panel.imported", "data_source_snapshot", snapshot_id, {"file_sha256": parsed["fileSha256"], "valid_rows": len(rows), "invalid_rows": len(errors), "observations": len(observations)}, deal_id)
         return {"snapshotId": snapshot_id, "validRows": len(rows), "invalidRows": len(errors), "observationCount": len(observations), "errors": errors, "fileSha256": parsed["fileSha256"]}
 
-    def run_market_rent_growth(self, organization_id: str, user_id: str, deal_id: str, context: dict) -> dict:
+    def run_assumption_intelligence(self, organization_id: str, user_id: str, deal_id: str, assumption_type: str, context: dict) -> dict:
+        if assumption_type not in BY_NAME:
+            raise ValueError("Unsupported assumption type")
         with self.db.connect() as connection:
             deal = connection.execute("SELECT * FROM deals WHERE id=? AND organization_id=?", (deal_id, organization_id)).fetchone()
             if not deal:
                 raise LookupError("Deal not found")
-            observations = [dict(row) for row in connection.execute("SELECT o.* FROM market_observations o JOIN data_source_snapshots s ON s.id=o.snapshot_id WHERE o.organization_id=? AND s.deal_id=? ORDER BY o.observation_date", (organization_id, deal_id))]
-        recommendation = recommend_market_rent_growth(dict(deal), observations, dict(context or {}))
+            observations = [dict(row) for row in connection.execute("SELECT o.* FROM market_observations o JOIN data_source_snapshots s ON s.id=o.snapshot_id WHERE o.organization_id=? AND (s.deal_id=? OR s.deal_id IS NULL) ORDER BY o.observation_date", (organization_id, deal_id))]
+        recommendation = recommend(assumption_type, dict(deal), observations, dict(context or {}))
         run_id, created = str(uuid.uuid4()), now()
         recommendation["id"] = run_id
         run_hash = canonical_hash({**recommendation, "createdBy": user_id, "createdAt": created})
         snapshot_ids = sorted({row["snapshot_id"] for row in observations if row["id"] in recommendation.get("supportingEvidence", [])})
         with self.db.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            connection.execute("INSERT INTO assumption_runs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (run_id, organization_id, deal_id, "market_rent_growth", None, json.dumps(snapshot_ids), json.dumps(recommendation.get("inputFeatures", {}), sort_keys=True), recommendation.get("inputSha256", canonical_hash({})), created, recommendation.get("low"), recommendation.get("base"), recommendation.get("high"), recommendation.get("modelEstimate"), recommendation.get("benchmarkEstimate"), recommendation.get("confidence", "unavailable"), json.dumps(recommendation.get("confidenceComponents", {}), sort_keys=True), recommendation.get("dataCompleteness", 0), recommendation.get("freshnessScore", 0), recommendation.get("geographicMatchScore", 0), recommendation.get("propertyMatchScore", 0), int(recommendation.get("outOfDomain", False)), recommendation.get("method", "unavailable"), recommendation.get("fallbackLevel", "unavailable"), json.dumps(recommendation.get("limitations", [])), recommendation.get("rationale", "Candidate only; analyst approval required."), json.dumps(recommendation.get("dataWindow")) if recommendation.get("dataWindow") else None, recommendation.get("sampleCount", 0), run_hash, user_id, created))
+            connection.execute("INSERT INTO assumption_runs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (run_id, organization_id, deal_id, assumption_type, None, json.dumps(snapshot_ids), json.dumps(recommendation.get("inputFeatures", {}), sort_keys=True), recommendation.get("inputSha256", canonical_hash({})), created, recommendation.get("low"), recommendation.get("base"), recommendation.get("high"), recommendation.get("modelEstimate"), recommendation.get("benchmarkEstimate"), recommendation.get("confidence", "unavailable"), json.dumps(recommendation.get("confidenceComponents", {}), sort_keys=True), recommendation.get("dataCompleteness", 0), recommendation.get("freshnessScore", 0), recommendation.get("geographicMatchScore", 0), recommendation.get("propertyMatchScore", 0), int(recommendation.get("outOfDomain", False)), recommendation.get("method", "unavailable"), recommendation.get("fallbackLevel", "unavailable"), json.dumps(recommendation.get("limitations", [])), recommendation.get("rationale", "Candidate only; analyst approval required."), json.dumps(recommendation.get("dataWindow")) if recommendation.get("dataWindow") else None, recommendation.get("sampleCount", 0), run_hash, user_id, created))
             for observation_id in recommendation.get("supportingEvidence", []):
                 connection.execute("INSERT INTO assumption_evidence VALUES(?,?,?,?,?,?,?)", (str(uuid.uuid4()), organization_id, run_id, observation_id, "included", "Selected by the documented fallback hierarchy.", created))
-        self.db.audit(organization_id, user_id, "assumption_run.created", "assumption_run", run_id, {"assumption_type": "market_rent_growth", "run_hash": run_hash, "candidate_only": True}, deal_id)
+        self.db.audit(organization_id, user_id, "assumption_run.created", "assumption_run", run_id, {"assumption_type": assumption_type, "run_hash": run_hash, "candidate_only": True}, deal_id)
         return recommendation
+
+    def run_market_rent_growth(self, organization_id: str, user_id: str, deal_id: str, context: dict) -> dict:
+        return self.run_assumption_intelligence(organization_id, user_id, deal_id, "market_rent_growth", context)
 
     def install_model_artifact(self, organization_id: str, user_id: str, artifact_path: Path) -> dict:
         artifact = load_artifact(artifact_path, Path(__file__).resolve().parents[2])
@@ -430,6 +449,7 @@ class Service:
             documents = connection.execute("SELECT deal_id,stored_name,sha256,size_bytes,original_purged_at FROM documents WHERE organization_id=?", (organization_id,)).fetchall()
             artifacts = connection.execute("SELECT id,content_json,content_sha256,approval_snapshot_json,approval_snapshot_sha256 FROM export_artifacts WHERE organization_id=?", (organization_id,)).fetchall()
             semantic_entities = connection.execute("SELECT id,deal_id,document_id,data_json,data_sha256,source_value_ids_json FROM semantic_entities WHERE organization_id=?", (organization_id,)).fetchall()
+            market_snapshots = connection.execute("SELECT id,deal_id,original_stored_name,content_sha256 FROM data_source_snapshots WHERE organization_id=? AND source_type='market_panel'", (organization_id,)).fetchall()
             extracted_membership = {(row["id"], row["deal_id"], row["document_id"]) for row in connection.execute("SELECT id,deal_id,document_id FROM extracted_values WHERE organization_id=?", (organization_id,)).fetchall()}
         storage = {"activeOriginals": 0, "purgedTombstones": 0, "missingActiveOriginals": 0, "integrityMismatches": 0, "unexpectedPurgedOriginals": 0, "unsafePaths": 0}
         upload_root = self.upload_dir.resolve()
@@ -449,6 +469,16 @@ class Service:
                 continue
             if path.stat().st_size != document["size_bytes"] or _sha256_file(path) != document["sha256"]:
                 storage["integrityMismatches"] += 1
+        market_integrity = {"count": len(market_snapshots), "missingOriginals": 0, "hashMismatches": 0, "unsafePaths": 0}
+        market_root = self.market_data_dir.resolve()
+        for snapshot in market_snapshots:
+            path = (self.market_data_dir / organization_id / (snapshot["deal_id"] or "_global") / snapshot["original_stored_name"]).resolve()
+            if market_root not in path.parents:
+                market_integrity["unsafePaths"] += 1
+            elif not path.is_file():
+                market_integrity["missingOriginals"] += 1
+            elif _sha256_file(path) != snapshot["content_sha256"]:
+                market_integrity["hashMismatches"] += 1
         staging_root = self.data_dir / ".purge-staging"
         staging_files = sum(1 for item in staging_root.iterdir() if item.is_file()) if staging_root.is_dir() else 0
         chains = {"auditValid": audit_valid, "auditBreakId": audit_break, "reviewValid": review_valid, "reviewBreakId": review_break}
@@ -470,7 +500,8 @@ class Service:
             except (json.JSONDecodeError, TypeError):
                 semantic_source_mismatches += 1
         semantic_integrity = {"count": len(semantic_entities), "hashMismatches": semantic_hash_mismatches, "sourceMismatches": semantic_source_mismatches}
-        return {"ok": database["ok"] and audit_valid and review_valid and storage_ok and artifact_mismatches == 0 and semantic_hash_mismatches == 0 and semantic_source_mismatches == 0, "checkedAt": now(), "database": database, "chains": chains, "storage": storage, "exports": artifact_integrity, "semanticEntities": semantic_integrity, "purgeStagingFiles": staging_files, "networkRequests": 0}
+        market_ok = not any(market_integrity[key] for key in ("missingOriginals", "hashMismatches", "unsafePaths"))
+        return {"ok": database["ok"] and audit_valid and review_valid and storage_ok and market_ok and artifact_mismatches == 0 and semantic_hash_mismatches == 0 and semantic_source_mismatches == 0, "checkedAt": now(), "database": database, "chains": chains, "storage": storage, "marketData": market_integrity, "exports": artifact_integrity, "semanticEntities": semantic_integrity, "purgeStagingFiles": staging_files, "networkRequests": 0}
 
     def review_value(self, organization_id: str, user_id: str, value_id: str, status: str, normalized_value: str | None, comments: str = "") -> dict:
         normalized_value = None if normalized_value is None else str(normalized_value)
@@ -611,14 +642,14 @@ class Service:
             document = documents_by_id.get(item.get("document_id"))
             item["document_sha256"] = document["sha256"] if document else None
         if kind == "test2":
-            approved_rent_growth = [item for item in approved if item["field_name"] == "market_rent_growth"]
+            approved_intelligence = [item for item in approved if item["field_name"] in BY_NAME]
             intelligence = {
                 "observedEvidence": snapshot.get("market_observations", []),
                 "modelRecommendations": snapshot.get("assumption_runs", []),
-                "analystApprovedAssumptions": [{"id": item["id"], "field": item["field_name"], "value": item["normalized_value"], "decisionId": item.get("latest_decision_id")} for item in approved_rent_growth],
+                "analystApprovedAssumptions": [{"id": item["id"], "field": item["field_name"], "value": item["normalized_value"], "decisionId": item.get("latest_decision_id")} for item in approved_intelligence],
                 "provenance": snapshot.get("assumption_decision_contexts", []),
                 "snapshotMetadata": snapshot.get("data_source_snapshots", []),
-                "mappingNote": "Only analyst-approved market rent growth is mapped to a standalone Test2 growth curve. Linking that curve to a leasing profile remains an explicit Test2 analyst action.",
+                "mappingNote": "Only analyst-approved supported growth assumptions map to standalone Test2 growth curves. Linking curves or unsupported assumptions to specific underwriting objects remains an explicit Test2 analyst action.",
             }
             result = test2_export(snapshot["deal"], approved, snapshot["findings"], snapshot["entities"], assumption_intelligence=intelligence)
         elif kind == "memo":

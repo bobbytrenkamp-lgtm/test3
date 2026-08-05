@@ -84,3 +84,6 @@ Schema version 2 and backup format 4.0 now preserve every generated test1/test2/
 ## Complete IC memo update
 
 The deterministic `test3-ic-memo/2.0` artifact now contains all 18 required sections. Approved facts link to local documents/pages, unapproved values are isolated as unverified, missing source/section states are explicit, and risks/questions/possible review steps derive only from open deterministic findings. The next P0 is the single fictional OM + rent roll + T-12 HTTP workflow; semantic tabular entities and spreadsheet cell viewing are its remaining prerequisites.
+## First usable release acceptance update
+
+One live authenticated HTTP regression now proves the entire defined first-release workflow against three committed fictional OM/rent-roll/T-12 fixtures, including exact source retrieval, extracted-cell review, governed approvals, eleven discrepancies, resolution, immutable test2/memo artifacts, audit and final zero-network integrity. P0 product correctness is closed at its documented boundary. Next: P1 semantic tenant/lease/period/account entities, spreadsheet cell viewer and expanded test2 arrays.

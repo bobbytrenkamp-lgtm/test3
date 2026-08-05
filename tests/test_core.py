@@ -659,6 +659,36 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(retrieved["approvalSnapshot"][0]["entityId"], value["id"])
         self.assertEqual(self.service.export_history(self.user["organization_id"], self.deal_id)[0]["contentSha256"], envelope["artifact"]["contentSha256"])
 
+    def test_semantic_rows_retain_cells_and_inherit_append_only_approval(self):
+        fixtures = (
+            ("fictional-rent-roll.csv", b"Tenant,Suite,Rentable Area,Current Rent,Lease Expiration,Renewal Options\nTenant A,101,1000,2000,2027-12-31,One five-year option\n", "rent_roll_record", "tenant_name"),
+            ("fictional-t12-operating-statement.csv", b"Account,Classification,Jan,Feb,Annual Total\nRental Revenue,revenue,100,110,210\n", "operating_account_period", "account_label"),
+            ("fictional-lease-agreement.csv", b"Tenant,Premises,Base Rent,Renewal Options,Termination Rights\nTenant A,Suite 101,2000,One option,None\n", "lease_schedule_record", "base_rent"),
+            ("fictional-debt-quote.csv", b"Lender,Loan Amount,Interest Rate,Spread,Term,Extension Options\nFictional Bank,1000000,0.06,0.02,60,One year\n", "debt_term_record", "lender"),
+        )
+        for filename, content, entity_type, required_field in fixtures:
+            uploaded = self.service.upload(self.user["organization_id"], self.user["id"], self.deal_id, filename, content)
+            self.assertEqual(uploaded["semanticEntities"], 1)
+            entity = next(item for item in self.service.deal(self.deal_id, self.user["organization_id"])["entities"] if item["document_id"] == uploaded["id"])
+            self.assertEqual(entity["entity_type"], entity_type)
+            self.assertIn(required_field, entity["data"])
+            self.assertEqual(entity["review_status"], "needs_review")
+            self.assertEqual(len(entity["data_sha256"]), 64)
+            for value_id in entity["source_value_ids"]:
+                value = next(item for item in self.service.deal(self.deal_id, self.user["organization_id"])["values"] if item["id"] == value_id)
+                self.service.review_value(self.user["organization_id"], self.user["id"], value_id, "approved", value["normalized_value"], "Verified fictional source cell")
+            approved = next(item for item in self.service.deal(self.deal_id, self.user["organization_id"])["entities"] if item["id"] == entity["id"])
+            self.assertEqual(approved["review_status"], "approved")
+        with self.service.db.connect() as connection:
+            entity_id = connection.execute("SELECT id FROM semantic_entities LIMIT 1").fetchone()[0]
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute("UPDATE semantic_entities SET data_json='{}' WHERE id=?", (entity_id,))
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute("DELETE FROM semantic_entities WHERE id=?", (entity_id,))
+        integrity = self.service.operational_integrity(self.user["organization_id"])
+        self.assertTrue(integrity["ok"])
+        self.assertEqual(integrity["semanticEntities"], {"count": 4, "hashMismatches": 0, "sourceMismatches": 0})
+
     def test_institutional_admin_initialization_and_rotation_revoke_sessions(self):
         with tempfile.TemporaryDirectory() as temporary:
             service = Service(Path(temporary))
@@ -915,10 +945,11 @@ class ServiceTests(unittest.TestCase):
         create_backup(Path(self.temp.name), destination)
         report = verify_backup(destination)
         self.assertTrue(report["valid"])
-        self.assertEqual(report["format"], "test3-backup/4.0")
-        self.assertEqual(report["schemaVersion"], 2)
+        self.assertEqual(report["format"], "test3-backup/5.0")
+        self.assertEqual(report["schemaVersion"], 3)
         self.assertTrue(report["restoredOperationalIntegrity"])
         self.assertEqual(report["counts"]["documents"], 1)
+        self.assertEqual(report["counts"]["semantic_entities"], 1)
         self.assertGreaterEqual(report["fileCount"], 2)
         with self.assertRaisesRegex(ValueError, "overwrite"):
             create_backup(Path(self.temp.name), destination)

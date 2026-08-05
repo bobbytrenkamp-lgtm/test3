@@ -12,3 +12,5 @@ XLSX formulas, macros, external links and embedded scripts are never evaluated. 
 
 CSV/XLSX source review uses an authenticated, bounded logical table view: at most 500 rows, 200 columns per row and 20,000 visible cells. The stored cell coordinate selects and outlines the exact escaped cell. The endpoint reports truncation and formula non-execution; XLSX viewing currently covers the first worksheet and does not claim pixel-identical formatting.
 
+Recognized category-specific table headers also create immutable semantic entities without replacing cell evidence. Rent-roll, operating-account/period, lease-schedule and debt-term records retain canonical data hashes, source rows and constituent cell IDs. Approval is inherited only after every mapped source cell is approved; details are in `docs/semantic-entity-contract.md`.
+

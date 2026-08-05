@@ -201,14 +201,16 @@ def _test2_model(deal: dict, values: dict[str, object], semantic_entities: list[
 
     semantic_arrays, semantic_diagnostics = _semantic_arrays(deal_id, semantic_entities or [])
     growth_curves = []
-    if values.get("market_rent_growth") not in (None, ""):
+    for growth_field, growth_name in (("market_rent_growth", "Market rent growth"), ("expense_growth", "Operating expense growth"), ("property_tax_growth", "Property tax growth"), ("insurance_growth", "Insurance growth"), ("construction_cost_growth", "Construction cost growth")):
+        if values.get(growth_field) in (None, ""):
+            continue
         try:
-            growth_rate = Decimal(str(values["market_rent_growth"]))
+            growth_rate = Decimal(str(values[growth_field]))
             if not Decimal("-1") <= growth_rate <= Decimal("1"):
                 raise ValueError
-            growth_curves.append({"id": _stable_id(deal_id, "market-rent-growth"), "name": "Analyst-approved market rent growth", "defaultRate": format(growth_rate, "f"), "byYear": []})
+            growth_curves.append({"id": _stable_id(deal_id, growth_field.replace("_", "-")), "name": f"Analyst-approved {growth_name.lower()}", "defaultRate": format(growth_rate, "f"), "byYear": []})
         except (InvalidOperation, TypeError, ValueError):
-            errors.append("approved market_rent_growth must be a decimal fraction from -1 through 1")
+            errors.append(f"approved {growth_field} must be a decimal fraction from -1 through 1")
             return None, errors, semantic_diagnostics
 
     return {

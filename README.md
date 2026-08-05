@@ -6,7 +6,7 @@
 
 ## What works in this release
 
-- Governed Assumption Intelligence for local market-panel evidence and market-rent-growth candidate ranges
+- Governed Assumption Intelligence across 15 assumption domains, with local market-panel evidence, benchmark matrices, correlations, data-quality profiles and candidate ranges
 - Immutable source snapshots, observations, model artifacts, runs, evidence links, and analyst decision context
 - Offline base-R reference pipeline with conspicuously fictional synthetic fixtures and outputs
 - Approved-only Test2 growth-curve mapping plus a non-controlling evidence/recommendation sidecar

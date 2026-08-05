@@ -1,5 +1,11 @@
 # AI changelog
 
+## 2026-08-05 — Multi-domain assumption data platform
+
+- Generalized the first rent-growth slice into 15 governed assumption domains and expanded the import metric dictionary.
+- Added local data coverage/quality profiles, segmented benchmark matrices, exact-match descriptive correlations, scalable SQLite indexes, broader Test2 growth-curve mappings, and market-original integrity checks.
+- Added a zero-cost source-acquisition catalog and comprehensive assumption data dictionary.
+
 ## 2026-08-05 — Assumption Intelligence Engine
 
 - Added additive schema version 4 for immutable market evidence, model artifacts, candidate runs, evidence links, and analyst decision context.

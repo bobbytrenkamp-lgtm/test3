@@ -200,6 +200,16 @@ def _test2_model(deal: dict, values: dict[str, object], semantic_entities: list[
             return None, errors, []
 
     semantic_arrays, semantic_diagnostics = _semantic_arrays(deal_id, semantic_entities or [])
+    growth_curves = []
+    if values.get("market_rent_growth") not in (None, ""):
+        try:
+            growth_rate = Decimal(str(values["market_rent_growth"]))
+            if not Decimal("-1") <= growth_rate <= Decimal("1"):
+                raise ValueError
+            growth_curves.append({"id": _stable_id(deal_id, "market-rent-growth"), "name": "Analyst-approved market rent growth", "defaultRate": format(growth_rate, "f"), "byYear": []})
+        except (InvalidOperation, TypeError, ValueError):
+            errors.append("approved market_rent_growth must be a decimal fraction from -1 through 1")
+            return None, errors, semantic_diagnostics
 
     return {
         "modelId": _stable_id(deal_id, "model"),
@@ -214,7 +224,7 @@ def _test2_model(deal: dict, values: dict[str, object], semantic_entities: list[
             **({"rentableArea": rentable_area} if rentable_area not in (None, "") else {}),
             **({"unitCount": unit_count} if unit_count not in (None, "") else {}),
         },
-        "growthCurves": [], "spaces": semantic_arrays["spaces"], "tenants": semantic_arrays["tenants"], "leases": semantic_arrays["leases"],
+        "growthCurves": growth_curves, "spaces": semantic_arrays["spaces"], "tenants": semantic_arrays["tenants"], "leases": semantic_arrays["leases"],
         "marketLeasingProfiles": [], "otherRevenue": [],
         "capital": [], "debt": semantic_arrays["debt"], "valuation": valuation,
         "expenses": semantic_arrays["expenses"],
@@ -227,6 +237,7 @@ def test2_export(
     findings: list[dict],
     semantic_entities: list[dict] | None = None,
     compatibility_version: str = "0.1.0",
+    assumption_intelligence: dict | None = None,
 ) -> dict:
     values = _approved_values(approved)
     hashes = sorted({item.get("document_sha256") for item in approved if item.get("review_status") == "approved" and item.get("document_sha256")})
@@ -258,7 +269,8 @@ def test2_export(
             "mappedSemanticEntityCount": sum(item["status"] == "mapped" for item in semantic_diagnostics),
             "skippedSemanticEntityCount": sum(item["status"] == "skipped" for item in semantic_diagnostics),
         },
-        "test2PortableModel": portable,
+          "test2PortableModel": portable,
+          "assumptionIntelligence": assumption_intelligence or {"observedEvidence": [], "modelRecommendations": [], "analystApprovedAssumptions": [], "provenance": [], "snapshotMetadata": []},
         "supportingSources": [
             {
                 "sourceType": item.get("source_kind", "document"),

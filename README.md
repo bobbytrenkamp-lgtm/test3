@@ -6,6 +6,10 @@
 
 ## What works in this release
 
+- Governed Assumption Intelligence for local market-panel evidence and market-rent-growth candidate ranges
+- Immutable source snapshots, observations, model artifacts, runs, evidence links, and analyst decision context
+- Offline base-R reference pipeline with conspicuously fictional synthetic fixtures and outputs
+- Approved-only Test2 growth-curve mapping plus a non-controlling evidence/recommendation sidecar
 - Local fictional deal workspace and role-ready organization model
 - PDF, CSV, XLSX, PNG and JPEG verification, SHA-256 hashing and duplicate prevention
 - Mature local PDF/XLSX/image extraction with source-page bounding boxes and optional local Tesseract OCR

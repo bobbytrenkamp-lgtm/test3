@@ -247,6 +247,24 @@ class Handler(SimpleHTTPRequestHandler):
             if len(parts) == 4 and parts[:2] == ["api", "deals"] and parts[3] == "assumptions":
                 self._authorize_post(user, "assumption.create")
                 return self._json(201, self.service.create_assumption(user["organization_id"], user["id"], parts[2], self._payload()))
+            if len(parts) == 4 and parts[:2] == ["api", "deals"] and parts[3] == "market-panel":
+                self._authorize_post(user, "assumption.create")
+                length = int(self.headers.get("Content-Length", "0"))
+                if length < 0 or length > 16 * 1024 * 1024:
+                    raise ValueError("Market panel exceeds the 16 MiB limit")
+                metadata = {
+                    "source_name": self.headers.get("X-Source-Name", ""), "source_version": self.headers.get("X-Source-Version", ""),
+                    "as_of_date": self.headers.get("X-As-Of-Date", ""), "licensing_notes": self.headers.get("X-Licensing-Notes", ""),
+                    "freshness_state": self.headers.get("X-Freshness-State", "unknown"),
+                }
+                return self._json(201, self.service.import_market_panel(user["organization_id"], user["id"], parts[2], self.headers.get("X-Filename", "market-panel.csv"), self.rfile.read(length), metadata))
+            if len(parts) == 5 and parts[:2] == ["api", "deals"] and parts[3:] == ["assumption-intelligence", "market-rent-growth"]:
+                self._authorize_post(user, "assumption.create")
+                return self._json(201, self.service.run_market_rent_growth(user["organization_id"], user["id"], parts[2], self._payload()))
+            if len(parts) == 4 and parts[:2] == ["api", "assumption-runs"] and parts[3] == "decision":
+                self._authorize_post(user, "assumption.review")
+                payload = self._payload()
+                return self._json(200, self.service.decide_assumption_run(user["organization_id"], user["id"], parts[2], str(payload.get("selection", "")), payload.get("custom_value"), str(payload.get("rationale", "")), str(payload.get("controlling_source", ""))))
             if len(parts) == 4 and parts[:2] == ["api", "values"] and parts[3] == "review":
                 self._authorize_post(user, "value.review")
                 payload = self._payload()

@@ -47,13 +47,13 @@ def normalize_value(raw: str, value_type: str, unit: str | None) -> str | None:
         return None
     if value_type == "integer" and numeric != numeric.to_integral_value():
         return None
-    if value_type == "rate":
+    if value_type in ("rate", "signed_rate"):
         if unit == "basis_points":
             # Source patterns capture basis points, while review forms display the
             # normalized fraction. Values already in [0, 1] must round-trip.
             if numeric > 1:
                 numeric /= 10_000
-            if numeric < 0 or numeric > 1:
+            if numeric < (-1 if value_type == "signed_rate" else 0) or numeric > 1:
                 return None
         elif unit == "decimal_fraction":
             if "%" in raw:

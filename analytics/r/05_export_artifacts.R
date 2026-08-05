@@ -1,0 +1,5 @@
+source("analytics/r/04_validate_models.R")
+write_output(coefs, "coefficients.csv")
+write_output(metrics, "validation_metrics.csv")
+write_output(examples, "prediction_examples.csv")
+write_output(data.frame(model="fictional_rent_growth",version="1.0.0",status="fictional_synthetic",warning=warning_label), "model_manifest.csv")

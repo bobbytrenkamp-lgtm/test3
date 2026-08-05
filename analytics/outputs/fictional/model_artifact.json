@@ -15,7 +15,7 @@
   "residual_diagnostics": {"status": "insufficient synthetic sample"},
   "limitations": ["FICTIONAL SYNTHETIC MODEL — NOT FOR REAL UNDERWRITING", "No independent validation set", "Tiny synthetic sample"],
   "source_code_path": "analytics/r/03_fit_models.R",
-  "source_code_sha256": "e7dadba54449201f7e8a3c83c089f8aed8932f04d63f97585596ea784bc032f0",
+  "source_code_sha256": "6f7ce6be2911ae364873b6dc82ad8a52dcc1050b3742b12b0b3dc3d2f26e1bde",
   "repository_commit_sha": "6e6c0abe94c0cfdcb9c79e2f940b4fe4a3333b8d",
   "r_version": "R unavailable in current verification workspace",
   "data_status": "fictional_synthetic",

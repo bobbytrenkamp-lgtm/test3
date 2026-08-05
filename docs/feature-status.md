@@ -15,7 +15,7 @@
 | test2 export | Tested, bounded | Minimal and expanded `cre-platform-model` shapes passed test2's own `parseModelInput`; fully approved rows map to spaces/tenants/leases/expenses/debt with fail-closed row diagnostics; advanced arrays remain intentionally unmapped |
 | test1 enrichment | Tested, optional | Actual seven-file test1 data directory loaded by hash with freshness/citations; approved FIPS required; no networking |
 | Draft IC memo | Tested | Stable 18-section schema; approved-only source-linked facts, missing/unverified states, deterministic risks/questions, qualified-review labels, source appendix and immutable artifact history |
-| Optional local model | Designed | Loopback restriction; no generation adapter yet |
+| Optional local model | Tested, opt-in | Loopback-only Ollama probe/generation interface, bounded prompts, JSON-object validation and full model/prompt/input-hash/time metadata; outputs are candidate-only and no core workflow depends on it |
 | Audit history | Tested | Independent serialized audit and review-decision hash chains with tamper verifiers |
 | Operational integrity/readiness | Tested | Admin-only DB/schema/FK, chain, streamed-original and purge-staging probe; zero network requests |
 | Backup/restore drill | Tested | Format 3 schema/table contract, manifest hashes, SQLite integrity and application-open readiness in disposable restore |

@@ -104,3 +104,7 @@ Fully approved, schema-complete rent-roll/lease rows now map to stable-ID spaces
 ## Semantic header corpus update
 
 Category-scoped aliases now normalize common rent-roll, operating-statement, lease and debt header variations without creating values. Negative tests prove those aliases do not cross category boundaries and unknown documents remain untyped. The corpus is fictional and intentionally bounded; first-worksheet-only XLSX ingestion remains explicit.
+
+## Optional local-model provider update
+
+The Ollama adapter now supports explicit loopback-only availability probing and JSON-object generation with prompt bounds and required model, prompt-template, input-document hash, prompt hash and UTC generation metadata. Failures remain honest, outputs are always `candidate_only`, and no core workflow invokes the provider automatically. No hosted endpoint, account or paid API is accepted.

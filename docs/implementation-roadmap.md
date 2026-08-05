@@ -13,7 +13,7 @@ Every phase begins and ends with the cost guard. Required confirmation: “ZERO-
 | 6 — test2 export | Tested, bounded | Actual parser accepted minimal and expanded space/tenant/lease/expense/debt models; advanced test2 arrays remain unmapped |
 | 7 — test1 adapter | Tested, optional | Actual local snapshot match/fallback, integrity, freshness and zero-network evidence |
 | 8 — IC memo | Tested | All 18 required sections, approved-only source links, missing/unverified states and immutable artifact persistence |
-| 9 — optional local model | Designed | Loopback validation and honest unavailable state; optional generation adapter not implemented |
+| 9 — optional local model | Tested, opt-in | Explicit loopback probe/generation, structured JSON validation and required metadata; no automatic invocation or approval authority |
 | 10 — hardening | Tested, bounded; final audit active | Auth, retention, readiness, load/restore and browser audit complete within documented limits |
 
 Next implementation slice: broaden fictional semantic header/category-negative coverage and multi-sheet ingestion only where direct source navigation can remain exact. See `docs/institutional-readiness-audit.md`.

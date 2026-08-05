@@ -16,6 +16,7 @@ from urllib.parse import quote, urlparse
 from .service import Service
 from .auth import DUMMY_PASSWORD_HASH, SigninLimiter, session_token, verify_password
 from .db import now
+from .extraction import parse_csv, parse_xlsx
 from .permissions import require
 import pypdfium2 as pdfium
 
@@ -153,6 +154,25 @@ class Handler(SimpleHTTPRequestHandler):
                     self.send_header("Cache-Control", "private, no-store")
                     self.end_headers()
                     return self.wfile.write(body)
+                if len(parts) == 4 and parts[3] == "table":
+                    if document["detected_mime"] == "text/csv":
+                        rows, _ = parse_csv(body)
+                        kind, sheet = "csv", None
+                    elif document["detected_mime"].endswith("spreadsheetml.sheet"):
+                        rows, _ = parse_xlsx(body)
+                        kind, sheet = "xlsx", "First worksheet"
+                    else:
+                        raise ValueError("Table view is available only for CSV and XLSX documents")
+                    truncated = len(rows) > 500 or any(len(row) > 200 for row in rows[:500]) or sum(len(row) for row in rows[:500]) > 20_000
+                    visible, cells = [], 0
+                    for row in rows[:500]:
+                        remaining = 20_000 - cells
+                        if remaining <= 0:
+                            break
+                        clipped = row[:min(200, remaining)]
+                        visible.append(clipped)
+                        cells += len(clipped)
+                    return self._json(200, {"kind": kind, "sheet": sheet, "rows": visible, "rowCount": len(rows), "visibleCellCount": cells, "truncated": truncated, "formulasExecuted": False})
                 if len(parts) != 3:
                     raise LookupError("Document route not found")
                 self.send_response(200)

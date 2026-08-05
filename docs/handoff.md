@@ -87,3 +87,6 @@ The deterministic `test3-ic-memo/2.0` artifact now contains all 18 required sect
 ## First usable release acceptance update
 
 One live authenticated HTTP regression now proves the entire defined first-release workflow against three committed fictional OM/rent-roll/T-12 fixtures, including exact source retrieval, extracted-cell review, governed approvals, eleven discrepancies, resolution, immutable test2/memo artifacts, audit and final zero-network integrity. P0 product correctness is closed at its documented boundary. Next: P1 semantic tenant/lease/period/account entities, spreadsheet cell viewer and expanded test2 arrays.
+## Tabular source navigation update
+
+CSV and first-worksheet XLSX candidates now open a bounded, non-executing logical table view with exact selected-cell highlighting. The endpoint is authenticated/organization-scoped and reports truncation plus formula non-execution. Next: semantic rent-roll, operating-period/account, lease-schedule/option and debt-term entities; the table viewer is now available to support their review.

@@ -17,7 +17,7 @@ The project has a strong zero-cost local foundation and meaningful controls, but
 | Secure ingestion and original preservation | Proven | Independent MIME, size/archive limits, SHA-256, duplicate constraint, UUID paths, processing versions, no macro execution, purge/recovery, explicit malware-unavailable state | No actual malware engine by design; full-media erasure remains operator duty |
 | Complete extraction provenance model | Mostly proven | Deal/document/version/category/raw/normalized/unit/currency/page/bbox/excerpt/hash/method/version/confidence/validation/review/reviewer/comment/supersession columns | Spreadsheet coordinates are logical cells, not a rendered exact-source viewer; dynamic row fields lack governed semantic types |
 | Required OM/rent-roll/operations/lease/debt extractions | Partial | 57 governed scalar fields, complete scalar reconciliation contract, plus generic CSV/XLSX cells | Many named schedules/options/accounts are absent; repeated rows are not converted to semantic tenant/lease/period records |
-| Exact click-through source review | Partial | PDF/image page rendering and normalized bounding-box browser evidence; excerpt fallback | CSV/XLSX exact cell/sheet rendering and source-area navigation are missing |
+| Exact click-through source review | Proven for supported source semantics | PDF/image page rendering and normalized bounding-box evidence; bounded non-executing CSV/XLSX table endpoint and highlighted logical cell navigation; excerpt fallback | Tabular view is intentionally logical rather than pixel-identical and covers the first XLSX worksheet |
 | Human approval and controlling-source governance | Proven | Typed approvals, rejection rationale, append-only decision chain, explicit supersession, approved-only export | Dynamic unregistered table cells can be reviewed but lack downstream semantic governance |
 | Nineteen deterministic reconciliation rules | Mostly proven | All scalar inputs are registry-governed; a real approval/service workflow persists sixteen named findings; date comparison is type-correct; immutable input-hashed runs retain supersession/resolution | Structured list inputs still await semantic row/entity ingestion, and the combined HTTP three-document release workflow remains pending |
 | Professional 12-area analyst UX | Partial | All named navigation areas represented; real desktop/mobile/security/accessibility evidence | Deal overview/processing are folded into other views; spreadsheet source review and some screens remain minimal |
@@ -41,7 +41,7 @@ The project has a strong zero-cost local foundation and meaningful controls, but
 ### P1 — semantic diligence coverage
 
 1. Add governed row/entity models for rent-roll tenants/units, operating periods/accounts, lease schedules/options and debt terms rather than relying only on `row.<n>.<header>` fields.
-2. Add CSV/XLSX sheet/cell source rendering/navigation.
+2. Extend current first-worksheet XLSX navigation only if multi-sheet semantic ingestion is added; do not claim pixel-identical rendering.
 3. Expand scalar registry coverage across every explicitly required named extraction, with positive/category-negative fixtures.
 4. Map supported semantic entities into the corresponding test2 arrays and execute each expanded shape through the real parser fixture.
 

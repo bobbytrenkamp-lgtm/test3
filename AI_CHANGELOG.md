@@ -129,3 +129,10 @@
 - Proved compatibility against test1 commit `aa8ab706…` with zero network requests and conservative verification semantics.
 - Redistributed no test1 code or data because the source repository has no license file.
 - Completed the configured browser path with six context cards, visible freshness/limitations/citations and a clean console.
+
+## 2026-08-04 — canonical reconciliation contract tranche
+
+- Expanded the governed registry from 40 to 57 fields so every scalar rule input has a type, unit, category scope and review boundary.
+- Replaced unreachable aliases with canonical existing names for NOI, unit count and interest rate comparisons.
+- Corrected lease expiration reconciliation to compare normalized calendar dates without decimal coercion.
+- Added a contract regression and a real service workflow that appends 31 approvals and persists sixteen named discrepancies with user-entered provenance.

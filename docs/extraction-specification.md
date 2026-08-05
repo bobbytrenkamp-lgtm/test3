@@ -2,7 +2,7 @@
 
 The pipeline is governed by the code-owned `FIELD_REGISTRY`. Every registered field has a stable machine name, analyst label, value type, one or more deterministic patterns, applicable document categories, optional unit/currency, confidence policy and optional reconciliation/export use. Registry names are unique and tested. Category scoping prevents, for example, debt terms from being extracted from a lease merely because similar words appear there. Unknown documents remain broad-scan candidates and always require review.
 
-The current registry covers more than 30 property, transaction, operating, lease, debt, capital and underwriting fields. It is intentionally conservative: adding a field requires a registry entry, fictional positive/category-negative tests and documentation of downstream meaning. A registry entry enables candidate detection, never approval.
+The current registry covers 57 property, transaction, operating, lease, debt, capital and underwriting fields. It includes every scalar consumed by reconciliation; a contract regression rejects rule inputs that are absent from the registry. It is intentionally conservative: adding a field requires a registry entry, fictional positive/category-negative tests and documentation of downstream meaning. A registry entry enables candidate detection, never approval.
 
 Current deterministic methods are filename/content phrase classification, registry patterns, CSV cells, first-sheet openpyxl values, PDFium selectable text/coordinates, Pillow image validation and optional local Tesseract image/scanned-PDF OCR. When Tesseract is unavailable, scanned sources remain honestly `needs_review`.
 

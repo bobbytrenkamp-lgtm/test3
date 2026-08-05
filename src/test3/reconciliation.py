@@ -5,6 +5,17 @@ from decimal import Decimal
 from difflib import SequenceMatcher
 
 
+RECONCILIATION_SCALAR_FIELDS = frozenset({
+    "asking_price", "broker_stated_noi", "broker_stated_cap_rate", "rent_roll_occupied_area",
+    "rent_roll_total_area", "occupancy", "rentable_square_feet", "rent_roll_annualized_rent",
+    "operating_rental_revenue", "calculated_noi", "reported_noi", "historical_noi", "pro_forma_noi",
+    "lease_expiration_date", "rent_roll_expiration", "lease_current_rent", "rent_roll_current_rent",
+    "lease_area", "rent_roll_lease_area", "unit_count", "rent_roll_unit_count", "loi_price", "psa_price",
+    "capex_line_item_total", "capex_stated_total", "calculated_ltv", "stated_ltv", "calculated_ltc",
+    "stated_ltc", "calculated_all_in_rate", "interest_rate", "expected_row_count", "actual_row_count",
+})
+
+
 @dataclass(frozen=True)
 class Finding:
     rule_code: str
@@ -54,18 +65,17 @@ def reconcile(values: dict) -> list[Finding]:
     comparisons = [
         ("AREA_OM_VS_RENT_ROLL", "rent_roll_total_area", "rentable_square_feet", Decimal("0.01"), "Rent-roll area differs from OM rentable area."),
         ("RENT_VS_OPERATIONS", "rent_roll_annualized_rent", "operating_rental_revenue", Decimal("0.05"), "Annualized rent differs from operating-statement rental revenue."),
-        ("NOI_LINE_ITEMS", "calculated_noi", "operating_statement_noi", Decimal("0.005"), "Revenue less above-NOI expenses differs from stated NOI."),
+        ("NOI_LINE_ITEMS", "calculated_noi", "reported_noi", Decimal("0.005"), "Revenue less above-NOI expenses differs from stated NOI."),
         ("NOI_HISTORICAL_VS_PRO_FORMA", "historical_noi", "pro_forma_noi", Decimal("0.10"), "Pro forma NOI materially differs from historical NOI."),
-        ("LEASE_DATES", "lease_expiration", "rent_roll_expiration", Decimal("0"), "Lease and rent-roll expiration dates differ."),
         ("LEASE_RENT", "lease_current_rent", "rent_roll_current_rent", Decimal("0.01"), "Lease schedule and rent-roll current rent differ."),
         ("LEASE_AREA", "lease_area", "rent_roll_lease_area", Decimal("0.005"), "Lease and rent-roll area differ."),
-        ("UNIT_COUNT", "om_unit_count", "rent_roll_unit_count", Decimal("0"), "Unit counts differ across documents."),
+        ("UNIT_COUNT", "unit_count", "rent_roll_unit_count", Decimal("0"), "Unit counts differ across documents."),
         ("PRICE_OM_VS_LOI", "asking_price", "loi_price", Decimal("0"), "Acquisition price differs between OM and LOI."),
         ("PRICE_LOI_VS_PSA", "loi_price", "psa_price", Decimal("0"), "Acquisition price differs between LOI and PSA."),
         ("CAPEX_TOTAL", "capex_line_item_total", "capex_stated_total", Decimal("0.005"), "Capital budget line items do not add to the stated total."),
         ("DEBT_LTV", "calculated_ltv", "stated_ltv", Decimal("0.005"), "Debt amount divided by value differs from stated LTV."),
         ("DEBT_LTC", "calculated_ltc", "stated_ltc", Decimal("0.005"), "Debt amount divided by cost differs from stated LTC."),
-        ("ALL_IN_RATE", "calculated_all_in_rate", "stated_interest_rate", Decimal("0.0001"), "Index plus spread does not equal the stated all-in rate."),
+        ("ALL_IN_RATE", "calculated_all_in_rate", "interest_rate", Decimal("0.0001"), "Index plus spread does not equal the stated all-in rate."),
     ]
     for code, left_key, right_key, threshold, message in comparisons:
         left, right = _decimal(values, left_key), _decimal(values, right_key)
@@ -74,6 +84,10 @@ def reconcile(values: dict) -> list[Finding]:
         mismatch = left != right if threshold == 0 else _ratio_difference(left, right) > threshold
         if mismatch:
             add(code, "medium", message, [left_key, right_key], "Select the controlling source and record the rationale.")
+
+    lease_expiration, rent_roll_expiration = values.get("lease_expiration_date"), values.get("rent_roll_expiration")
+    if lease_expiration and rent_roll_expiration and str(lease_expiration) != str(rent_roll_expiration):
+        add("LEASE_DATES", "medium", "Lease and rent-roll expiration dates differ.", ["lease_expiration_date", "rent_roll_expiration"], "Select the controlling source and record the rationale.")
 
     periods = values.get("operating_periods")
     if isinstance(periods, list) and len(set(periods)) != len(periods):

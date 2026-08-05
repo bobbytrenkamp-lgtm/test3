@@ -24,7 +24,7 @@ The project has a strong zero-cost local foundation and meaningful controls, but
 | test2 approved-only package | Proven for documented boundary | Minimal and expanded space/tenant/lease/expense/debt models passed actual test2 `parseModelInput` at audited commit `9a0581e`; approved-only provenance and per-row skip diagnostics are tested; every generation is immutable/hash-verified | Buildings, rent steps, recoveries, options, capital and scenarios remain explicitly unmapped |
 | test1 optional read-only enrichment | Proven, optional | Actual seven-file local snapshot parsed by hash with approved FIPS, dates/citations/coverage and zero requests | Upstream test1 has no license, so no code/data redistribution; user supplies local files |
 | Full reviewable IC memo | Proven, deterministic | Stable 18-section schema; approved facts link to local sources; missing/unverified states, operations/rollover/debt areas, deterministic risks/questions, cautiously labeled review steps and deduplicated appendix; immutable versioned artifact tests | Narrative quality is intentionally bounded without a local model; absent information remains explicit rather than invented |
-| Optional local-model provider | Designed only | Loopback URL validation and honest unavailable state | No probe/generation/metadata persistence or structured-output validation; optional core workflows do not depend on it |
+| Optional local-model provider | Proven for interface boundary | Explicit loopback-only probe/generation, bounded prompt, JSON-object validation, model/prompt/input-hash/time metadata and candidate-only status; core remains deterministic | No UI invocation or durable generation table; optional functionality is inactive unless called by a future reviewed workflow |
 | Security/privacy threat coverage | Strong but bounded | Loopback refusal, auth/CSRF/roles/lockouts/revocation, CSP/escaping, archive limits, audit integrity, retention, backup/restore, browser injection test | No federated identity/TLS network mode (network binding intentionally refused), malware scan, built-in backup encryption or formal external penetration test |
 | Audit integrity and operational readiness | Proven, local | Preventive triggers, independent audit/review verifiers, schema/FK/DB/file/tombstone checks, crash recovery | Hash chains are local, not externally anchored; this is explicitly not claimed otherwise |
 | Backup, restore and bounded load | Proven for recorded scope | Format 3 app-open restore; two 100-operation/8-worker exact-count runs | Not large-document/OCR/soak/hardware-failure capacity evidence |
@@ -47,7 +47,7 @@ The project has a strong zero-cost local foundation and meaningful controls, but
 
 ### P2 — bounded optional/operational maturity
 
-1. Implement the optional local-model interface only with loopback probing, opt-in invocation, structured validation and complete model/prompt/input-hash metadata; deterministic operation must remain sufficient.
+1. Add a reviewed UI/persistence workflow only if optional local-model assistance is activated; the provider interface is now tested and deterministic operation remains sufficient.
 2. Add assistive-technology/forced-colors/zoom evidence and larger/longer target-hardware probes without broadening network deployment.
 3. Add an optional audited local backup-encryption approach only if its dependency/license/secret-handling model remains charge-impossible; otherwise retain OS-encryption guidance.
 

@@ -2,6 +2,10 @@
 
 Date: 2026-08-04
 
+## Browser accessibility/security update
+
+A real Chromium audit at desktop and 390×844 fixed signed-out control reachability, mobile sign-out, keyboard upload, low-contrast text and cache coherence. Synthetic markup rendered only as text, mobile overflow was zero, session revocation restored isolated/focused sign-in state and browser warning/error logs were empty. CI now runs a dependency-free accessibility contract guard. Exact evidence and limitations are in `docs/browser-accessibility-security-evidence.md`. Next: requirement-by-requirement institutional gap audit and interrupted-operation recovery.
+
 ## Resilience-evidence update
 
 The local bounded harness concurrently creates and ingests fictional deals, asserts exact database/audit counts and readiness, creates backup format 3.0, opens a disposable restore through current code and reruns operational integrity. Two 100-operation/8-worker runs completed with zero failures and exact counts; results and limits are recorded in `docs/resilience-evidence.md`. Next: automated browser accessibility/XSS/security evidence and operational interrupted-transaction recovery procedures.

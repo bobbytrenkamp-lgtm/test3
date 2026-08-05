@@ -6,5 +6,7 @@ Readiness tests also assert the governed SQLite schema version, fail-closed reje
 
 The bounded concurrency probe uses 1..32 workers and 1..1000 operations, always against a newly created temporary directory. A CI-sized 8-operation regression checks exact deal/document/audit counts, chain/storage health and a real application-open restore. The recorded 100-operation/8-worker runs and limitations are in `docs/resilience-evidence.md`.
 
+The dependency-free accessibility guard runs in CI over static semantics and CSS contracts. Real Chromium evidence covers authentication isolation/transitions, keyboard upload, responsive navigation/overflow, computed contrast, stored-markup escaping, session revocation and browser logs; see `docs/browser-accessibility-security-evidence.md` for exact results and limitations.
+
 Not yet sufficient for production: browser accessibility/e2e automation, complex PDF corpus benchmarks, OCR failure matrix, load tests, restore drill and independent penetration review.
 

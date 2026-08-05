@@ -4,7 +4,7 @@ Date: 2026-08-04
 
 ## Authoritative institutional gap audit
 
-`docs/institutional-readiness-audit.md` is now the authoritative completion matrix. Infrastructure, zero-cost controls, test1, minimal test2, readiness, retention, load/restore and bounded browser accessibility are evidenced. The full objective is not complete: reconciliation inputs are not consistently reachable from runtime fields, semantic tabular extraction/spreadsheet source viewing is partial, exports are not persisted/versioned artifacts, and the memo/test2 mappings are minimal. P0 begins with a canonical reconciliation field contract and one automated OM + rent-roll + T-12 first-release workflow.
+`docs/institutional-readiness-audit.md` is the authoritative completion matrix. Infrastructure, zero-cost controls, test1, minimal test2, readiness, retention, load/restore and bounded browser accessibility are evidenced. Scalar reconciliation inputs are governed and service-reachable, and exports are persisted immutable artifacts. The full objective remains incomplete: semantic tabular extraction/spreadsheet source viewing, the complete memo, expanded test2 mappings and the combined OM + rent-roll + T-12 workflow remain open.
 
 ## Purge crash-recovery update
 
@@ -77,3 +77,7 @@ ZERO-COST CHECK PASSED: No application component can create a charge for the rep
 ## 2026-08-04 canonical reconciliation contract
 
 All scalar reconciliation keys now belong to the 57-field governed registry. `RECONCILIATION_SCALAR_FIELDS` is checked against `FIELD_BY_NAME`, and the service regression approves 31 assumptions through append-only decisions before asserting sixteen persisted findings. Lease dates are normalized ISO strings and no longer pass through decimal parsing. Structured row/list rules and the combined three-document HTTP release workflow remain open work; do not describe the entire reconciliation requirement as complete yet.
+
+## Immutable export artifact update
+
+Schema version 2 and backup format 4.0 now preserve every generated test1/test2/memo payload with independent canonical content and approval-snapshot hashes, per-kind version, schema, actor and UTC time. Append-only triggers, scoped retrieval/history, live HTTP coverage and operational re-hashing are implemented. The next P0 item is the complete IC memo inside this artifact envelope, followed by the combined fictional OM/rent-roll/T-12 release workflow.

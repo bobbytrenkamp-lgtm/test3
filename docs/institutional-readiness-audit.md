@@ -21,7 +21,7 @@ The project has a strong zero-cost local foundation and meaningful controls, but
 | Human approval and controlling-source governance | Proven | Typed approvals, rejection rationale, append-only decision chain, explicit supersession, approved-only export | Dynamic unregistered table cells can be reviewed but lack downstream semantic governance |
 | Nineteen deterministic reconciliation rules | Mostly proven | All scalar inputs are registry-governed; a real approval/service workflow persists sixteen named findings; date comparison is type-correct; immutable input-hashed runs retain supersession/resolution | Structured list inputs still await semantic row/entity ingestion, and the combined HTTP three-document release workflow remains pending |
 | Professional 12-area analyst UX | Partial | All named navigation areas represented; real desktop/mobile/security/accessibility evidence | Deal overview/processing are folded into other views; spreadsheet source review and some screens remain minimal |
-| test2 approved-only package | Partial, honestly bounded | Minimal property model passed actual test2 `parseModelInput`; blockers and provenance tested | Buildings/spaces/tenants/leases/rent steps/recoveries/expenses/capital/debt/scenarios are not mapped; exports are generated responses, not persisted versions |
+| test2 approved-only package | Partial, honestly bounded | Minimal property model passed actual test2 `parseModelInput`; approved-only provenance tested; every generation is an immutable versioned/hash-verified artifact with approval snapshot and history | Buildings/spaces/tenants/leases/rent steps/recoveries/expenses/capital/debt/scenarios are not mapped |
 | test1 optional read-only enrichment | Proven, optional | Actual seven-file local snapshot parsed by hash with approved FIPS, dates/citations/coverage and zero requests | Upstream test1 has no license, so no code/data redistribution; user supplies local files |
 | Full reviewable IC memo | Partial | Draft flag, approved facts, discrepancies and source appendix | Most required sections (sources missing, operations, rollover, debt, risks/mitigants, unverified statements) are absent |
 | Optional local-model provider | Designed only | Loopback URL validation and honest unavailable state | No probe/generation/metadata persistence or structured-output validation; optional core workflows do not depend on it |
@@ -37,9 +37,8 @@ The project has a strong zero-cost local foundation and meaningful controls, but
 ### P0 — correctness and release workflow
 
 1. Complete the HTTP/three-document release workflow around the now-proven canonical scalar contract and sixteen-rule approved service workflow; connect structured list rules to semantic entities.
-2. Persist immutable export artifacts with version, hash, schema, actor and approval snapshot; support retrieval/history.
-3. Build complete required IC memo sections with explicit missing/unverified states and source links.
-4. Add fictional OM, rent-roll and T-12 fixtures that exercise classification, semantic extraction, source review, approvals, reconciliation, resolution, export, memo and audit.
+2. Complete required IC memo content within the now-persisted immutable export artifact contract.
+3. Add fictional OM, rent-roll and T-12 fixtures that exercise classification, semantic extraction, source review, approvals, reconciliation, resolution, export, memo and audit.
 
 ### P1 — semantic diligence coverage
 

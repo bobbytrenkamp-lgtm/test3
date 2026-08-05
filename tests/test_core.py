@@ -180,6 +180,22 @@ class HttpSecurityTests(unittest.TestCase):
                 response = connection.getresponse()
                 response.read()
                 self.assertEqual(response.status, 410)
+                deal_id = bootstrap["deals"][0]["id"]
+                connection.request("POST", f"/api/deals/{deal_id}/export/memo", headers={"Cookie": cookie, "X-CSRF-Token": bootstrap["user"]["csrf_token"]})
+                response = connection.getresponse()
+                exported = json.loads(response.read())
+                self.assertEqual(response.status, 200)
+                self.assertEqual(exported["artifact"]["version"], 1)
+                connection.request("GET", f"/api/deals/{deal_id}/exports", headers={"Cookie": cookie})
+                response = connection.getresponse()
+                history = json.loads(response.read())
+                self.assertEqual(response.status, 200)
+                self.assertEqual(history[0]["id"], exported["artifact"]["id"])
+                connection.request("GET", f"/api/exports/{exported['artifact']['id']}", headers={"Cookie": cookie})
+                response = connection.getresponse()
+                retrieved = json.loads(response.read())
+                self.assertEqual(response.status, 200)
+                self.assertEqual(retrieved["content"], exported["content"])
                 connection.request("POST", "/api/signout", headers={"Cookie": cookie, "X-CSRF-Token": bootstrap["user"]["csrf_token"]})
                 response = connection.getresponse()
                 response.read()
@@ -466,13 +482,13 @@ class Test1SnapshotTests(unittest.TestCase):
         service = Service(app_data, test1_data_dir=self.root)
         user = service.seed()
         deal_id = service.bootstrap(user)["deals"][0]["id"]
-        before = service.export(user["organization_id"], user["id"], deal_id, "test1")
+        before = service.export(user["organization_id"], user["id"], deal_id, "test1")["content"]
         self.assertEqual(before["status"], "input_required")
         assumption = service.create_assumption(user["organization_id"], user["id"], deal_id, {"field_name":"county_fips", "proposed_value":"51107", "rationale":"Fictional official parcel record"})
-        pending = service.export(user["organization_id"], user["id"], deal_id, "test1")
+        pending = service.export(user["organization_id"], user["id"], deal_id, "test1")["content"]
         self.assertEqual(pending["status"], "input_required")
         service.review_assumption(user["organization_id"], user["id"], assumption["id"], "approved", "51107", "Checked fictional source")
-        matched = service.export(user["organization_id"], user["id"], deal_id, "test1")
+        matched = service.export(user["organization_id"], user["id"], deal_id, "test1")["content"]
         self.assertEqual(matched["status"], "matched")
         self.assertEqual(matched["results"]["countyFips"], "51107")
 
@@ -501,9 +517,16 @@ class ServiceTests(unittest.TestCase):
         snapshot = self.service.deal(self.deal_id, self.user["organization_id"])
         value = snapshot["values"][0]
         self.service.review_value(self.user["organization_id"], self.user["id"], value["id"], "approved", value["normalized_value"], "checked")
-        export = self.service.export(self.user["organization_id"], self.user["id"], self.deal_id, "test2")
+        envelope = self.service.export(self.user["organization_id"], self.user["id"], self.deal_id, "test2")
+        export = envelope["content"]
         self.assertEqual(export["mappingDiagnostics"]["approvedFieldCount"], 1)
         self.assertEqual(export["sourceDocumentHashes"], [hashlib.sha256(b"Property Name,Asking Price\nFictional Plaza,10000000\n").hexdigest()])
+        self.assertEqual(envelope["artifact"]["version"], 1)
+        self.assertEqual(envelope["artifact"]["approvedCount"], 1)
+        retrieved = self.service.export_artifact(self.user["organization_id"], envelope["artifact"]["id"])
+        self.assertEqual(retrieved["content"], export)
+        self.assertEqual(retrieved["approvalSnapshot"][0]["entityId"], value["id"])
+        self.assertEqual(self.service.export_history(self.user["organization_id"], self.deal_id)[0]["contentSha256"], envelope["artifact"]["contentSha256"])
 
     def test_institutional_admin_initialization_and_rotation_revoke_sessions(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -606,7 +629,7 @@ class ServiceTests(unittest.TestCase):
         values = {item["id"]: item for item in self.service.deal(self.deal_id, self.user["organization_id"])["values"]}
         self.assertEqual(values[first["id"]]["review_status"], "superseded")
         self.assertEqual(values[second["id"]]["review_status"], "approved")
-        exported = self.service.export(self.user["organization_id"], self.user["id"], self.deal_id, "test2")
+        exported = self.service.export(self.user["organization_id"], self.user["id"], self.deal_id, "test2")["content"]
         source = next(item for item in exported["supportingSources"] if item["field"] == "discount_rate")
         self.assertEqual(source["sourceType"], "user_entered")
         self.assertIsNone(source["documentId"])
@@ -697,6 +720,25 @@ class ServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Only an open finding"):
             self.service.resolve_finding(self.user["organization_id"], self.user["id"], first["id"], "Too late")
 
+    def test_export_versions_are_append_only_scoped_and_hash_verified(self):
+        first = self.service.export(self.user["organization_id"], self.user["id"], self.deal_id, "memo")
+        second = self.service.export(self.user["organization_id"], self.user["id"], self.deal_id, "memo")
+        self.assertEqual((first["artifact"]["version"], second["artifact"]["version"]), (1, 2))
+        history = self.service.export_history(self.user["organization_id"], self.deal_id)
+        self.assertEqual([item["version"] for item in history], [2, 1])
+        with self.assertRaises(LookupError):
+            self.service.export_artifact("other-organization", first["artifact"]["id"])
+        with self.service.db.connect() as connection:
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute("DELETE FROM export_artifacts WHERE id=?", (first["artifact"]["id"],))
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute("UPDATE export_artifacts SET content_sha256='changed' WHERE id=?", (first["artifact"]["id"],))
+            connection.execute("DROP TRIGGER export_artifacts_no_update")
+            connection.execute("UPDATE export_artifacts SET content_json='{}' WHERE id=?", (first["artifact"]["id"],))
+        with self.assertRaisesRegex(ValueError, "integrity verification failed"):
+            self.service.export_artifact(self.user["organization_id"], first["artifact"]["id"])
+        self.assertEqual(self.service.operational_integrity(self.user["organization_id"])["exports"]["hashMismatches"], 1)
+
     def test_ten_rules_are_reachable_through_approved_service_values(self):
         approved_values = {
             "rent_roll_occupied_area": "80", "rent_roll_total_area": "100", "occupancy": "0.90",
@@ -742,8 +784,8 @@ class ServiceTests(unittest.TestCase):
         create_backup(Path(self.temp.name), destination)
         report = verify_backup(destination)
         self.assertTrue(report["valid"])
-        self.assertEqual(report["format"], "test3-backup/3.0")
-        self.assertEqual(report["schemaVersion"], 1)
+        self.assertEqual(report["format"], "test3-backup/4.0")
+        self.assertEqual(report["schemaVersion"], 2)
         self.assertTrue(report["restoredOperationalIntegrity"])
         self.assertEqual(report["counts"]["documents"], 1)
         self.assertGreaterEqual(report["fileCount"], 2)

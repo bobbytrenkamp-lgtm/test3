@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -34,6 +34,9 @@ CREATE TRIGGER IF NOT EXISTS reconciliation_runs_no_update BEFORE UPDATE ON reco
 CREATE TRIGGER IF NOT EXISTS reconciliation_runs_no_delete BEFORE DELETE ON reconciliation_runs BEGIN SELECT RAISE(ABORT, 'reconciliation runs are append-only'); END;
 CREATE TABLE IF NOT EXISTS findings(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), deal_id TEXT NOT NULL REFERENCES deals(id), rule_code TEXT NOT NULL, severity TEXT NOT NULL, explanation TEXT NOT NULL, compared_values_json TEXT NOT NULL, source_documents_json TEXT NOT NULL, page_references_json TEXT NOT NULL, suggested_next_step TEXT NOT NULL, resolution_status TEXT NOT NULL CHECK(resolution_status IN ('open','resolved','superseded')), resolution_notes TEXT, created_at TEXT NOT NULL, reconciliation_run_id TEXT REFERENCES reconciliation_runs(id), superseded_at TEXT);
 CREATE TRIGGER IF NOT EXISTS findings_no_delete BEFORE DELETE ON findings BEGIN SELECT RAISE(ABORT, 'findings are retained for reconciliation history'); END;
+CREATE TABLE IF NOT EXISTS export_artifacts(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), deal_id TEXT NOT NULL REFERENCES deals(id), kind TEXT NOT NULL CHECK(kind IN ('test1','test2','memo')), version INTEGER NOT NULL CHECK(version > 0), schema_version TEXT NOT NULL, content_json TEXT NOT NULL, content_sha256 TEXT NOT NULL, approval_snapshot_json TEXT NOT NULL, approval_snapshot_sha256 TEXT NOT NULL, actor_id TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL, UNIQUE(deal_id,kind,version));
+CREATE TRIGGER IF NOT EXISTS export_artifacts_no_update BEFORE UPDATE ON export_artifacts BEGIN SELECT RAISE(ABORT, 'export artifacts are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS export_artifacts_no_delete BEFORE DELETE ON export_artifacts BEGIN SELECT RAISE(ABORT, 'export artifacts are append-only'); END;
 CREATE TABLE IF NOT EXISTS audit_events(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), deal_id TEXT, actor_id TEXT REFERENCES users(id), action TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT, details_json TEXT NOT NULL, previous_hash TEXT, event_hash TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TRIGGER IF NOT EXISTS audit_events_no_update BEFORE UPDATE ON audit_events BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END;
 CREATE TRIGGER IF NOT EXISTS audit_events_no_delete BEFORE DELETE ON audit_events BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END;

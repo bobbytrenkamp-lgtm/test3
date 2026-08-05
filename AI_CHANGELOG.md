@@ -136,3 +136,9 @@
 - Replaced unreachable aliases with canonical existing names for NOI, unit count and interest rate comparisons.
 - Corrected lease expiration reconciliation to compare normalized calendar dates without decimal coercion.
 - Added a contract regression and a real service workflow that appends 31 approvals and persists sixteen named discrepancies with user-entered provenance.
+## 2026-08-04 — immutable export artifact tranche
+
+- Persisted every test1, test2 and memo generation as canonical JSON with content and approval-snapshot SHA-256 hashes.
+- Added per-deal/kind versioning, actor/schema metadata, append-only triggers and organization-scoped history/retrieval APIs.
+- Extended operational integrity and backup format 4.0 to cover artifact presence and hash validity.
+- Updated the browser to acknowledge the locally saved artifact version while preserving content rendering.

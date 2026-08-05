@@ -304,6 +304,7 @@ class Service:
         review_valid, review_break = self.db.verify_review_chain(organization_id)
         with self.db.connect() as connection:
             documents = connection.execute("SELECT deal_id,stored_name,sha256,size_bytes,original_purged_at FROM documents WHERE organization_id=?", (organization_id,)).fetchall()
+            artifacts = connection.execute("SELECT id,content_json,content_sha256,approval_snapshot_json,approval_snapshot_sha256 FROM export_artifacts WHERE organization_id=?", (organization_id,)).fetchall()
         storage = {"activeOriginals": 0, "purgedTombstones": 0, "missingActiveOriginals": 0, "integrityMismatches": 0, "unexpectedPurgedOriginals": 0, "unsafePaths": 0}
         upload_root = self.upload_dir.resolve()
         for document in documents:
@@ -326,7 +327,13 @@ class Service:
         staging_files = sum(1 for item in staging_root.iterdir() if item.is_file()) if staging_root.is_dir() else 0
         chains = {"auditValid": audit_valid, "auditBreakId": audit_break, "reviewValid": review_valid, "reviewBreakId": review_break}
         storage_ok = not any(storage[key] for key in ("missingActiveOriginals", "integrityMismatches", "unexpectedPurgedOriginals", "unsafePaths")) and staging_files == 0
-        return {"ok": database["ok"] and audit_valid and review_valid and storage_ok, "checkedAt": now(), "database": database, "chains": chains, "storage": storage, "purgeStagingFiles": staging_files, "networkRequests": 0}
+        artifact_mismatches = sum(
+            hashlib.sha256(item["content_json"].encode()).hexdigest() != item["content_sha256"]
+            or hashlib.sha256(item["approval_snapshot_json"].encode()).hexdigest() != item["approval_snapshot_sha256"]
+            for item in artifacts
+        )
+        artifact_integrity = {"count": len(artifacts), "hashMismatches": artifact_mismatches}
+        return {"ok": database["ok"] and audit_valid and review_valid and storage_ok and artifact_mismatches == 0, "checkedAt": now(), "database": database, "chains": chains, "storage": storage, "exports": artifact_integrity, "purgeStagingFiles": staging_files, "networkRequests": 0}
 
     def review_value(self, organization_id: str, user_id: str, value_id: str, status: str, normalized_value: str | None, comments: str = "") -> dict:
         normalized_value = None if normalized_value is None else str(normalized_value)
@@ -486,6 +493,46 @@ class Service:
                 result = {"status": "invalid_snapshot", "verified": False, "coverage": "missing", "inputs": inputs, "results": {}, "networkRequests": 0, "message": str(error)}
         else:
             raise ValueError("Unknown export kind")
-        result_hash = hashlib.sha256(json.dumps(result, sort_keys=True, default=str).encode()).hexdigest()
-        self.db.audit(organization_id, user_id, f"export.{kind}", "deal", deal_id, {"approved_count": len(approved), "result_sha256": result_hash, "contract": result.get("schemaVersion") or result.get("status")}, deal_id)
-        return result
+        content_json = json.dumps(result, sort_keys=True, separators=(",", ":"), default=str)
+        result_hash = hashlib.sha256(content_json.encode()).hexdigest()
+        approval_snapshot = [
+            {
+                "entityId": item["id"], "entityType": item["entity_type"], "field": item["field_name"],
+                "normalizedValue": item.get("normalized_value"), "decisionId": item.get("latest_decision_id"),
+                "documentId": item.get("document_id"), "documentVersion": item.get("document_version"),
+                "sourceTextSha256": item.get("source_text_hash"), "documentSha256": item.get("document_sha256"),
+                "reviewerId": item.get("reviewer_id"), "reviewedAt": item.get("reviewed_at"),
+            }
+            for item in sorted(approved, key=lambda row: (row["field_name"], row["id"]))
+        ]
+        snapshot_json = json.dumps(approval_snapshot, sort_keys=True, separators=(",", ":"), default=str)
+        snapshot_hash = hashlib.sha256(snapshot_json.encode()).hexdigest()
+        artifact_id, created = str(uuid.uuid4()), now()
+        schema_version = str(result.get("schemaVersion") or result.get("status") or f"test3-{kind}/1.0")
+        with self.db.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if not connection.execute("SELECT id FROM deals WHERE id=? AND organization_id=?", (deal_id, organization_id)).fetchone():
+                raise LookupError("Deal not found")
+            version = connection.execute("SELECT COALESCE(MAX(version),0)+1 FROM export_artifacts WHERE deal_id=? AND kind=?", (deal_id, kind)).fetchone()[0]
+            connection.execute("INSERT INTO export_artifacts VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (artifact_id, organization_id, deal_id, kind, version, schema_version, content_json, result_hash, snapshot_json, snapshot_hash, user_id, created))
+        artifact = {"id": artifact_id, "dealId": deal_id, "kind": kind, "version": version, "schemaVersion": schema_version, "contentSha256": result_hash, "approvalSnapshotSha256": snapshot_hash, "approvedCount": len(approval_snapshot), "actorId": user_id, "createdAt": created}
+        self.db.audit(organization_id, user_id, f"export.{kind}", "export_artifact", artifact_id, artifact, deal_id)
+        return {"artifact": artifact, "content": result}
+
+    def export_history(self, organization_id: str, deal_id: str) -> list[dict]:
+        with self.db.connect() as connection:
+            if not connection.execute("SELECT id FROM deals WHERE id=? AND organization_id=?", (deal_id, organization_id)).fetchone():
+                raise LookupError("Deal not found")
+            rows = connection.execute("SELECT id,deal_id,kind,version,schema_version,content_sha256,approval_snapshot_sha256,actor_id,created_at FROM export_artifacts WHERE organization_id=? AND deal_id=? ORDER BY created_at DESC, rowid DESC", (organization_id, deal_id)).fetchall()
+        return [{"id": row["id"], "dealId": row["deal_id"], "kind": row["kind"], "version": row["version"], "schemaVersion": row["schema_version"], "contentSha256": row["content_sha256"], "approvalSnapshotSha256": row["approval_snapshot_sha256"], "actorId": row["actor_id"], "createdAt": row["created_at"]} for row in rows]
+
+    def export_artifact(self, organization_id: str, artifact_id: str) -> dict:
+        with self.db.connect() as connection:
+            row = connection.execute("SELECT * FROM export_artifacts WHERE id=? AND organization_id=?", (artifact_id, organization_id)).fetchone()
+        if not row:
+            raise LookupError("Export artifact not found")
+        content_json, snapshot_json = row["content_json"], row["approval_snapshot_json"]
+        if hashlib.sha256(content_json.encode()).hexdigest() != row["content_sha256"] or hashlib.sha256(snapshot_json.encode()).hexdigest() != row["approval_snapshot_sha256"]:
+            raise ValueError("Export artifact integrity verification failed")
+        artifact = {"id": row["id"], "dealId": row["deal_id"], "kind": row["kind"], "version": row["version"], "schemaVersion": row["schema_version"], "contentSha256": row["content_sha256"], "approvalSnapshotSha256": row["approval_snapshot_sha256"], "actorId": row["actor_id"], "createdAt": row["created_at"]}
+        return {"artifact": artifact, "approvalSnapshot": json.loads(snapshot_json), "content": json.loads(content_json)}

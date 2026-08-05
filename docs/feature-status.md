@@ -23,3 +23,4 @@
 | Original-document retention/purge | Tested | Admin reauthentication, durable staging, startup rollback/finish recovery, integrity verification, HTTP 410 and immutable tombstone; backups/history unaffected |
 | Accessibility | Tested, bounded | CI static guard plus real Chromium auth/keyboard/mobile/contrast audit; assistive-tech/zoom/forced-colors certification remains |
 | Security/performance/restore hardening | In development | Auth/retention/schema/readiness, purge crash recovery, measured bounded load, application-open restore and browser security/accessibility tested; final gap audit remains |
+| Immutable export artifacts | Tested | Per-kind versions, canonical content/approval hashes, actor/schema metadata, append-only database guards, scoped retrieval/history, readiness and backup coverage |

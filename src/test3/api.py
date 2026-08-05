@@ -103,6 +103,13 @@ class Handler(SimpleHTTPRequestHandler):
                 deal_id = parts[2]
                 if len(parts) == 3:
                     return self._json(200, self.service.deal(deal_id, user["organization_id"]))
+                if len(parts) == 4 and parts[3] == "exports":
+                    return self._json(200, self.service.export_history(user["organization_id"], deal_id))
+            if parsed.path.startswith("/api/exports/"):
+                user = self._identity()
+                parts = parsed.path.strip("/").split("/")
+                if len(parts) == 3:
+                    return self._json(200, self.service.export_artifact(user["organization_id"], parts[2]))
             if parsed.path.startswith("/api/documents/"):
                 user = self._identity()
                 parts = parsed.path.strip("/").split("/")

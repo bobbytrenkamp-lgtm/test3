@@ -2,19 +2,18 @@
 
 Every phase begins and ends with the cost guard. Required confirmation: “ZERO-COST CHECK PASSED: No application component can create a charge for the repository owner.”
 
-| Phase | Status | Exit evidence |
+| Phase | Status | Exit evidence / remaining boundary |
 |---|---|---|
-| 0 — audit and documentation | Functional | Assessment, contracts, architecture, threat and cost model reviewed |
-| 1 — foundation | Functional, tested locally | Loopback app, SQLite schema, organizations/roles, fictional seed, CI guards |
-| 2 — ingestion | Functional, tested locally | MIME verification, limits, hashes, duplicates, immutable names, viewer |
-| 3 — deterministic processing | Functional, tested locally | Mature local PDF/XLSX/image path; optional Tesseract OCR and honest unavailable state |
-| 4 — extraction review | Functional, tested locally | Provenance model and human approve/edit/reject workflow |
-| 5 — reconciliation | Functional, tested locally | 19 deterministic rules; resolution notes |
-| 6 — test2 export | In development | Local contract tests pass; actual test2 import validation remains |
-| 7 — test1 adapter | Designed | Honest local snapshot match/fallback contract |
-| 8 — IC memo | Functional | Draft uses approved facts and source appendix only |
-| 9 — optional local model | Designed | Loopback-only provider validation and honest unavailable state |
-| 10 — hardening | Not started | Load, restore, accessibility and security review required |
+| 0 — audit and documentation | Tested, active governance | Assessment/contracts plus institutional gap matrix; roadmap must track every merge |
+| 1 — foundation | Tested locally | Fail-closed admin bootstrap, SQLite schema, organizations/roles, CI guards |
+| 2 — ingestion | Tested locally | MIME/limits/hashes/duplicates/UUID storage, viewer, controlled purge and crash recovery |
+| 3 — deterministic processing | Tested, bounded | PDFium/openpyxl/Pillow and optional local Tesseract with honest unavailable state |
+| 4 — extraction review | Partial | Provenance and approval are tested; full semantic fields/rows and spreadsheet source navigation remain |
+| 5 — reconciliation | Partial | 19 rules and immutable runs tested; runtime-reachable canonical input contract/E2E remains |
+| 6 — test2 export | Tested, minimal | Actual parser accepted minimal property model; expanded entities and persisted versions remain |
+| 7 — test1 adapter | Tested, optional | Actual local snapshot match/fallback, integrity, freshness and zero-network evidence |
+| 8 — IC memo | Partial | Approved facts/discrepancies/source appendix only; full required sections remain |
+| 9 — optional local model | Designed | Loopback validation and honest unavailable state; optional generation adapter not implemented |
+| 10 — hardening | Tested, bounded; final audit active | Auth, retention, readiness, load/restore and browser audit complete within documented limits |
 
-Next recommended slice: optional local Tesseract and a permissively licensed mature PDF parser, followed by test2 fixture execution. Neither may add hosted processing.
-
+Next implementation slice: canonical reconciliation inputs plus a three-document first-release E2E, followed by persisted export versions and complete memo sections. See `docs/institutional-readiness-audit.md`.

@@ -50,7 +50,7 @@ Administrator original-byte purge is password-reauthenticated, integrity-checked
 
 ## Architecture and status
 
-Start with [repository assessment](docs/repository-assessment.md), [architecture](docs/architecture.md), [feature status](docs/feature-status.md), [resilience evidence](docs/resilience-evidence.md), [browser accessibility/security evidence](docs/browser-accessibility-security-evidence.md), and the [cost and billing audit](docs/cost-and-billing-audit.md).
+Start with the [institutional readiness audit](docs/institutional-readiness-audit.md), [repository assessment](docs/repository-assessment.md), [architecture](docs/architecture.md), [feature status](docs/feature-status.md), [resilience evidence](docs/resilience-evidence.md), [browser accessibility/security evidence](docs/browser-accessibility-security-evidence.md), and the [cost and billing audit](docs/cost-and-billing-audit.md).
 
 ## Related repositories
 

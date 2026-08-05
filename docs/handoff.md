@@ -100,3 +100,7 @@ The approved-data area now exposes every semantic row, canonical fields, source 
 ## Approved semantic test2 mapping update
 
 Fully approved, schema-complete rent-roll/lease rows now map to stable-ID spaces, tenants and leases; explicitly expense-classified operating rows map to fixed-annual expenses; complete debt-term rows map to debt facilities. Pending, rejected, incomplete and unsupported rows are excluded with per-entity diagnostics and no invented assumptions. An expanded fictional model passed test2's real `parseModelInput` at audited commit `9a0581efa10751726f067e2e6b3bea76f4c99b0b` using already-local tooling and no downloads. Advanced arrays remain an explicit boundary.
+
+## Semantic header corpus update
+
+Category-scoped aliases now normalize common rent-roll, operating-statement, lease and debt header variations without creating values. Negative tests prove those aliases do not cross category boundaries and unknown documents remain untyped. The corpus is fictional and intentionally bounded; first-worksheet-only XLSX ingestion remains explicit.

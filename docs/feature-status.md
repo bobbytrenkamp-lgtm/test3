@@ -26,4 +26,4 @@
 | Immutable export artifacts | Tested | Per-kind versions, canonical content/approval hashes, actor/schema metadata, append-only database guards, scoped retrieval/history, readiness and backup coverage |
 | First usable release E2E | Tested | Live authenticated HTTP workflow with committed fictional OM/rent-roll/T-12 fixtures, exact source retrieval/review, 10+ findings, resolution, immutable exports/memo, audit and integrity |
 | CSV/XLSX exact logical source view | Tested | Authenticated bounded table endpoint, escaped cell rendering, selected-coordinate highlight and explicit no-formula execution; first worksheet only |
-| Governed semantic table entities | Tested | Immutable rent-roll, operating account/period, lease schedule/options and debt-term rows with hashes, exact source-cell membership, derived approval and readiness/backup coverage |
+| Governed semantic table entities | Tested | Immutable rent-roll, operating account/period, lease schedule/options and debt-term rows with hashes, exact source-cell membership, derived approval, analyst row/source UI and readiness/backup coverage |

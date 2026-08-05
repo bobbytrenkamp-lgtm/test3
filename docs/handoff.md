@@ -93,3 +93,6 @@ CSV and first-worksheet XLSX candidates now open a bounded, non-executing logica
 ## Semantic diligence entity update
 
 Schema version 3 and backup format 5 now preserve immutable rent-roll, operating-account/period, lease-schedule/options and debt-term entities. Each row is hash-bound to exact source cells and becomes approved only when all those cells are approved through the existing decision chain. Operational integrity verifies hashes and membership. Next: expose semantic rows in the analyst UI and map approved entities into real test2 arrays with parser evidence.
+## Semantic entity UI update
+
+The approved-data area now exposes every semantic row, canonical fields, source document/row and derived approval state. Analysts can open a constituent cell in the exact viewer; approvals still occur only through cell-level append-only decisions. Next: map fully approved rows into test2 spaces/tenants/leases/expenses/debt with real parser validation.

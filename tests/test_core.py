@@ -278,6 +278,8 @@ class HttpSecurityTests(unittest.TestCase):
 
                 snapshot, _ = request("GET", f"/api/deals/{deal['id']}")
                 self.assertEqual({item["category"] for item in snapshot["documents"]}, {item[2] for item in fixtures})
+                self.assertEqual({item["entity_type"] for item in snapshot["entities"]}, {"rent_roll_record", "operating_account_period"})
+                self.assertTrue(all(item["review_status"] == "needs_review" for item in snapshot["entities"]))
                 values_by_document = {}
                 for value in snapshot["values"]:
                     values_by_document.setdefault(value["document_id"], value)

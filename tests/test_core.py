@@ -212,6 +212,106 @@ class HttpSecurityTests(unittest.TestCase):
                 server.server_close()
                 worker.join(timeout=5)
 
+    def test_complete_first_usable_release_over_authenticated_http(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            Handler.service = Service(Path(temporary), max_upload_bytes=100_000)
+            Handler.service.seed()
+            Handler.signin_limiter = SigninLimiter()
+            Handler.signin_address_limiter = SigninLimiter(max_failures=20)
+            Handler.secure_cookie = False
+            server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+            worker = threading.Thread(target=server.serve_forever, daemon=True)
+            worker.start()
+            connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=10)
+            cookie, csrf = None, None
+
+            def request(method: str, path: str, payload=None, extra_headers=None, expected=200):
+                headers = dict(extra_headers or {})
+                if cookie:
+                    headers["Cookie"] = cookie
+                if method == "POST" and path != "/api/signin":
+                    headers["X-CSRF-Token"] = csrf
+                body = payload
+                if isinstance(payload, dict):
+                    body = json.dumps(payload)
+                    headers["Content-Type"] = "application/json"
+                connection.request(method, path, body=body, headers=headers)
+                response = connection.getresponse()
+                content = response.read()
+                self.assertEqual(response.status, expected, (method, path, content))
+                return json.loads(content) if response.getheader("Content-Type", "").startswith("application/json") else content, response
+
+            try:
+                _, response = request("POST", "/api/signin", {"email":"analyst@example.test", "password":"fictional-demo"})
+                cookie = response.getheader("Set-Cookie").split(";", 1)[0]
+                bootstrap, _ = request("GET", "/api/bootstrap")
+                csrf = bootstrap["user"]["csrf_token"]
+                deal, _ = request("POST", "/api/deals", {"name":"Fictional Three-Source Plaza", "address":"1 Fictional Way", "property_type":"office"}, expected=201)
+                fixture_root = Path(__file__).parent / "fixtures"
+                fixtures = tuple(
+                    (filename, (fixture_root / filename).read_bytes(), category)
+                    for filename, category in (
+                        ("fictional-offering-memorandum.csv", "offering_memorandum"),
+                        ("fictional-rent-roll.csv", "rent_roll"),
+                        ("fictional-t12-operating-statement.csv", "t12_operating_statement"),
+                    )
+                )
+                document_ids = []
+                for filename, content, category in fixtures:
+                    uploaded, _ = request("POST", f"/api/deals/{deal['id']}/upload", content, {"X-Filename": filename}, expected=201)
+                    self.assertEqual(uploaded["category"], category)
+                    document_ids.append(uploaded["id"])
+                    source_bytes, _ = request("GET", f"/api/documents/{uploaded['id']}")
+                    self.assertEqual(source_bytes, content)
+
+                snapshot, _ = request("GET", f"/api/deals/{deal['id']}")
+                self.assertEqual({item["category"] for item in snapshot["documents"]}, {item[2] for item in fixtures})
+                values_by_document = {}
+                for value in snapshot["values"]:
+                    values_by_document.setdefault(value["document_id"], value)
+                for document_id in document_ids:
+                    value = values_by_document[document_id]
+                    reviewed, _ = request("POST", f"/api/values/{value['id']}/review", {"status":"approved", "normalized_value":value["normalized_value"], "comments":"Checked against fictional source"})
+                    self.assertEqual(reviewed["review_status"], "approved")
+
+                governed_values = {
+                    "rent_roll_occupied_area":"80", "rent_roll_total_area":"100", "occupancy":"0.90", "rentable_square_feet":"120",
+                    "rent_roll_annualized_rent":"100", "operating_rental_revenue":"200", "calculated_noi":"50", "reported_noi":"60",
+                    "historical_noi":"100", "pro_forma_noi":"130", "lease_expiration_date":"2026-12-31", "rent_roll_expiration":"2027-12-31",
+                    "lease_current_rent":"10", "rent_roll_current_rent":"12", "lease_area":"100", "rent_roll_lease_area":"110",
+                    "unit_count":"10", "rent_roll_unit_count":"11", "asking_price":"1000", "loi_price":"900", "psa_price":"800",
+                }
+                for field_name, value in governed_values.items():
+                    assumption, _ = request("POST", f"/api/deals/{deal['id']}/assumptions", {"field_name":field_name, "proposed_value":value, "rationale":"Fictional controlled input"}, expected=201)
+                    request("POST", f"/api/assumptions/{assumption['id']}/review", {"status":"approved", "normalized_value":value, "comments":"Approved for fictional workflow"})
+
+                findings, _ = request("POST", f"/api/deals/{deal['id']}/reconcile")
+                self.assertGreaterEqual(len(findings), 10)
+                snapshot, _ = request("GET", f"/api/deals/{deal['id']}")
+                open_finding = next(item for item in snapshot["findings"] if item["resolution_status"] == "open")
+                resolved, _ = request("POST", f"/api/findings/{open_finding['id']}/resolve", {"notes":"Fictional committee selected the controlling source."})
+                self.assertEqual(resolved["resolution_status"], "resolved")
+
+                underwriting, _ = request("POST", f"/api/deals/{deal['id']}/export/test2")
+                memo, _ = request("POST", f"/api/deals/{deal['id']}/export/memo")
+                self.assertEqual(underwriting["artifact"]["version"], 1)
+                self.assertEqual(memo["content"]["schemaVersion"], "test3-ic-memo/2.0")
+                self.assertEqual(len(memo["content"]["sections"]), 18)
+                history, _ = request("GET", f"/api/deals/{deal['id']}/exports")
+                self.assertEqual({item["kind"] for item in history}, {"test2", "memo"})
+
+                final, _ = request("GET", f"/api/deals/{deal['id']}")
+                actions = {item["action"] for item in final["audit"]}
+                self.assertTrue({"deal.created", "document.uploaded", "value.approved", "assumption.approved", "reconciliation.completed", "finding.resolved", "export.test2", "export.memo"} <= actions)
+                integrity, _ = request("GET", "/api/operations/integrity")
+                self.assertTrue(integrity["ok"])
+                self.assertEqual(integrity["networkRequests"], 0)
+            finally:
+                connection.close()
+                server.shutdown()
+                server.server_close()
+                worker.join(timeout=5)
+
 
 class ResilienceTests(unittest.TestCase):
     def test_concurrent_local_workload_has_exact_counts_and_valid_chains(self):

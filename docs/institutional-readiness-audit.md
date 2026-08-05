@@ -29,15 +29,14 @@ The project has a strong zero-cost local foundation and meaningful controls, but
 | Audit integrity and operational readiness | Proven, local | Preventive triggers, independent audit/review verifiers, schema/FK/DB/file/tombstone checks, crash recovery | Hash chains are local, not externally anchored; this is explicitly not claimed otherwise |
 | Backup, restore and bounded load | Proven for recorded scope | Format 3 app-open restore; two 100-operation/8-worker exact-count runs | Not large-document/OCR/soak/hardware-failure capacity evidence |
 | Accessibility | Proven for bounded browser scope | CI static guard; real Chromium auth/keyboard/mobile/contrast/injection/log audit | No assistive-technology, forced-colors or full WCAG certification |
-| Complete first-usable-release E2E | Partial | Service workflow and live HTTP/browser tests cover major slices | No single automated workflow signs in, uploads fictional OM + rent roll + T-12, reviews source links, produces 10+ reachable findings, resolves and persists versioned export/memo/audit |
+| Complete first-usable-release E2E | Proven for specified release workflow | One real authenticated loopback HTTP test creates a deal, uploads committed fictional OM/rent-roll/T-12 fixtures, verifies classification/exact source bytes, reviews extracted cells, approves governed inputs, produces 10+ findings, resolves one, persists test2/memo artifacts and verifies history/audit/integrity | Semantic row/entity coverage and expanded test2 mapping remain P1 product-depth gaps, not hidden acceptance claims |
 | Production/institutional release claim | Not achieved | README/status correctly disclaim production readiness | Close P0/P1 product gaps below and rerun this matrix |
 
 ## Ranked implementation backlog
 
 ### P0 — correctness and release workflow
 
-1. Complete the HTTP/three-document release workflow around the now-proven canonical scalar contract and sixteen-rule approved service workflow; connect structured list rules to semantic entities.
-2. Add fictional OM, rent-roll and T-12 fixtures that exercise classification, semantic extraction, source review, approvals, reconciliation, resolution, export, memo and audit.
+1. Promote the P1 semantic row/entity and spreadsheet-source work needed for deeper diligence coverage; the bounded first-release HTTP workflow is now proven.
 
 ### P1 — semantic diligence coverage
 

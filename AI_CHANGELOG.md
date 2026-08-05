@@ -148,3 +148,9 @@
 - Limited factual sections to approved values with local document/page links or user-entered rationale.
 - Added received/missing sources, explicit missing sections, excluded-value disclosures, deterministic diligence questions/risks and cautiously labeled review steps.
 - Rendered the complete schema with escaped content and local links inside the analyst interface; memo artifacts remain deterministic and local.
+## 2026-08-04 — first usable release acceptance tranche
+
+- Added three committed fictional OM, rent-roll and T-12 fixtures.
+- Proved the complete defined analyst workflow through real authenticated loopback HTTP routes and a fresh database.
+- Required exact source retrieval, review decisions, eleven reachable discrepancies, resolution, immutable test2/memo artifacts, audit actions and final operational integrity.
+- Documented the acceptance boundary: scalar assumptions are governed, while deeper semantic table models remain an explicit P1 gap.

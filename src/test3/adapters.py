@@ -18,6 +18,9 @@ TEST2_PROPERTY_TYPES = frozenset(
 TEST2_REQUIRED_APPROVED_FIELDS = (
     "property_name", "forecast_start_date", "forecast_months", "discount_rate"
 )
+TEST2_LEASE_STATUSES = frozenset({"occupied", "future", "vacant", "month_to_month", "holdover", "expired", "terminated", "pending", "proposed", "sublease"})
+TEST2_RENT_BASES = frozenset({"per_area_per_year", "per_area_per_month", "annual_amount", "monthly_amount", "per_unit_per_month"})
+TEST2_DEBT_TYPES = frozenset({"acquisition", "permanent", "construction", "bridge", "revolver", "mezzanine", "preferred_equity", "seller_financing", "supplemental"})
 
 
 def _approved_values(approved: list[dict]) -> dict[str, object]:
@@ -33,7 +36,108 @@ def _stable_id(deal_id: str, suffix: str) -> str:
     return str(uuid5(NAMESPACE_URL, f"test3:{deal_id}:{suffix}"))
 
 
-def _test2_model(deal: dict, values: dict[str, object]) -> tuple[dict | None, list[str]]:
+def _decimal(value: object) -> str:
+    result = Decimal(str(value))
+    if not result.is_finite():
+        raise ValueError("decimal value must be finite")
+    return format(result, "f")
+
+
+def _iso_date(value: object) -> str:
+    result = str(value)
+    datetime.strptime(result, "%Y-%m-%d")
+    return result
+
+
+def _positive_int(value: object) -> int:
+    result = int(str(value))
+    if result < 1:
+        raise ValueError
+    return result
+
+
+def _semantic_arrays(deal_id: str, entities: list[dict]) -> tuple[dict[str, list[dict]], list[dict]]:
+    arrays = {"spaces": [], "tenants": [], "leases": [], "expenses": [], "debt": []}
+    diagnostics: list[dict] = []
+    for entity in entities:
+        entity_id, entity_type = str(entity.get("id", "unknown")), entity.get("entity_type")
+        if entity.get("review_status") != "approved":
+            diagnostics.append({"entityId": entity_id, "entityType": entity_type, "status": "skipped", "reason": "entity is not fully approved"})
+            continue
+        data = entity.get("data") or {}
+        try:
+            if entity_type in ("rent_roll_record", "lease_schedule_record"):
+                tenant_name = data.get("tenant_name") or data.get("party")
+                space_code = data.get("suite") or data.get("unit") or data.get("premises")
+                area = _decimal(data["rentable_area"])
+                commencement = _iso_date(data.get("lease_commencement") or data.get("commencement"))
+                expiration = _iso_date(data.get("lease_expiration") or data.get("expiration"))
+                base_rent = _decimal(data.get("current_rent") or data.get("base_rent"))
+                rent_basis = str(data.get("rent_unit") or data.get("base_rent_basis") or "")
+                status = str(data.get("occupancy_status") or data.get("lease_status") or "")
+                if not tenant_name or not space_code:
+                    raise ValueError("tenant and space identifiers are required")
+                if rent_basis not in TEST2_RENT_BASES:
+                    raise ValueError("rent basis is missing or unsupported")
+                if status not in TEST2_LEASE_STATUSES:
+                    raise ValueError("lease status is missing or unsupported")
+                tenant_id = _stable_id(deal_id, f"semantic:{entity_id}:tenant")
+                space_id = _stable_id(deal_id, f"semantic:{entity_id}:space")
+                arrays["tenants"].append({"id": tenant_id, "name": str(tenant_name)})
+                arrays["spaces"].append({"id": space_id, "code": str(space_code), "area": area})
+                arrays["leases"].append({
+                    "id": _stable_id(deal_id, f"semantic:{entity_id}:lease"), "tenantId": tenant_id,
+                    "spaceIds": [space_id], "status": status, "area": area,
+                    "commencementDate": commencement, "expirationDate": expiration,
+                    "baseRent": base_rent, "baseRentBasis": rent_basis,
+                    **({"notes": str(data["notes"])} if data.get("notes") else {}),
+                })
+                diagnostics.append({"entityId": entity_id, "entityType": entity_type, "status": "mapped", "targets": ["spaces", "tenants", "leases"]})
+            elif entity_type == "operating_account_period":
+                classification = str(data.get("account_classification", "")).strip().lower()
+                if classification not in {"expense", "operating expense", "operating_expense"}:
+                    raise ValueError("only explicitly expense-classified accounts map to test2 expenses")
+                amount = _decimal(data["annual_total"])
+                name = str(data.get("account_label") or "").strip()
+                if not name:
+                    raise ValueError("account label is required")
+                arrays["expenses"].append({"id": _stable_id(deal_id, f"semantic:{entity_id}:expense"), "name": name, "category": classification, "method": "fixed_annual", "amount": amount})
+                diagnostics.append({"entityId": entity_id, "entityType": entity_type, "status": "mapped", "targets": ["expenses"]})
+            elif entity_type == "debt_term_record":
+                debt_type = str(data.get("debt_type") or "")
+                rate_type = str(data.get("rate_type") or "")
+                lender = str(data.get("lender") or "").strip()
+                if not lender:
+                    raise ValueError("lender is required")
+                if debt_type not in TEST2_DEBT_TYPES:
+                    raise ValueError("debt type is missing or unsupported")
+                if rate_type not in {"fixed", "floating"}:
+                    raise ValueError("rate type is missing or unsupported")
+                debt = {
+                    "id": _stable_id(deal_id, f"semantic:{entity_id}:debt"),
+                    "name": lender, "type": debt_type,
+                    "commitment": _decimal(data["loan_amount"]),
+                    "fundingDate": _iso_date(data["funding_date"]), "rateType": rate_type,
+                    "termMonths": _positive_int(data["term"]),
+                }
+                if rate_type == "fixed":
+                    debt["fixedRate"] = _decimal(data["interest_rate"])
+                elif data.get("spread") not in (None, ""):
+                    debt["spread"] = _decimal(data["spread"])
+                for source, target in (("rate_floor", "rateFloor"), ("rate_cap", "rateCap")):
+                    if data.get(source) not in (None, ""):
+                        debt[target] = _decimal(data[source])
+                arrays["debt"].append(debt)
+                diagnostics.append({"entityId": entity_id, "entityType": entity_type, "status": "mapped", "targets": ["debt"]})
+            else:
+                diagnostics.append({"entityId": entity_id, "entityType": entity_type, "status": "skipped", "reason": "entity type has no test2 mapping"})
+        except (KeyError, InvalidOperation, TypeError, ValueError) as error:
+            reason = f"required value {error.args[0]} is missing" if isinstance(error, KeyError) else (str(error) or "required value is missing or invalid")
+            diagnostics.append({"entityId": entity_id, "entityType": entity_type, "status": "skipped", "reason": reason})
+    return arrays, diagnostics
+
+
+def _test2_model(deal: dict, values: dict[str, object], semantic_entities: list[dict] | None = None) -> tuple[dict | None, list[str], list[dict]]:
     missing = [name for name in TEST2_REQUIRED_APPROVED_FIELDS if values.get(name) in (None, "")]
     errors: list[str] = []
     property_type = deal.get("property_type")
@@ -78,22 +182,24 @@ def _test2_model(deal: dict, values: dict[str, object]) -> tuple[dict | None, li
 
     if rentable_area not in (None, ""):
         try:
-            rentable_area = format(Decimal(str(rentable_area)), "f")
-        except (InvalidOperation, TypeError):
+            rentable_area = _decimal(rentable_area)
+        except (InvalidOperation, TypeError, ValueError):
             errors.append("approved rentable_square_feet must be decimal-compatible")
 
     if missing or errors:
-        return None, [*(f"missing approved {name}" for name in missing), *errors]
+        return None, [*(f"missing approved {name}" for name in missing), *errors], []
 
     deal_id = str(deal["id"])
     acquisition_price = values.get("asking_price")
     valuation: dict[str, object] = {"discountRate": discount_rate}
     if acquisition_price not in (None, ""):
         try:
-            valuation["acquisitionPrice"] = format(Decimal(str(acquisition_price)), "f")
-        except (InvalidOperation, TypeError):
+            valuation["acquisitionPrice"] = _decimal(acquisition_price)
+        except (InvalidOperation, TypeError, ValueError):
             errors.append("approved asking_price must be decimal-compatible")
-            return None, errors
+            return None, errors, []
+
+    semantic_arrays, semantic_diagnostics = _semantic_arrays(deal_id, semantic_entities or [])
 
     return {
         "modelId": _stable_id(deal_id, "model"),
@@ -108,21 +214,23 @@ def _test2_model(deal: dict, values: dict[str, object]) -> tuple[dict | None, li
             **({"rentableArea": rentable_area} if rentable_area not in (None, "") else {}),
             **({"unitCount": unit_count} if unit_count not in (None, "") else {}),
         },
-        "growthCurves": [], "spaces": [], "tenants": [], "leases": [],
-        "marketLeasingProfiles": [], "otherRevenue": [], "expenses": [],
-        "capital": [], "debt": [], "valuation": valuation,
-    }, []
+        "growthCurves": [], "spaces": semantic_arrays["spaces"], "tenants": semantic_arrays["tenants"], "leases": semantic_arrays["leases"],
+        "marketLeasingProfiles": [], "otherRevenue": [],
+        "capital": [], "debt": semantic_arrays["debt"], "valuation": valuation,
+        "expenses": semantic_arrays["expenses"],
+    }, [], semantic_diagnostics
 
 
 def test2_export(
     deal: dict,
     approved: list[dict],
     findings: list[dict],
+    semantic_entities: list[dict] | None = None,
     compatibility_version: str = "0.1.0",
 ) -> dict:
     values = _approved_values(approved)
     hashes = sorted({item.get("document_sha256") for item in approved if item.get("review_status") == "approved" and item.get("document_sha256")})
-    model, blockers = _test2_model(deal, values)
+    model, blockers, semantic_diagnostics = _test2_model(deal, values, semantic_entities)
     generated_at = datetime.now(timezone.utc).isoformat()
     portable = None
     if model is not None:
@@ -146,6 +254,9 @@ def test2_export(
             "approvedFieldCount": len(values),
             "importReady": portable is not None,
             "blockers": blockers,
+            "semanticEntities": semantic_diagnostics,
+            "mappedSemanticEntityCount": sum(item["status"] == "mapped" for item in semantic_diagnostics),
+            "skippedSemanticEntityCount": sum(item["status"] == "skipped" for item in semantic_diagnostics),
         },
         "test2PortableModel": portable,
         "supportingSources": [

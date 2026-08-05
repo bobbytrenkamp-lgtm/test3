@@ -96,3 +96,7 @@ Schema version 3 and backup format 5 now preserve immutable rent-roll, operating
 ## Semantic entity UI update
 
 The approved-data area now exposes every semantic row, canonical fields, source document/row and derived approval state. Analysts can open a constituent cell in the exact viewer; approvals still occur only through cell-level append-only decisions. Next: map fully approved rows into test2 spaces/tenants/leases/expenses/debt with real parser validation.
+
+## Approved semantic test2 mapping update
+
+Fully approved, schema-complete rent-roll/lease rows now map to stable-ID spaces, tenants and leases; explicitly expense-classified operating rows map to fixed-annual expenses; complete debt-term rows map to debt facilities. Pending, rejected, incomplete and unsupported rows are excluded with per-entity diagnostics and no invented assumptions. An expanded fictional model passed test2's real `parseModelInput` at audited commit `9a0581efa10751726f067e2e6b3bea76f4c99b0b` using already-local tooling and no downloads. Advanced arrays remain an explicit boundary.

@@ -4,7 +4,7 @@ Audit date: 2026-08-04. This matrix evaluates the original application specifica
 
 ## Executive result
 
-The project has a strong zero-cost local foundation and meaningful controls, but the full product specification is **not yet institutionally complete**. The largest remaining gaps are semantic tabular extraction/source navigation, expanded test2 entity mappings and a single automated first-usable-release workflow using three document types.
+The project has a strong zero-cost local foundation and meaningful controls, but the full product specification is **not yet institutionally complete**. The largest remaining gaps are broader semantic extraction coverage, advanced test2 arrays, optional local-model execution and additional accessibility/operational evidence.
 
 ## Requirement matrix
 
@@ -16,12 +16,12 @@ The project has a strong zero-cost local foundation and meaningful controls, but
 | PDF/XLSX/CSV/PNG/JPEG support | Proven, bounded | MIME/signature checks, PDFium/openpyxl/Pillow, optional local Tesseract, corrupt/unsafe tests | No extraction-accuracy benchmark; OCR requires separately installed local executable |
 | Secure ingestion and original preservation | Proven | Independent MIME, size/archive limits, SHA-256, duplicate constraint, UUID paths, processing versions, no macro execution, purge/recovery, explicit malware-unavailable state | No actual malware engine by design; full-media erasure remains operator duty |
 | Complete extraction provenance model | Mostly proven | Deal/document/version/category/raw/normalized/unit/currency/page/bbox/excerpt/hash/method/version/confidence/validation/review/reviewer/comment/supersession columns | Spreadsheet coordinates are logical cells, not a rendered exact-source viewer; dynamic row fields lack governed semantic types |
-| Required OM/rent-roll/operations/lease/debt extractions | Mostly proven | 57 governed scalars plus immutable source-cell-backed rent-roll, operating account/period, lease schedule/options/rights and debt-term rows; derived approval and integrity tests | Broader header corpus and multi-sheet ingestion remain bounded; semantic entities are not yet mapped into test2 arrays |
+| Required OM/rent-roll/operations/lease/debt extractions | Mostly proven | 57 governed scalars plus immutable source-cell-backed rent-roll, operating account/period, lease schedule/options/rights and debt-term rows; derived approval, integrity and bounded downstream mappings | Broader header corpus and multi-sheet ingestion remain bounded |
 | Exact click-through source review | Proven for supported source semantics | PDF/image page rendering and normalized bounding-box evidence; bounded non-executing CSV/XLSX table endpoint and highlighted logical cell navigation; excerpt fallback | Tabular view is intentionally logical rather than pixel-identical and covers the first XLSX worksheet |
 | Human approval and controlling-source governance | Proven | Typed approvals, rejection rationale, append-only decision chain, explicit supersession, approved-only export | Dynamic unregistered table cells can be reviewed but lack downstream semantic governance |
-| Nineteen deterministic reconciliation rules | Mostly proven | All scalar inputs are registry-governed; a real approval/service workflow persists sixteen named findings; date comparison is type-correct; immutable input-hashed runs retain supersession/resolution | Structured list inputs still await semantic row/entity ingestion, and the combined HTTP three-document release workflow remains pending |
+| Nineteen deterministic reconciliation rules | Mostly proven | All scalar inputs are registry-governed; a real approval/service workflow persists sixteen named findings; date comparison is type-correct; immutable input-hashed runs retain supersession/resolution; combined HTTP workflow is proven | Some structured-list rules remain outside semantic-row reconciliation |
 | Professional 12-area analyst UX | Partial | All named navigation areas represented; real desktop/mobile/security/accessibility evidence | Deal overview/processing are folded into other views; spreadsheet source review and some screens remain minimal |
-| test2 approved-only package | Partial, honestly bounded | Minimal property model passed actual test2 `parseModelInput`; approved-only provenance tested; every generation is an immutable versioned/hash-verified artifact with approval snapshot and history | Buildings/spaces/tenants/leases/rent steps/recoveries/expenses/capital/debt/scenarios are not mapped |
+| test2 approved-only package | Proven for documented boundary | Minimal and expanded space/tenant/lease/expense/debt models passed actual test2 `parseModelInput` at audited commit `9a0581e`; approved-only provenance and per-row skip diagnostics are tested; every generation is immutable/hash-verified | Buildings, rent steps, recoveries, options, capital and scenarios remain explicitly unmapped |
 | test1 optional read-only enrichment | Proven, optional | Actual seven-file local snapshot parsed by hash with approved FIPS, dates/citations/coverage and zero requests | Upstream test1 has no license, so no code/data redistribution; user supplies local files |
 | Full reviewable IC memo | Proven, deterministic | Stable 18-section schema; approved facts link to local sources; missing/unverified states, operations/rollover/debt areas, deterministic risks/questions, cautiously labeled review steps and deduplicated appendix; immutable versioned artifact tests | Narrative quality is intentionally bounded without a local model; absent information remains explicit rather than invented |
 | Optional local-model provider | Designed only | Loopback URL validation and honest unavailable state | No probe/generation/metadata persistence or structured-output validation; optional core workflows do not depend on it |
@@ -29,7 +29,7 @@ The project has a strong zero-cost local foundation and meaningful controls, but
 | Audit integrity and operational readiness | Proven, local | Preventive triggers, independent audit/review verifiers, schema/FK/DB/file/tombstone checks, crash recovery | Hash chains are local, not externally anchored; this is explicitly not claimed otherwise |
 | Backup, restore and bounded load | Proven for recorded scope | Format 3 app-open restore; two 100-operation/8-worker exact-count runs | Not large-document/OCR/soak/hardware-failure capacity evidence |
 | Accessibility | Proven for bounded browser scope | CI static guard; real Chromium auth/keyboard/mobile/contrast/injection/log audit | No assistive-technology, forced-colors or full WCAG certification |
-| Complete first-usable-release E2E | Proven for specified release workflow | One real authenticated loopback HTTP test creates a deal, uploads committed fictional OM/rent-roll/T-12 fixtures, verifies classification/exact source bytes, reviews extracted cells, approves governed inputs, produces 10+ findings, resolves one, persists test2/memo artifacts and verifies history/audit/integrity | Semantic row/entity coverage and expanded test2 mapping remain P1 product-depth gaps, not hidden acceptance claims |
+| Complete first-usable-release E2E | Proven for specified release workflow | One real authenticated loopback HTTP test creates a deal, uploads committed fictional OM/rent-roll/T-12 fixtures, verifies classification/exact source bytes, reviews extracted cells, approves governed inputs, produces 10+ findings, resolves one, persists test2/memo artifacts and verifies history/audit/integrity | Broader semantic corpus and advanced test2 arrays remain product-depth gaps, not hidden acceptance claims |
 | Production/institutional release claim | Not achieved | README/status correctly disclaim production readiness | Close P0/P1 product gaps below and rerun this matrix |
 
 ## Ranked implementation backlog
@@ -40,10 +40,10 @@ The project has a strong zero-cost local foundation and meaningful controls, but
 
 ### P1 — semantic diligence coverage
 
-1. Expand fictional header/category-negative coverage for the governed semantic entities and map approved entities to validated test2 arrays.
+1. Expand fictional header/category-negative coverage for the governed semantic entities; approved bounded mappings are now parser-validated.
 2. Extend current first-worksheet XLSX navigation only if multi-sheet semantic ingestion is added; do not claim pixel-identical rendering.
 3. Expand scalar registry coverage across every explicitly required named extraction, with positive/category-negative fixtures.
-4. Map supported semantic entities into the corresponding test2 arrays and execute each expanded shape through the real parser fixture.
+4. Add advanced test2 mappings only with approved source semantics and execute each new shape through the real parser fixture.
 
 ### P2 — bounded optional/operational maturity
 

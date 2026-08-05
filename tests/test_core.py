@@ -420,9 +420,28 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(result["results"], {})
 
     def test_memo_does_not_invent(self):
-        memo = diligence_summary(self.deal, self.approved, [])
+        documents = [{"id":"doc-1", "original_name":"Fictional OM.pdf", "detected_mime":"application/pdf", "category":"offering_memorandum", "processing_status":"extracted", "original_purged_at":None}]
+        findings = [{"rule_code":"CAP_RATE_MATH", "severity":"high", "explanation":"Fictional cap rate mismatch.", "source_documents":["Fictional OM.pdf"], "page_references":[1], "suggested_next_step":"Confirm fictional inputs.", "resolution_status":"open"}]
+        memo = diligence_summary(self.deal, self.approved, findings, documents, self.approved)
         self.assertTrue(memo["draft"])
+        self.assertEqual(memo["schemaVersion"], "test3-ic-memo/2.0")
         self.assertEqual(len(memo["approvedFacts"]), 1)
+        expected_sections = [
+            "executiveSummary", "propertyOverview", "sourcesReceived", "sourcesMissing", "purchaseAssumptions",
+            "historicalOperations", "proFormaAssumptions", "tenantUnitSummary", "leaseRollover", "debtTerms",
+            "keyDiscrepancies", "materialDiligenceQuestions", "locationJurisdictionContext", "majorRisks",
+            "potentialMitigants", "approvedFacts", "unverifiedStatements", "sourceAppendix",
+        ]
+        sections = {section["id"]: section for section in memo["sections"]}
+        self.assertEqual([section["id"] for section in memo["sections"]], expected_sections)
+        self.assertEqual(sections["propertyOverview"]["status"], "supported")
+        self.assertEqual(sections["historicalOperations"]["status"], "missing")
+        self.assertEqual(len(sections["sourcesMissing"]["items"]), 2)
+        self.assertEqual(sections["unverifiedStatements"]["items"][0]["statement"], "Asking Price: rejected; excluded from approved facts.")
+        self.assertEqual(memo["approvedFacts"][0]["sourceRefs"][0]["sourceUrl"], "/api/documents/doc-1/page/1")
+        self.assertEqual(sections["keyDiscrepancies"]["items"][0]["sourceRefs"][0]["sourceUrl"], "/api/documents/doc-1/page/1")
+        self.assertNotIn("10000000", json.dumps(memo["approvedFacts"]))
+        self.assertIn("not an established mitigant", sections["potentialMitigants"]["items"][0]["statement"])
 
     def test_local_model_rejects_external_hosts(self):
         self.assertEqual(validate_local_endpoint("http://127.0.0.1:11434"), "http://127.0.0.1:11434")

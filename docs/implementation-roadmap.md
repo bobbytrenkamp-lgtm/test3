@@ -12,8 +12,8 @@ Every phase begins and ends with the cost guard. Required confirmation: “ZERO-
 | 5 — reconciliation | Partial | 19 rules and immutable runs tested; runtime-reachable canonical input contract/E2E remains |
 | 6 — test2 export | Tested, minimal | Actual parser accepted minimal property model; expanded entities and persisted versions remain |
 | 7 — test1 adapter | Tested, optional | Actual local snapshot match/fallback, integrity, freshness and zero-network evidence |
-| 8 — IC memo | Partial | Approved facts/discrepancies/source appendix only; full required sections remain |
+| 8 — IC memo | Tested | All 18 required sections, approved-only source links, missing/unverified states and immutable artifact persistence |
 | 9 — optional local model | Designed | Loopback validation and honest unavailable state; optional generation adapter not implemented |
 | 10 — hardening | Tested, bounded; final audit active | Auth, retention, readiness, load/restore and browser audit complete within documented limits |
 
-Next implementation slice: canonical reconciliation inputs plus a three-document first-release E2E, followed by persisted export versions and complete memo sections. See `docs/institutional-readiness-audit.md`.
+Next implementation slice: the combined three-document first-release E2E and its prerequisite semantic tabular entities/source navigation. See `docs/institutional-readiness-audit.md`.

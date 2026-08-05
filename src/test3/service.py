@@ -476,7 +476,7 @@ class Service:
         if kind == "test2":
             result = test2_export(snapshot["deal"], approved, snapshot["findings"])
         elif kind == "memo":
-            result = diligence_summary(snapshot["deal"], approved, snapshot["findings"])
+            result = diligence_summary(snapshot["deal"], approved, snapshot["findings"], snapshot["documents"], snapshot["values"])
         elif kind == "test1":
             approved_values = {item["field_name"]: item.get("normalized_value") for item in approved}
             inputs = {

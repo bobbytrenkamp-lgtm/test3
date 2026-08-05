@@ -165,6 +165,71 @@ def test1_enrichment(address: dict, local_snapshot: dict | None = None) -> dict:
     return enrich_test1_snapshot(address, local_snapshot)
 
 
-def diligence_summary(deal: dict, approved: list[dict], findings: list[dict]) -> dict:
-    facts = [{"statement": f"{item['field_name'].replace('_', ' ').title()}: {item.get('normalized_value')}", "source": {"sourceType": item.get("source_kind", "document"), "documentId": item.get("document_id"), "page": item.get("page_number"), "excerptHash": item.get("source_text_hash")}} for item in approved if item.get("review_status") == "approved"]
-    return {"title": f"DRAFT — {deal['name']} diligence summary", "draft": True, "legalNotice": "Diligence support only; lease and legal items require qualified review.", "executiveSummary": "This draft includes approved facts only. Missing information is not inferred.", "approvedFacts": facts, "keyDiscrepancies": findings, "sourceAppendix": [fact["source"] for fact in facts]}
+def diligence_summary(deal: dict, approved: list[dict], findings: list[dict], documents: list[dict] | None = None, all_values: list[dict] | None = None) -> dict:
+    documents, all_values = documents or [], all_values or approved
+    documents_by_name = {item["original_name"]: item for item in documents}
+    documents_by_id = {item["id"]: item for item in documents}
+
+    def source(item: dict) -> dict:
+        document_id = item.get("document_id")
+        return {
+            "sourceType": item.get("source_kind", "document"), "documentId": document_id,
+            "documentVersion": item.get("document_version"), "page": item.get("page_number"),
+            "excerptHash": item.get("source_text_hash"),
+            "sourceUrl": f"/api/documents/{document_id}/page/{item.get('page_number')}" if document_id and item.get("page_number") and documents_by_id.get(document_id, {}).get("detected_mime") == "application/pdf" else (f"/api/documents/{document_id}" if document_id else None),
+            **({"rationale": item.get("rationale") or item.get("source_excerpt")} if not document_id else {}),
+        }
+
+    facts = [
+        {"field": item["field_name"], "statement": f"{item['field_name'].replace('_', ' ').title()}: {item.get('normalized_value')}", "sourceRefs": [source(item)]}
+        for item in approved if item.get("review_status") == "approved"
+    ]
+    by_field = {item["field"]: item for item in facts}
+
+    def fact_section(section_id: str, title: str, fields: tuple[str, ...]) -> dict:
+        items = [by_field[field] for field in fields if field in by_field]
+        return {"id": section_id, "title": title, "status": "supported" if items else "missing", "items": items, "note": None if items else "No approved source-backed facts are available for this section."}
+
+    received = [{"statement": f"{item['original_name']} ({item['category']}, {item['processing_status']})", "sourceRefs": [{"sourceType": "document", "documentId": item["id"], "documentVersion": 1, "page": None, "excerptHash": None, "sourceUrl": None if item.get("original_purged_at") else f"/api/documents/{item['id']}"}]} for item in documents]
+    required_sources = {"offering_memorandum": "Offering memorandum", "rent_roll": "Rent roll", "t12_operating_statement": "T-12 operating statement"}
+    received_categories = {item.get("category") for item in documents}
+    missing_sources = [{"statement": f"{label}: not received", "sourceRefs": []} for category, label in required_sources.items() if category not in received_categories]
+    open_findings = [item for item in findings if item.get("resolution_status", "open") == "open"]
+    discrepancy_items = [{"statement": item["explanation"], "severity": item.get("severity"), "ruleCode": item.get("rule_code"), "sourceRefs": [{"sourceType": "document_reference", "documentName": name, "documentId": documents_by_name.get(name, {}).get("id"), "page": page, "sourceUrl": (f"/api/documents/{documents_by_name[name]['id']}/page/{page}" if name in documents_by_name and page and documents_by_name[name].get("detected_mime") == "application/pdf" else (f"/api/documents/{documents_by_name[name]['id']}" if name in documents_by_name else None))} for name in item.get("source_documents", []) for page in (item.get("page_references") or [None])]} for item in open_findings]
+    unverified = [{"statement": f"{item['field_name'].replace('_', ' ').title()}: {item.get('review_status', 'needs_review').replace('_', ' ')}; excluded from approved facts.", "sourceRefs": [source(item)]} for item in all_values if item.get("review_status") != "approved"]
+    questions = [{"statement": f"Resolve {item.get('rule_code', 'discrepancy')}: {item.get('suggested_next_step') or 'Review controlling sources.'}", "sourceRefs": []} for item in open_findings]
+    questions.extend({"statement": f"Obtain and review the missing {item['statement'].split(':', 1)[0].lower()}.", "sourceRefs": []} for item in missing_sources)
+    risks = [{"statement": item["explanation"], "severity": item.get("severity"), "sourceRefs": []} for item in open_findings if item.get("severity") in ("high", "medium")]
+    mitigants = [{"statement": f"Potential review step (not an established mitigant): {item.get('suggested_next_step')}", "sourceRefs": []} for item in open_findings if item.get("suggested_next_step")]
+    appendix_by_key = {}
+    for sourced_item in [*facts, *received, *discrepancy_items]:
+        for ref in sourced_item["sourceRefs"]:
+            key = (ref.get("sourceType"), ref.get("documentId"), ref.get("page"), ref.get("excerptHash"), ref.get("rationale"))
+            appendix_by_key[key] = ref
+    appendix = list(appendix_by_key.values())
+    sections = [
+        {"id": "executiveSummary", "title": "Executive summary", "status": "supported" if facts else "missing", "items": [{"statement": f"This draft contains {len(facts)} approved source-backed fact(s) and {len(open_findings)} open discrepancy finding(s). Missing information is not inferred.", "sourceRefs": []}]},
+        fact_section("propertyOverview", "Property overview", ("property_name", "address", "year_built", "rentable_square_feet", "unit_count", "occupancy")),
+        {"id": "sourcesReceived", "title": "Sources received", "status": "supported" if received else "missing", "items": received, "note": None if received else "No diligence documents have been received."},
+        {"id": "sourcesMissing", "title": "Sources missing", "status": "supported" if missing_sources else "not_applicable", "items": missing_sources, "note": "Compared with the first-usable-release OM, rent roll and T-12 set."},
+        fact_section("purchaseAssumptions", "Purchase assumptions", ("asking_price", "loi_price", "psa_price", "broker_stated_cap_rate")),
+        fact_section("historicalOperations", "Historical operations", ("historical_noi", "operating_rental_revenue", "gross_revenue", "operating_expenses", "reported_noi")),
+        fact_section("proFormaAssumptions", "Pro forma assumptions", ("pro_forma_noi", "forecast_start_date", "forecast_months", "discount_rate")),
+        fact_section("tenantUnitSummary", "Tenant or unit summary", ("tenant_name", "suite", "unit_count", "rent_roll_unit_count", "rent_roll_occupied_area")),
+        fact_section("leaseRollover", "Lease rollover", ("lease_commencement_date", "lease_expiration_date", "rent_roll_expiration", "lease_current_rent", "rent_roll_current_rent")),
+        fact_section("debtTerms", "Debt terms", ("loan_amount", "interest_rate", "loan_spread", "loan_term_months", "amortization_months", "interest_only_months", "stated_ltv", "stated_ltc", "minimum_dscr")),
+        {"id": "keyDiscrepancies", "title": "Key discrepancies", "status": "open" if discrepancy_items else "none_identified", "items": discrepancy_items},
+        {"id": "materialDiligenceQuestions", "title": "Material diligence questions", "status": "open" if questions else "none_identified", "items": questions},
+        fact_section("locationJurisdictionContext", "Location and jurisdiction context", ("address", "county_fips", "state", "municipality", "parcel_id")),
+        {"id": "majorRisks", "title": "Major risks", "status": "open" if risks else "none_identified", "items": risks, "note": "Only unresolved deterministic findings are listed; no broader risk conclusion is inferred."},
+        {"id": "potentialMitigants", "title": "Potential mitigants", "status": "review_required" if mitigants else "missing", "items": mitigants, "note": "These are review steps, not verified mitigants or recommendations."},
+        {"id": "approvedFacts", "title": "Approved facts", "status": "supported" if facts else "missing", "items": facts},
+        {"id": "unverifiedStatements", "title": "Unverified statements", "status": "review_required" if unverified else "none_identified", "items": unverified, "note": "Pending, rejected and superseded values are excluded from factual sections."},
+        {"id": "sourceAppendix", "title": "Source appendix", "status": "supported" if appendix else "missing", "items": [{"statement": f"Source {index + 1}", "sourceRefs": [ref]} for index, ref in enumerate(appendix)]},
+    ]
+    return {
+        "schemaVersion": "test3-ic-memo/2.0", "title": f"DRAFT — {deal['name']} diligence summary", "draft": True,
+        "legalNotice": "Diligence support only; this is not investment, legal or accounting advice. Lease and legal items require qualified review.",
+        "executiveSummary": sections[0]["items"][0]["statement"], "sections": sections,
+        "approvedFacts": facts, "keyDiscrepancies": discrepancy_items, "sourceAppendix": appendix,
+    }

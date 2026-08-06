@@ -80,8 +80,8 @@ def parse_market_panel(content: bytes) -> tuple[dict, list[dict], list[dict]]:
 def rows_to_observations(snapshot_id: str, organization_id: str, rows: list[dict], created_at: str) -> list[dict]:
     observations = []
     for row in rows:
-        geography_type = "submarket" if row.get("submarket") else "market" if row.get("market_id") else "county"
-        geography_id = row.get("submarket") or row.get("market_id") or row.get("county_fips")
+        geography_type = row.get("geography_type") or ("submarket" if row.get("submarket") else "market" if row.get("market_id") else "county")
+        geography_id = row.get("geography_id") or row.get("submarket") or row.get("market_id") or row.get("county_fips")
         for metric in sorted(DECIMAL_METRICS):
             if row.get(metric) in (None, ""):
                 continue

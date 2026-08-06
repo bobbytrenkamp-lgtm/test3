@@ -27,6 +27,8 @@ Each deal response includes:
 - linear trend, observed-period change, volatility, maximum drawdown and latest z-score;
 - empirical 10th/50th/90th-percentile change scenarios and historical extremes;
 - strongest small-lag associations for exact geography/property scopes.
+- reusable observed-period level-change, percentage-change and configurable lag factors;
+- like-for-like cross-market percentile scorecards for level, momentum, mean change, volatility and downside deviation.
 
 All outputs are descriptive. Correlation, lead/lag results and empirical scenarios are explicitly labeled non-causal and non-forecasting. Irregularly spaced observations are not presented as equally spaced calendar forecasts.
 

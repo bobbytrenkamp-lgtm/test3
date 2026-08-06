@@ -11,6 +11,7 @@ from test3.assumptions.public_sources import PUBLIC_SERIES, build_market_panel_c
 from test3.assumptions.observations import parse_market_panel, rows_to_observations
 from test3.assumptions.factors import derived_change_factors, market_factor_scorecards
 from test3.assumptions.governance import cadence_findings, research_manifest, revision_conflicts, source_scorecards
+from test3.assumptions.validation import market_regimes, walk_forward_baselines
 
 
 PANEL = b"""period,market_id,market_name,property_type,source,source_date,source_reference,usage_rights,county_fips,state_fips,rent_growth_12m,expense_growth,property_tax_growth,insurance_growth,vacancy_rate,effective_rent,renewal_probability,downtime_months,tenant_improvements,leasing_commission_rate,transaction_cap_rate,discount_rate,debt_interest_rate,construction_cost_growth,lease_up_units_per_month,lease_comp_count\n2025-01-01,BAL,Baltimore,office,Analyst panel,2025-02-01,local://panel,Internal use,24510,24,0.025,0.030,0.040,0.060,0.12,31.0,0.65,9,45,0.05,0.065,0.09,0.06,0.04,2,12\n2025-04-01,BAL,Baltimore,office,Analyst panel,2025-05-01,local://panel,Internal use,24510,24,0.030,0.035,0.045,0.070,0.11,32.0,0.67,8,47,0.05,0.067,0.095,0.062,0.045,2.2,14\n2025-07-01,BAL,Baltimore,office,Analyst panel,2025-08-01,local://panel,Internal use,24510,24,0.035,0.040,0.050,0.080,0.10,33.0,0.70,7,50,0.055,0.070,0.10,0.065,0.05,2.5,16\n"""
@@ -67,6 +68,22 @@ class AssumptionIntelligenceTests(unittest.TestCase):
         manifest = research_manifest(observations, snapshots)
         self.assertEqual(len(manifest["manifestSha256"]), 64)
         self.assertEqual(manifest["observationCount"], 4)
+
+    def test_walk_forward_baselines_and_transparent_regimes(self):
+        observations = []
+        periods = ("2024-01-01", "2024-04-01", "2024-07-01", "2024-10-01", "2025-01-01", "2025-04-01")
+        rents = (.03, .025, .02, .01, -.01, -.02)
+        vacancies = (.12, .115, .11, .12, .13, .14)
+        for period, rent, vacancy in zip(periods, rents, vacancies):
+            for metric, value in (("rent_growth_12m", rent), ("vacancy_rate", vacancy)):
+                observations.append({"metric": metric, "value": str(value), "observation_date": period, "property_type": "office", "geography_type": "market", "geography_id": "BAL"})
+        baselines = walk_forward_baselines(observations)
+        self.assertEqual(len(baselines), 4)
+        self.assertTrue(all(item["testCount"] == 3 for item in baselines))
+        regimes = market_regimes(observations)
+        self.assertEqual(len(regimes), 1)
+        self.assertIn("favorable", regimes[0]["regimeCounts"])
+        self.assertIn("adverse", regimes[0]["regimeCounts"])
 
     def test_market_panel_run_decision_and_test2_sidecar(self):
         with tempfile.TemporaryDirectory() as folder:

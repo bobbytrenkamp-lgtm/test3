@@ -1,5 +1,10 @@
 # AI changelog
 
+## 2026-08-06 — Model-risk baselines
+
+- Added no-look-ahead walk-forward persistence and historical-mean-change benchmarks.
+- Added transparent rent-growth/vacancy market regimes and observed transition counts.
+
 ## 2026-08-06 — Institutional data governance
 
 - Added cross-vintage revision/conflict registers, cadence-gap diagnostics and per-source scorecards.

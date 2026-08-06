@@ -21,3 +21,5 @@ All rates are decimal fractions, all dates are ISO `YYYY-MM-DD`, currency is exp
 | lease_up_units_per_month | Net newly occupied units/area-equivalent per month | units_per_month | lease_up_pace |
 
 Additional context metrics include absorption, inventory, deliveries, pipeline, transactions, permits, employment/population/income growth, inflation, Treasury rate, and granular operating costs per area. Definitions and transformations must be source-specific in `methodology_notes`; incompatible definitions should not be pooled.
+
+The institutional public-series catalog additionally covers the Treasury curve, SOFR, high-yield spreads, mortgage rates, bank CRE delinquencies, construction inputs, housing supply, industrial production, retail sales, sector employment, population, household income, renter households, vacancies and median gross rent. See `institutional-data-lab.md` for the controlled acquisition and analytical workflow.

@@ -1,5 +1,11 @@
 # AI changelog
 
+## 2026-08-05 — Institutional data lab
+
+- Added an audited 27-series public macro/CRE catalog and offline FRED/BLS normalization workflow.
+- Added local trend, volatility, drawdown, outlier, empirical stress and exploratory lead/lag analytics.
+- Preserved analyst-controlled provenance and the absolute zero-cost runtime boundary.
+
 ## 2026-08-05 — Multi-domain assumption data platform
 
 - Generalized the first rent-growth slice into 15 governed assumption domains and expanded the import metric dictionary.

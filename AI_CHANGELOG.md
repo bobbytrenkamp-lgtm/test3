@@ -1,5 +1,10 @@
 # AI changelog
 
+## 2026-08-06 — Panel factor engine
+
+- Added reusable observed-period change factors and like-for-like market percentile scorecards.
+- Added momentum, volatility and downside-deviation comparison without pooling incompatible metrics or property types.
+
 ## 2026-08-05 — Institutional data lab
 
 - Added an audited 27-series public macro/CRE catalog and offline FRED/BLS normalization workflow.

@@ -9,6 +9,7 @@ from test3.adapters import test2_export
 from test3.assumptions.analysis import lead_lag_matrix, stress_scenarios, time_series_diagnostics
 from test3.assumptions.public_sources import PUBLIC_SERIES, build_market_panel_csv, parse_bls_csv, parse_fred_csv
 from test3.assumptions.observations import parse_market_panel, rows_to_observations
+from test3.assumptions.factors import derived_change_factors, market_factor_scorecards
 
 
 PANEL = b"""period,market_id,market_name,property_type,source,source_date,source_reference,usage_rights,county_fips,state_fips,rent_growth_12m,expense_growth,property_tax_growth,insurance_growth,vacancy_rate,effective_rent,renewal_probability,downtime_months,tenant_improvements,leasing_commission_rate,transaction_cap_rate,discount_rate,debt_interest_rate,construction_cost_growth,lease_up_units_per_month,lease_comp_count\n2025-01-01,BAL,Baltimore,office,Analyst panel,2025-02-01,local://panel,Internal use,24510,24,0.025,0.030,0.040,0.060,0.12,31.0,0.65,9,45,0.05,0.065,0.09,0.06,0.04,2,12\n2025-04-01,BAL,Baltimore,office,Analyst panel,2025-05-01,local://panel,Internal use,24510,24,0.030,0.035,0.045,0.070,0.11,32.0,0.67,8,47,0.05,0.067,0.095,0.062,0.045,2.2,14\n2025-07-01,BAL,Baltimore,office,Analyst panel,2025-08-01,local://panel,Internal use,24510,24,0.035,0.040,0.050,0.080,0.10,33.0,0.70,7,50,0.055,0.070,0.10,0.065,0.05,2.5,16\n"""
@@ -39,6 +40,18 @@ class AssumptionIntelligenceTests(unittest.TestCase):
         lead_lag = lead_lag_matrix(observations)
         self.assertEqual(len(lead_lag), 1)
         self.assertIn("not causal", lead_lag[0]["warning"])
+        factors = derived_change_factors(observations)
+        self.assertTrue(any(item["factor"] == "change_4_observed_periods" for item in factors))
+
+    def test_cross_market_factor_scorecards_are_like_for_like(self):
+        observations = []
+        for market, values in (("BAL", (.10, .11, .12, .13)), ("DC", (.08, .09, .095, .10))):
+            for index, value in enumerate(values):
+                observations.append({"metric": "vacancy_rate", "value": str(value), "observation_date": f"2025-{1 + index * 3:02d}-01", "property_type": "office", "geography_type": "market", "geography_id": market})
+        scorecards = market_factor_scorecards(observations)
+        self.assertEqual(len(scorecards), 2)
+        self.assertTrue(all(item["peerCount"] == 2 for item in scorecards))
+        self.assertEqual({item["latestPercentile"] for item in scorecards}, {0.0, 1.0})
 
     def test_market_panel_run_decision_and_test2_sidecar(self):
         with tempfile.TemporaryDirectory() as folder:

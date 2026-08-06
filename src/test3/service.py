@@ -25,6 +25,7 @@ from .assumptions.catalog import BY_NAME, public_catalog
 from .assumptions.profiling import profile_observations
 from .assumptions.analysis import benchmark_matrix, correlation_matrix, lead_lag_matrix, stress_scenarios, time_series_diagnostics
 from .assumptions.public_sources import public_series_catalog
+from .assumptions.factors import derived_change_factors, market_factor_scorecards
 
 
 def _sha256_file(path: Path) -> str:
@@ -231,7 +232,7 @@ class Service:
         for run in runs:
             for key in ("evidence_snapshot_ids_json", "input_features_json", "confidence_components_json", "limitations_json"):
                 run[key.removesuffix("_json")] = json.loads(run.pop(key))
-        return {"deal": dict(deal), "documents": documents, "values": values, "entities": entities, "findings": findings, "audit": audit, "review_decisions": decisions, "assumption_runs": runs, "data_source_snapshots": snapshots, "market_observations": observations, "data_profile": profile_observations(observations), "benchmark_matrix": benchmark_matrix(observations), "correlation_matrix": correlation_matrix(observations), "time_series_diagnostics": time_series_diagnostics(observations), "stress_scenarios": stress_scenarios(observations), "lead_lag_matrix": lead_lag_matrix(observations), "assumption_decision_contexts": decision_contexts}
+        return {"deal": dict(deal), "documents": documents, "values": values, "entities": entities, "findings": findings, "audit": audit, "review_decisions": decisions, "assumption_runs": runs, "data_source_snapshots": snapshots, "market_observations": observations, "data_profile": profile_observations(observations), "benchmark_matrix": benchmark_matrix(observations), "correlation_matrix": correlation_matrix(observations), "time_series_diagnostics": time_series_diagnostics(observations), "stress_scenarios": stress_scenarios(observations), "lead_lag_matrix": lead_lag_matrix(observations), "derived_change_factors": derived_change_factors(observations), "market_factor_scorecards": market_factor_scorecards(observations), "assumption_decision_contexts": decision_contexts}
 
     def import_market_panel(self, organization_id: str, user_id: str, deal_id: str | None, filename: str, content: bytes, metadata: dict) -> dict:
         parsed, rows, errors = parse_market_panel(content)

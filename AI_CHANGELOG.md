@@ -1,5 +1,10 @@
 # AI changelog
 
+## 2026-08-06 — Institutional data governance
+
+- Added cross-vintage revision/conflict registers, cadence-gap diagnostics and per-source scorecards.
+- Added canonical research manifests linking every observation to its source snapshot and original row hash.
+
 ## 2026-08-06 — Panel factor engine
 
 - Added reusable observed-period change factors and like-for-like market percentile scorecards.

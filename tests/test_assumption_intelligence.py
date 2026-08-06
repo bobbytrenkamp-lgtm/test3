@@ -10,6 +10,7 @@ from test3.assumptions.analysis import lead_lag_matrix, stress_scenarios, time_s
 from test3.assumptions.public_sources import PUBLIC_SERIES, build_market_panel_csv, parse_bls_csv, parse_fred_csv
 from test3.assumptions.observations import parse_market_panel, rows_to_observations
 from test3.assumptions.factors import derived_change_factors, market_factor_scorecards
+from test3.assumptions.governance import cadence_findings, research_manifest, revision_conflicts, source_scorecards
 
 
 PANEL = b"""period,market_id,market_name,property_type,source,source_date,source_reference,usage_rights,county_fips,state_fips,rent_growth_12m,expense_growth,property_tax_growth,insurance_growth,vacancy_rate,effective_rent,renewal_probability,downtime_months,tenant_improvements,leasing_commission_rate,transaction_cap_rate,discount_rate,debt_interest_rate,construction_cost_growth,lease_up_units_per_month,lease_comp_count\n2025-01-01,BAL,Baltimore,office,Analyst panel,2025-02-01,local://panel,Internal use,24510,24,0.025,0.030,0.040,0.060,0.12,31.0,0.65,9,45,0.05,0.065,0.09,0.06,0.04,2,12\n2025-04-01,BAL,Baltimore,office,Analyst panel,2025-05-01,local://panel,Internal use,24510,24,0.030,0.035,0.045,0.070,0.11,32.0,0.67,8,47,0.05,0.067,0.095,0.062,0.045,2.2,14\n2025-07-01,BAL,Baltimore,office,Analyst panel,2025-08-01,local://panel,Internal use,24510,24,0.035,0.040,0.050,0.080,0.10,33.0,0.70,7,50,0.055,0.070,0.10,0.065,0.05,2.5,16\n"""
@@ -52,6 +53,20 @@ class AssumptionIntelligenceTests(unittest.TestCase):
         self.assertEqual(len(scorecards), 2)
         self.assertTrue(all(item["peerCount"] == 2 for item in scorecards))
         self.assertEqual({item["latestPercentile"] for item in scorecards}, {0.0, 1.0})
+
+    def test_revision_cadence_source_and_manifest_governance(self):
+        base = {"metric": "vacancy_rate", "observation_date": "2025-01-01", "geography_type": "market", "geography_id": "BAL", "property_type": "office", "property_subtype": None, "quality_level": "moderate", "validation_errors_json": "[]", "original_row_hash": "row"}
+        observations = []
+        for index, (snapshot, source, period, value) in enumerate((("s1", "Source A", "2025-01-01", "0.10"), ("s2", "Source B", "2025-01-01", "0.11"), ("s1", "Source A", "2025-04-01", "0.12"), ("s1", "Source A", "2025-10-01", "0.14"))):
+            observations.append({**base, "id": f"o{index}", "snapshot_id": snapshot, "source_label": source, "observation_date": period, "value": value, "original_row_hash": f"r{index}"})
+        snapshots = [{"id": item, "source_name": f"Source {letter}", "source_version": "1", "as_of_date": "2025-10-01", "imported_at": "2025-10-02T00:00:00Z", "freshness_state": "current", "validation_state": "valid", "content_sha256": item * 32, "licensing_notes": "Internal", "schema_version": "1"} for item, letter in (("s1", "A"), ("s2", "B"))]
+        conflicts = revision_conflicts(observations)
+        self.assertEqual((len(conflicts), conflicts[0]["conflict"]), (1, True))
+        self.assertTrue(cadence_findings(observations)[0]["largeGaps"])
+        self.assertEqual(len(source_scorecards(observations, snapshots)), 2)
+        manifest = research_manifest(observations, snapshots)
+        self.assertEqual(len(manifest["manifestSha256"]), 64)
+        self.assertEqual(manifest["observationCount"], 4)
 
     def test_market_panel_run_decision_and_test2_sidecar(self):
         with tempfile.TemporaryDirectory() as folder:

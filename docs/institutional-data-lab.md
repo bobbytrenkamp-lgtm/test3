@@ -31,6 +31,8 @@ Each deal response includes:
 - like-for-like cross-market percentile scorecards for level, momentum, mean change, volatility and downside deviation.
 - revision/conflict registers for identical logical observations across snapshots and sources;
 - cadence and large-gap findings, per-source coverage/quality scorecards, and a canonical SHA-256 research manifest.
+- no-look-ahead walk-forward persistence and mean-change baselines with MAE, RMSE, bias and directional accuracy;
+- transparent rent-growth/vacancy regimes and observed transition counts.
 
 All outputs are descriptive. Correlation, lead/lag results and empirical scenarios are explicitly labeled non-causal and non-forecasting. Irregularly spaced observations are not presented as equally spaced calendar forecasts.
 
@@ -43,5 +45,6 @@ All outputs are descriptive. Correlation, lead/lag results and empirical scenari
 5. Treat candidate ranges as analyst decision support, never automatic underwriting truth.
 6. Obtain separately licensed proprietary observations locally when public data cannot support a market-level conclusion.
 7. Review every cross-vintage conflict and archive the research-manifest hash with investment-committee materials.
+8. Require any future local predictive model to beat the documented walk-forward baselines on genuinely held-out periods.
 
 ZERO-COST CHECK PASSED: No application component can create a charge for the repository owner.

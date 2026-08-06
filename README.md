@@ -9,6 +9,7 @@
 - Governed Assumption Intelligence across 15 assumption domains, with local market-panel evidence, benchmark matrices, correlations, time-series diagnostics, empirical stress bands, lead/lag exploration, derived change factors, cross-market scorecards, data-quality profiles and candidate ranges
 - Audited offline catalog of 27 FRED, BLS and Census indicators with local FRED/BLS CSV normalization; no runtime download, key or hosted API
 - Revision/conflict registers, cadence-gap diagnostics, source scorecards, and canonical research manifests for reproducibility
+- Walk-forward baseline backtests and transparent rent/vacancy regime-transition analysis for model-risk governance
 - Immutable source snapshots, observations, model artifacts, runs, evidence links, and analyst decision context
 - Offline base-R reference pipeline with conspicuously fictional synthetic fixtures and outputs
 - Approved-only Test2 growth-curve mapping plus a non-controlling evidence/recommendation sidecar

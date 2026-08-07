@@ -199,6 +199,26 @@ def _test2_model(deal: dict, values: dict[str, object], semantic_entities: list[
             errors.append("approved asking_price must be decimal-compatible")
             return None, errors, []
 
+    for field, target in (("exit_cap_rate", "terminalCapRate"),):
+        if values.get(field) not in (None, ""):
+            try:
+                rate = Decimal(str(values[field]))
+                if not Decimal("0") <= rate <= Decimal("1"):
+                    raise ValueError
+                valuation[target] = format(rate, "f")
+            except (InvalidOperation, TypeError, ValueError):
+                return None, [f"approved {field} must be a decimal fraction from 0 through 1"], []
+
+    vacancy = None
+    if values.get("vacancy") not in (None, ""):
+        try:
+            vacancy_rate = Decimal(str(values["vacancy"]))
+            if not Decimal("0") <= vacancy_rate <= Decimal("1"):
+                raise ValueError
+            vacancy = {"generalVacancyRate": format(vacancy_rate, "f")}
+        except (InvalidOperation, TypeError, ValueError):
+            return None, ["approved vacancy must be a decimal fraction from 0 through 1"], []
+
     semantic_arrays, semantic_diagnostics = _semantic_arrays(deal_id, semantic_entities or [])
     growth_curves = []
     for growth_field, growth_name in (("market_rent_growth", "Market rent growth"), ("expense_growth", "Operating expense growth"), ("property_tax_growth", "Property tax growth"), ("insurance_growth", "Insurance growth"), ("construction_cost_growth", "Construction cost growth")):
@@ -229,6 +249,7 @@ def _test2_model(deal: dict, values: dict[str, object], semantic_entities: list[
         "growthCurves": growth_curves, "spaces": semantic_arrays["spaces"], "tenants": semantic_arrays["tenants"], "leases": semantic_arrays["leases"],
         "marketLeasingProfiles": [], "otherRevenue": [],
         "capital": [], "debt": semantic_arrays["debt"], "valuation": valuation,
+        **({"vacancy": vacancy} if vacancy is not None else {}),
         "expenses": semantic_arrays["expenses"],
     }, [], semantic_diagnostics
 

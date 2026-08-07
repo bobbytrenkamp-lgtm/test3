@@ -10,6 +10,7 @@ from pathlib import Path
 
 MAX_DATASET_BYTES = 16 * 1024 * 1024
 MAX_SNAPSHOT_BYTES = 40 * 1024 * 1024
+MAX_ZONING_FILES = 100
 DATASETS = {
     "metadata": ("platform_metadata.json", True),
     "policy": ("map_data.json", True),
@@ -67,6 +68,29 @@ def load_snapshot(data_dir: Path) -> dict:
         if total > MAX_SNAPSHOT_BYTES:
             raise Test1SnapshotError("Configured test1 snapshot exceeds the total safety limit")
 
+    zoning_dir = root / "zoning" / "normalized"
+    if zoning_dir.is_dir():
+        zoning_files = sorted(zoning_dir.glob("*.json"))
+        if len(zoning_files) > MAX_ZONING_FILES:
+            raise Test1SnapshotError("Configured test1 snapshot exceeds the zoning file-count safety limit")
+        zoning = {}
+        for path in zoning_files:
+            value, file_integrity = _read_json(root, path.relative_to(root).as_posix())
+            jurisdiction = value.get("jurisdiction") if isinstance(value, dict) else None
+            fips = str(jurisdiction.get("county_fips") or "") if isinstance(jurisdiction, dict) else ""
+            if not re.fullmatch(r"\d{5}", fips) or not isinstance(value.get("districts"), dict):
+                raise Test1SnapshotError(f"Unsupported test1 zoning dataset shape: {path.name}")
+            if fips in zoning:
+                raise Test1SnapshotError(f"Duplicate test1 zoning jurisdiction for county FIPS: {fips}")
+            zoning[fips] = value
+            relative = path.relative_to(root).as_posix()
+            integrity[relative] = file_integrity
+            total += file_integrity["bytes"]
+            if total > MAX_SNAPSHOT_BYTES:
+                raise Test1SnapshotError("Configured test1 snapshot exceeds the total safety limit")
+        if zoning:
+            loaded["zoning"] = zoning
+
     metadata, policy = loaded["metadata"], loaded["policy"]
     if not isinstance(metadata, dict) or metadata.get("_schema") != "platform_metadata_v1":
         raise Test1SnapshotError("Unsupported test1 platform metadata schema")
@@ -74,7 +98,7 @@ def load_snapshot(data_dir: Path) -> dict:
         raise Test1SnapshotError("Unsupported test1 map data schema")
     _validate_optional_shapes(loaded)
     return {
-        "schemaVersion": "test1-local-data-directory/1.0",
+        "schemaVersion": "test1-local-data-directory/1.1",
         "loadedAt": datetime.now(timezone.utc).isoformat(),
         "sourceGeneratedAt": policy.get("generated_at") or metadata.get("_generated_at"),
         "sourceLastUpdated": policy.get("source_last_updated"),
@@ -101,7 +125,7 @@ def enrich(inputs: dict, snapshot: dict | None) -> dict:
     base = {"inputs": inputs, "networkRequests": 0}
     if snapshot is None:
         return {**base, "status": "unavailable", "verified": False, "coverage": "missing", "message": "No local test1 data directory was configured; deal workflow remains available.", "results": {}}
-    if not isinstance(snapshot, dict) or snapshot.get("schemaVersion") != "test1-local-data-directory/1.0":
+    if not isinstance(snapshot, dict) or snapshot.get("schemaVersion") not in {"test1-local-data-directory/1.0", "test1-local-data-directory/1.1"}:
         raise Test1SnapshotError("Unsupported normalized test1 snapshot version")
     fips = str(inputs.get("county_fips") or "")
     if not re.fullmatch(r"\d{5}", fips):
@@ -114,7 +138,8 @@ def enrich(inputs: dict, snapshot: dict | None) -> dict:
     incentives = [item for item in datasets.get("taxIncentives", {}).get("tax_incentives", []) if isinstance(item, dict) and fips in [str(value) for value in item.get("fips_list", [])]]
     facilities = [item for item in datasets.get("facilities", []) if isinstance(item, dict) and str(item.get("county_fips")) == fips]
     state = datasets.get("stateRegulations", {}).get("states", {}).get(fips[:2])
-    county_match = any((policy, political, water is not None, incentives, facilities))
+    zoning = datasets.get("zoning", {}).get(fips)
+    county_match = any((policy, political, water is not None, incentives, facilities, zoning))
     if not county_match and not state:
         return {**base, "status": "no_match", "verified": False, "coverage": "not_researched", "snapshot": _snapshot_metadata(snapshot), "results": {}}
 
@@ -126,6 +151,7 @@ def enrich(inputs: dict, snapshot: dict | None) -> dict:
         "taxIncentives": [_incentive_result(item) for item in incentives],
         "facilities": _facility_result(facilities) if facilities else None,
         "stateRegulation": _state_result(state),
+        "zoning": _zoning_result(zoning),
     }
     present = sum(value not in (None, [], {}) for value in results.values()) - 1
     freshness = _freshness(snapshot)
@@ -214,3 +240,53 @@ def _state_result(record: object) -> dict | None:
         return None
     keep = ("name", "abbr", "level", "status", "summary", "types", "last_reviewed")
     return {**{key: record.get(key) for key in keep}, "citations": _citations(record.get("sources"))}
+
+
+def _zoning_result(record: object) -> dict | None:
+    """Return bounded, review-oriented zoning context; never infer parcel zoning."""
+    if not isinstance(record, dict) or not isinstance(record.get("jurisdiction"), dict):
+        return None
+    jurisdiction = record["jurisdiction"]
+    jurisdiction_keep = (
+        "jurisdiction_id", "jurisdiction_name", "jurisdiction_type", "state", "county",
+        "county_fips", "controlling_authority", "source_license", "retrieval_method",
+        "source_last_updated", "source_last_checked", "ordinance_effective_date",
+        "ordinance_version", "data_coverage_status", "geometry_coverage_status",
+        "dimensional_standard_coverage", "permitted_use_coverage", "overlay_coverage",
+        "verification_status", "known_limitations", "pilot_notes", "notes",
+    )
+    official_sources = [
+        {"label": label, "url": str(jurisdiction[key])}
+        for key, label in (
+            ("official_zoning_page_url", "Official zoning page"),
+            ("official_zoning_map_url", "Official zoning map"),
+            ("official_ordinance_url", "Official ordinance"),
+        )
+        if re.match(r"^https?://", str(jurisdiction.get(key, "")))
+    ]
+    districts = []
+    for code, district in sorted(record.get("districts", {}).items())[:100]:
+        if not isinstance(district, dict):
+            continue
+        standards = district.get("standards", {})
+        districts.append({
+            "districtCode": str(district.get("district_code") or code),
+            "districtName": district.get("district_name"),
+            "districtCategory": district.get("district_category"),
+            "baseOrOverlay": district.get("base_or_overlay"),
+            "confidenceLevel": district.get("confidence_level"),
+            "lastVerified": district.get("last_verified"),
+            "eligibilitySummary": district.get("dc_eligibility_summary"),
+            "officialSourceUrl": str(district["official_source_url"]) if re.match(r"^https?://", str(district.get("official_source_url", ""))) else None,
+            "standardCount": len(standards) if isinstance(standards, dict) else 0,
+            "manualReviewRequired": any(isinstance(item, dict) and item.get("manual_review_required") is True for item in standards.values()) if isinstance(standards, dict) else False,
+        })
+    return {
+        "jurisdiction": {key: jurisdiction.get(key) for key in jurisdiction_keep},
+        "officialSources": official_sources,
+        "districts": districts,
+        "districtCount": len(record.get("districts", {})),
+        "disclaimer": record.get("disclaimer"),
+        "parcelDistrictKnown": False,
+        "decisionUse": "preliminary_research_only",
+    }

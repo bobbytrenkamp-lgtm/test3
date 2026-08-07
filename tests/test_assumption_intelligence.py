@@ -144,6 +144,15 @@ class AssumptionIntelligenceTests(unittest.TestCase):
         self.assertEqual(len(curves), 5)
         self.assertEqual(len({curve["id"] for curve in curves}), 5)
 
+    def test_approved_vacancy_and_exit_cap_map_to_current_test2_contract(self):
+        deal = {"id": "deal", "name": "Example", "property_type": "office"}
+        approved = []
+        for field, value in (("property_name", "Example"), ("forecast_start_date", "2026-01-01"), ("forecast_months", "120"), ("discount_rate", "0.09"), ("vacancy", "0.08"), ("exit_cap_rate", "0.065")):
+            approved.append({"id": field, "field_name": field, "normalized_value": value, "review_status": "approved", "reviewed_at": "2026-01-01", "source_kind": "user_entered"})
+        model = test2_export(deal, approved, [])["test2PortableModel"]["model"]
+        self.assertEqual(model["vacancy"], {"generalVacancyRate": "0.08"})
+        self.assertEqual(model["valuation"]["terminalCapRate"], "0.065")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -71,6 +71,13 @@ def synthetic_test1_data(root: Path) -> None:
     }
     for filename, value in datasets.items():
         (root / filename).write_text(json.dumps(value), encoding="utf-8")
+    zoning = root / "zoning" / "normalized"
+    zoning.mkdir(parents=True)
+    (zoning / "va-example-county.json").write_text(json.dumps({
+        "jurisdiction_id":"va-example-county", "disclaimer":"Fictional preliminary research; verify officially.",
+        "jurisdiction":{"jurisdiction_id":"va-example-county", "jurisdiction_name":"Example County, Virginia", "jurisdiction_type":"county", "state":"VA", "county":"Example County", "county_fips":"51107", "controlling_authority":"Example County", "official_zoning_page_url":"https://example.gov/zoning", "official_ordinance_url":"https://example.gov/code", "source_license":"Fictional public data", "retrieval_method":"local_static", "source_last_checked":"2026-08-01", "data_coverage_status":"partial", "geometry_coverage_status":"demo_only", "dimensional_standard_coverage":"partial", "permitted_use_coverage":"partial", "overlay_coverage":"none", "verification_status":"low_confidence", "known_limitations":["No parcel geometry."]},
+        "districts":{"I-1":{"district_code":"I-1", "district_name":"Fictional Industrial", "district_category":"industrial", "base_or_overlay":"base", "confidence_level":"low", "last_verified":"2026-08-01", "dc_eligibility_summary":"Requires official review.", "official_source_url":"https://example.gov/code", "standards":{"minimum_setback":{"value":25, "unit":"feet", "manual_review_required":True}}}}
+    }), encoding="utf-8")
 
 
 class SecurityTests(unittest.TestCase):
@@ -689,7 +696,7 @@ class Test1SnapshotTests(unittest.TestCase):
 
     def test_actual_static_directory_shapes_load_with_integrity(self):
         snapshot = load_snapshot(self.root)
-        self.assertEqual(snapshot["schemaVersion"], "test1-local-data-directory/1.0")
+        self.assertEqual(snapshot["schemaVersion"], "test1-local-data-directory/1.1")
         self.assertEqual(snapshot["sourceLastUpdated"], "2026-07-31")
         self.assertEqual(len(snapshot["integrity"]["map_data.json"]["sha256"]), 64)
 
@@ -701,6 +708,9 @@ class Test1SnapshotTests(unittest.TestCase):
         self.assertEqual(result["results"]["policy"]["citations"][0]["url"], "https://example.gov/policy")
         self.assertEqual(result["results"]["waterStress"]["label"], "High")
         self.assertEqual(result["results"]["facilities"]["knownCapacityMw"], "25.5")
+        self.assertEqual(result["results"]["zoning"]["districts"][0]["districtCode"], "I-1")
+        self.assertTrue(result["results"]["zoning"]["districts"][0]["manualReviewRequired"])
+        self.assertFalse(result["results"]["zoning"]["parcelDistrictKnown"])
         self.assertIn(result["snapshot"]["freshness"]["status"], {"current", "stale"})
         self.assertEqual(result["snapshot"]["datasetDates"]["waterStress"], "2024-01")
 
@@ -724,6 +734,12 @@ class Test1SnapshotTests(unittest.TestCase):
     def test_duplicate_json_keys_are_rejected(self):
         (self.root / "platform_metadata.json").write_text('{"_schema":"platform_metadata_v1","_schema":"other"}', encoding="utf-8")
         with self.assertRaisesRegex(Test1SnapshotError, "duplicate key"):
+            load_snapshot(self.root)
+
+    def test_duplicate_zoning_county_is_rejected(self):
+        source = self.root / "zoning" / "normalized" / "va-example-county.json"
+        (source.parent / "duplicate.json").write_bytes(source.read_bytes())
+        with self.assertRaisesRegex(Test1SnapshotError, "Duplicate test1 zoning jurisdiction"):
             load_snapshot(self.root)
 
     def test_service_uses_only_reviewed_county_fips_and_local_directory(self):

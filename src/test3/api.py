@@ -16,7 +16,7 @@ from urllib.parse import quote, urlparse
 from .service import Service
 from .auth import DUMMY_PASSWORD_HASH, SigninLimiter, session_token, verify_password
 from .db import now
-from .extraction import parse_csv, parse_xlsx
+from .extraction import parse_csv, parse_xlsx_sheets
 from .permissions import require
 import pypdfium2 as pdfium
 
@@ -159,8 +159,16 @@ class Handler(SimpleHTTPRequestHandler):
                         rows, _ = parse_csv(body)
                         kind, sheet = "csv", None
                     elif document["detected_mime"].endswith("spreadsheetml.sheet"):
-                        rows, _ = parse_xlsx(body)
-                        kind, sheet = "xlsx", "First worksheet"
+                        sheets, _ = parse_xlsx_sheets(body)
+                        parameters = dict(part.split("=", 1) for part in urlparse(self.path).query.split("&") if "=" in part)
+                        try:
+                            sheet_index = int(parameters.get("sheet", "1"))
+                        except ValueError as error:
+                            raise ValueError("Worksheet index must be an integer") from error
+                        if not 1 <= sheet_index <= len(sheets):
+                            raise ValueError("Worksheet index is outside the workbook")
+                        selected = sheets[sheet_index - 1]
+                        rows, kind, sheet = selected["rows"], "xlsx", selected["title"]
                     else:
                         raise ValueError("Table view is available only for CSV and XLSX documents")
                     truncated = len(rows) > 500 or any(len(row) > 200 for row in rows[:500]) or sum(len(row) for row in rows[:500]) > 20_000
@@ -172,7 +180,7 @@ class Handler(SimpleHTTPRequestHandler):
                         clipped = row[:min(200, remaining)]
                         visible.append(clipped)
                         cells += len(clipped)
-                    return self._json(200, {"kind": kind, "sheet": sheet, "rows": visible, "rowCount": len(rows), "visibleCellCount": cells, "truncated": truncated, "formulasExecuted": False})
+                    return self._json(200, {"kind": kind, "sheet": sheet, "sheetIndex": sheet_index if kind == "xlsx" else None, "sheetCount": len(sheets) if kind == "xlsx" else 1, "rows": visible, "rowCount": len(rows), "visibleCellCount": cells, "truncated": truncated, "formulasExecuted": False})
                 if len(parts) != 3:
                     raise LookupError("Document route not found")
                 self.send_response(200)

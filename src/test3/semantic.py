@@ -33,13 +33,13 @@ def derive_entities(category: str, cells: list[dict]) -> list[dict]:
     if not contract:
         return []
     entity_type, aliases = contract
-    grouped: dict[int, list[dict]] = defaultdict(list)
+    grouped: dict[tuple[int, int], list[dict]] = defaultdict(list)
     for cell in cells:
         match = re.fullmatch(r"row\.(\d+)\.(.+)", cell["field_name"])
         if match:
-            grouped[int(match.group(1))].append({**cell, "header": match.group(2)})
+            grouped[(int(cell.get("page_number") or 1), int(match.group(1)))].append({**cell, "header": match.group(2)})
     entities = []
-    for source_row, row_cells in sorted(grouped.items()):
+    for (source_page, source_row), row_cells in sorted(grouped.items()):
         data, period_values, source_ids = {}, {}, []
         for cell in row_cells:
             value = cell.get("normalized_value") if cell.get("normalized_value") is not None else cell.get("raw_value")
@@ -55,5 +55,5 @@ def derive_entities(category: str, cells: list[dict]) -> list[dict]:
         if not data or (entity_type == "operating_account_period" and "account_label" not in data):
             continue
         canonical_json = json.dumps(data, sort_keys=True, separators=(",", ":"), default=str)
-        entities.append({"entity_type": entity_type, "source_row": source_row, "data": data, "data_json": canonical_json, "data_sha256": hashlib.sha256(canonical_json.encode()).hexdigest(), "source_value_ids": sorted(source_ids)})
+        entities.append({"entity_type": entity_type, "source_page": source_page, "source_row": source_row, "data": data, "data_json": canonical_json, "data_sha256": hashlib.sha256(canonical_json.encode()).hexdigest(), "source_value_ids": sorted(source_ids)})
     return entities

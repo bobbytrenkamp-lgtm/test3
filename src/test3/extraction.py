@@ -19,6 +19,7 @@ MAX_XLSX_XML_BYTES = 25 * 1024 * 1024
 MAX_XLSX_TOTAL_BYTES = 100 * 1024 * 1024
 MAX_XLSX_ROWS = 100_000
 MAX_XLSX_CELLS = 2_000_000
+MAX_XLSX_SHEETS = 64
 
 
 @dataclass(frozen=True)
@@ -92,7 +93,7 @@ def parse_csv(content: bytes) -> tuple[list[list[str]], list[Candidate]]:
     return rows, candidates
 
 
-def parse_xlsx(content: bytes) -> tuple[list[list[str]], list[Candidate]]:
+def parse_xlsx_sheets(content: bytes) -> tuple[list[dict], list[Candidate]]:
     # XLSX is a ZIP of XML. Values only are read; formulas, macros, links and scripts are never evaluated.
     with zipfile.ZipFile(io.BytesIO(content)) as archive:
         entries = archive.infolist()
@@ -106,27 +107,42 @@ def parse_xlsx(content: bytes) -> tuple[list[list[str]], list[Candidate]]:
             if entry.compress_size and entry.file_size / entry.compress_size > 200:
                 raise ValueError("XLSX compression ratio is unsafe")
         names = set(archive.namelist())
-        sheet_name = next((name for name in sorted(names) if name.startswith("xl/worksheets/sheet") and name.endswith(".xml")), None)
-        if not sheet_name:
+        sheet_names = [name for name in names if name.startswith("xl/worksheets/sheet") and name.endswith(".xml")]
+        if not sheet_names:
             return [], []
     workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=False, keep_links=False)
     try:
-        sheet = workbook.worksheets[0]
-        if sheet.max_row > MAX_XLSX_ROWS or sheet.max_column * sheet.max_row > MAX_XLSX_CELLS:
-            raise ValueError("XLSX dimensions exceed the safety limit")
-        rows = [["" if cell.value is None else str(cell.value) for cell in row] for row in sheet.iter_rows()]
+        if len(workbook.worksheets) > MAX_XLSX_SHEETS:
+            raise ValueError("XLSX worksheet count exceeds the safety limit")
+        sheets, total_cells = [], 0
+        for sheet_index, sheet in enumerate(workbook.worksheets, 1):
+            sheet_cells = sheet.max_column * sheet.max_row
+            total_cells += sheet_cells
+            if sheet.max_row > MAX_XLSX_ROWS or sheet_cells > MAX_XLSX_CELLS or total_cells > MAX_XLSX_CELLS:
+                raise ValueError("XLSX dimensions exceed the safety limit")
+            rows = [["" if cell.value is None else str(cell.value) for cell in row] for row in sheet.iter_rows()]
+            sheets.append({"index": sheet_index, "title": sheet.title, "rows": rows})
     finally:
         workbook.close()
     candidates = []
-    if rows:
+    for sheet_record in sheets:
+        rows, sheet_index, sheet_title = sheet_record["rows"], sheet_record["index"], sheet_record["title"]
+        if not rows:
+            continue
         headers = [re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_") for value in rows[0]]
         for row_index, row in enumerate(rows[1:], 2):
             for index, raw in enumerate(row):
                 if not raw.strip() or index >= len(headers):
                     continue
                 formula = raw.startswith("=")
-                candidates.append(Candidate(f"row.{row_index}.{headers[index] or index}", raw, None if formula else (str(number(raw)) if number(raw) is not None else raw.strip()), 1, f"XLSX sheet {sheet.title!r}, cell row {row_index}, column {index + 1}", 0.4 if formula else 0.95, "xlsx_formula_not_evaluated_v2" if formula else "xlsx_cell_v2", (index, row_index - 1, index + 1, row_index)))
-    return rows, candidates
+                candidates.append(Candidate(f"row.{row_index}.{headers[index] or index}", raw, None if formula else (str(number(raw)) if number(raw) is not None else raw.strip()), sheet_index, f"XLSX sheet {sheet_title!r}, cell row {row_index}, column {index + 1}", 0.4 if formula else 0.95, "xlsx_formula_not_evaluated_v3" if formula else "xlsx_cell_v3", (index, row_index - 1, index + 1, row_index)))
+    return sheets, candidates
+
+
+def parse_xlsx(content: bytes) -> tuple[list[list[str]], list[Candidate]]:
+    """Backward-compatible first-sheet row view plus candidates from every worksheet."""
+    sheets, candidates = parse_xlsx_sheets(content)
+    return (sheets[0]["rows"] if sheets else []), candidates
 
 
 def extract_selectable_pdf_text(content: bytes) -> str:

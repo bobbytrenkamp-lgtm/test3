@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -25,7 +25,7 @@ CREATE TRIGGER IF NOT EXISTS document_purges_no_update BEFORE UPDATE ON document
 CREATE TRIGGER IF NOT EXISTS document_purges_no_delete BEFORE DELETE ON document_purges BEGIN SELECT RAISE(ABORT, 'document purges are append-only'); END;
 CREATE TABLE IF NOT EXISTS document_versions(id TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES documents(id), version INTEGER NOT NULL, extractor_version TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(document_id,version));
 CREATE TABLE IF NOT EXISTS extracted_values(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), deal_id TEXT NOT NULL REFERENCES deals(id), document_id TEXT NOT NULL REFERENCES documents(id), document_version INTEGER NOT NULL, document_category TEXT NOT NULL, field_name TEXT NOT NULL, raw_value TEXT NOT NULL, normalized_value TEXT, unit TEXT, currency TEXT, page_number INTEGER, bbox_json TEXT, source_excerpt TEXT NOT NULL, source_text_hash TEXT NOT NULL, extraction_method TEXT NOT NULL, extractor_version TEXT NOT NULL, confidence REAL NOT NULL CHECK(confidence BETWEEN 0 AND 1), validation_status TEXT NOT NULL, review_status TEXT NOT NULL, reviewer_id TEXT REFERENCES users(id), reviewed_at TEXT, comments TEXT, superseded_value_id TEXT REFERENCES extracted_values(id), final_approved_value_id TEXT REFERENCES extracted_values(id), created_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS semantic_entities(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), deal_id TEXT NOT NULL REFERENCES deals(id), document_id TEXT NOT NULL REFERENCES documents(id), document_version INTEGER NOT NULL, document_category TEXT NOT NULL, entity_type TEXT NOT NULL CHECK(entity_type IN ('rent_roll_record','operating_account_period','lease_schedule_record','debt_term_record')), source_row INTEGER NOT NULL, data_json TEXT NOT NULL, data_sha256 TEXT NOT NULL, source_value_ids_json TEXT NOT NULL, extractor_version TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(document_id,document_version,entity_type,source_row));
+CREATE TABLE IF NOT EXISTS semantic_entities(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), deal_id TEXT NOT NULL REFERENCES deals(id), document_id TEXT NOT NULL REFERENCES documents(id), document_version INTEGER NOT NULL, document_category TEXT NOT NULL, entity_type TEXT NOT NULL CHECK(entity_type IN ('rent_roll_record','operating_account_period','lease_schedule_record','debt_term_record')), source_page INTEGER NOT NULL DEFAULT 1, source_row INTEGER NOT NULL, data_json TEXT NOT NULL, data_sha256 TEXT NOT NULL, source_value_ids_json TEXT NOT NULL, extractor_version TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(document_id,document_version,entity_type,source_page,source_row));
 CREATE TRIGGER IF NOT EXISTS semantic_entities_no_update BEFORE UPDATE ON semantic_entities BEGIN SELECT RAISE(ABORT, 'semantic entities are immutable derived evidence'); END;
 CREATE TRIGGER IF NOT EXISTS semantic_entities_no_delete BEFORE DELETE ON semantic_entities BEGIN SELECT RAISE(ABORT, 'semantic entities are retained evidence'); END;
 CREATE TABLE IF NOT EXISTS data_source_snapshots(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), deal_id TEXT REFERENCES deals(id), source_type TEXT NOT NULL CHECK(source_type IN ('test1_economic','market_panel','public_extract','analyst_comp_package')), source_name TEXT NOT NULL, source_version TEXT NOT NULL, as_of_date TEXT, imported_at TEXT NOT NULL, file_hashes_json TEXT NOT NULL, schema_version TEXT NOT NULL, coverage_json TEXT NOT NULL, geography_level TEXT NOT NULL, property_type_coverage_json TEXT NOT NULL, licensing_notes TEXT NOT NULL, freshness_state TEXT NOT NULL CHECK(freshness_state IN ('current','stale','unknown')), validation_state TEXT NOT NULL CHECK(validation_state IN ('valid','partial','invalid')), import_actor TEXT NOT NULL REFERENCES users(id), content_sha256 TEXT NOT NULL, original_stored_name TEXT, created_at TEXT NOT NULL);
@@ -94,6 +94,16 @@ class Database:
                 connection.execute("ALTER TABLE documents ADD COLUMN original_purged_by TEXT REFERENCES users(id)")
             if "original_purge_reason" not in document_columns:
                 connection.execute("ALTER TABLE documents ADD COLUMN original_purge_reason TEXT")
+            semantic_columns = {row[1] for row in connection.execute("PRAGMA table_info(semantic_entities)")}
+            if semantic_columns and "source_page" not in semantic_columns:
+                connection.execute("DROP TRIGGER IF EXISTS semantic_entities_no_update")
+                connection.execute("DROP TRIGGER IF EXISTS semantic_entities_no_delete")
+                connection.execute("ALTER TABLE semantic_entities RENAME TO semantic_entities_v4")
+                connection.execute("CREATE TABLE semantic_entities(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), deal_id TEXT NOT NULL REFERENCES deals(id), document_id TEXT NOT NULL REFERENCES documents(id), document_version INTEGER NOT NULL, document_category TEXT NOT NULL, entity_type TEXT NOT NULL CHECK(entity_type IN ('rent_roll_record','operating_account_period','lease_schedule_record','debt_term_record')), source_page INTEGER NOT NULL DEFAULT 1, source_row INTEGER NOT NULL, data_json TEXT NOT NULL, data_sha256 TEXT NOT NULL, source_value_ids_json TEXT NOT NULL, extractor_version TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(document_id,document_version,entity_type,source_page,source_row))")
+                connection.execute("INSERT INTO semantic_entities(id,organization_id,deal_id,document_id,document_version,document_category,entity_type,source_page,source_row,data_json,data_sha256,source_value_ids_json,extractor_version,created_at) SELECT id,organization_id,deal_id,document_id,document_version,document_category,entity_type,1,source_row,data_json,data_sha256,source_value_ids_json,extractor_version,created_at FROM semantic_entities_v4")
+                connection.execute("DROP TABLE semantic_entities_v4")
+                connection.execute("CREATE TRIGGER semantic_entities_no_update BEFORE UPDATE ON semantic_entities BEGIN SELECT RAISE(ABORT, 'semantic entities are immutable derived evidence'); END")
+                connection.execute("CREATE TRIGGER semantic_entities_no_delete BEFORE DELETE ON semantic_entities BEGIN SELECT RAISE(ABORT, 'semantic entities are retained evidence'); END")
             connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
 
     @contextmanager

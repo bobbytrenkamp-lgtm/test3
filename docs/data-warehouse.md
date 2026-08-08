@@ -12,6 +12,8 @@ Run `test3-data --data-root data init` to create the local structure. `test3-dat
 
 Ingestion validates and batches canonical observations into a temporary DuckDB table, rejects duplicate identifiers, writes Zstandard-compressed Parquet, verifies its row count, atomically publishes it, then publishes an immutable manifest containing content hashes. A failed version never receives a manifest. An existing version is never overwritten or deleted.
 
+Every analytical query verifies manifest integrity, the governed source-definition fingerprint, file size and Parquet SHA-256 first. Queries select only the newest validated version of each source/dataset pair, preventing revisions from being double-counted. `test3-data status` performs the same verification and fails closed on tampering or orphaned metadata.
+
 Large runtime datasets under `data/warehouse/` are ignored by Git. Only schemas, catalog definitions, documentation and explicitly fictional fixtures are committed.
 
 ## Canonical lineage

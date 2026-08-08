@@ -17,7 +17,7 @@ def _parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("init", help="create the local warehouse directory structure")
     commands.add_parser("catalog", help="emit the governed source catalog as JSON")
-    commands.add_parser("status", help="emit immutable dataset manifest status as JSON")
+    commands.add_parser("status", help="verify files and emit immutable dataset manifest status as JSON")
     commands.add_parser("summary", help="query a bounded warehouse summary with DuckDB")
     return parser
 

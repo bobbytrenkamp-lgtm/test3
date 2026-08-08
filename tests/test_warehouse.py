@@ -8,6 +8,7 @@ import unittest
 from test3.warehouse.catalog import SOURCE_CATALOG
 from test3.warehouse.duckdb_engine import WarehouseEngine
 from test3.warehouse.ingestion import ingest_observations
+from test3.warehouse.manifests import ManifestIntegrityError
 from test3.warehouse.quality import profile_parquet
 from test3.warehouse.schemas import normalize_observation
 from test3.warehouse.storage import WAREHOUSE_DIRS, WarehousePaths
@@ -71,6 +72,28 @@ class WarehouseTests(unittest.TestCase):
             second_manifest = json.loads(second.manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(second_manifest["predecessor_manifest_hash"], result.manifest_hash)
             self.assertTrue(result.parquet_path.exists(), "publishing v2 must retain the prior snapshot")
+            self.assertEqual(engine.summary()["rows"], 2, "queries must use only the latest validated dataset version")
+
+    def test_tampered_parquet_is_rejected_before_query(self):
+        with tempfile.TemporaryDirectory() as root:
+            paths = WarehousePaths.from_data_root(root)
+            result = ingest_observations(paths, source_id="user_import", dataset_id="fictional_market_panel",
+                                         source_version="fixture-v1", domain="rent", rows=fixture_rows())
+            with result.parquet_path.open("ab") as stream:
+                stream.write(b"tamper")
+            with self.assertRaisesRegex(ManifestIntegrityError, "content mismatch"):
+                WarehouseEngine(paths).summary()
+
+    def test_tampered_manifest_is_rejected_before_query(self):
+        with tempfile.TemporaryDirectory() as root:
+            paths = WarehousePaths.from_data_root(root)
+            result = ingest_observations(paths, source_id="user_import", dataset_id="fictional_market_panel",
+                                         source_version="fixture-v1", domain="rent", rows=fixture_rows())
+            payload = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+            payload["row_count"] = 999
+            result.manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaisesRegex(ManifestIntegrityError, "manifest hash mismatch"):
+                WarehouseEngine(paths).summary()
 
     def test_duplicate_or_invalid_ingest_never_publishes_snapshot(self):
         with tempfile.TemporaryDirectory() as root:

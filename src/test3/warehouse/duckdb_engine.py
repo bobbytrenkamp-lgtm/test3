@@ -6,6 +6,7 @@ from typing import Iterable
 import duckdb
 
 from .schemas import CANONICAL_COLUMNS
+from .manifests import active_manifests
 from .storage import WarehousePaths
 
 
@@ -18,8 +19,7 @@ class WarehouseEngine:
         self.paths = paths
 
     def parquet_files(self) -> list[Path]:
-        normalized = self.paths.contained("normalized")
-        return sorted(normalized.rglob("*.parquet")) if normalized.exists() else []
+        return [path for manifest in active_manifests(self.paths) for path in manifest["resolved_files"]]
 
     def query_observations(self, *, metrics: Iterable[str] | None = None, geography_id: str | None = None,
                            columns: Iterable[str] = CANONICAL_COLUMNS, limit: int = 1000) -> list[dict]:

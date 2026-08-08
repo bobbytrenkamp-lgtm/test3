@@ -33,7 +33,7 @@ class SourceSpec:
 
 def _public(source_id: str, source: str, dataset: str, metrics: tuple[str, ...], geographies: tuple[str, ...], frequency: tuple[str, ...], first: str, update: str, license_note: str) -> SourceSpec:
     return SourceSpec(source_id, source, dataset, metrics, geographies, frequency, first, update, license_note,
-                      "manual_local_download", False, False, False, False, True,
+                      "governed_official_https_or_validated_local_file", False, False, False, False, True,
                       "Source-specific normalization into canonical observation schema; original frequency retained.")
 
 
@@ -46,6 +46,7 @@ SOURCE_CATALOG = {
         _public("hud_public", "U.S. Department of Housing and Urban Development", "Public housing datasets", ("fair_market_rent", "affordability"), ("county", "metro", "zip"), ("annual",), "1983", "annual", "U.S. federal government data; verify dataset-specific terms."),
         _public("census_bps", "U.S. Census Bureau", "Building Permits Survey", ("permits", "units_authorized", "multifamily_permits"), ("state", "county", "place"), ("monthly", "annual"), "1980", "monthly", "U.S. federal government data."),
         SourceSpec("test1_local", "Test1", "Normalized local exports", ("geography", "zoning", "policy", "facilities"), ("state", "county", "place", "property"), ("irregular",), None, "user controlled", "User-owned local output; Test3 does not redistribute Test1 data.", "local_file", False, False, False, False, False, "Contract-validated local adapter; do not duplicate Test1 pipelines."),
+        SourceSpec("test3_derived", "Test3", "Deterministic derived metrics", ("growth",), ("national", "state", "county", "cbsa", "place"), ("annual",), None, "after source refresh", "MIT-licensed Test3 transformation; inputs retain their own source terms.", "local_processing", False, False, False, False, True, "Versioned deterministic transformations with input observation IDs."),
         SourceSpec("user_import", "User-provided", "CRE market imports", ("rent", "rent_growth", "vacancy", "supply", "transactions", "expenses"), ("market", "submarket", "property"), ("monthly", "quarterly", "annual"), None, "user controlled", "Rights and redistribution status must be supplied for every import.", "local_file", False, False, False, False, None, "Saved mapping template plus row-level lineage; analyst approval required.", ("Quality depends on user-provided source and methodology.",)),
     )
 }

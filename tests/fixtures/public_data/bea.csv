@@ -1,0 +1,4 @@
+GeoFIPS,GeoName,Region,TableName,LineCode,IndustryClassification,Description,Unit,2024,2025
+ "37001 ",Fiction County,5,CAINC1,1,,Personal income (thousands of dollars),Thousands of dollars,"1,000","1,050"
+ "37001 ",Fiction County,5,CAINC1,2,,Population (persons),Number of persons,100,101
+ "37001 ",Fiction County,5,CAINC1,3,,Per capita personal income (dollars),Dollars,10000,10396

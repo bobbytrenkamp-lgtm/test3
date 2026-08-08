@@ -13,8 +13,10 @@ def profile_parquet(path: str | Path) -> dict:
         row = connection.execute(
             f"""SELECT count(*) AS row_count, count(DISTINCT observation_id) AS unique_rows,
             count(*) FILTER (WHERE value IS NULL) AS null_values,
-            min(observation_date), max(observation_date), count(DISTINCT geography_id), count(DISTINCT metric)
+            min(observation_date), max(observation_date), count(DISTINCT geography_id), count(DISTINCT metric),
+            count(*) - count(DISTINCT observation_id), count(*) FILTER (WHERE value < 0)
             FROM read_parquet({sql_literal(str(resolved))})"""
         ).fetchone()
     return {"rows": row[0], "unique_observation_ids": row[1], "null_values": row[2], "earliest": row[3],
-            "latest": row[4], "geographies": row[5], "metrics": row[6]}
+            "latest": row[4], "geographies": row[5], "metrics": row[6], "duplicate_observations": row[7],
+            "negative_values_review": row[8], "null_percentage": (row[2] / row[0] * 100) if row[0] else None}

@@ -1,5 +1,7 @@
 # test3
 
+Populate the local analytical warehouse with `test3-data refresh --source census --to-year 2024 --geography county`; inspect it with `test3-data status`, `test3-data coverage`, and `test3-data lineage OBSERVATION_ID`. See `docs/public-data-ingestion.md` for the credential-free Tier 1 contracts.
+
 `test3` is an open-source, local-first Commercial Real Estate Deal Intake and Due Diligence Engine. It turns raw deal documents into source-linked, human-approved underwriting inputs and a versioned `test2` handoff package.
 
 > ZERO-COST CHECK PASSED: No application component can create a charge for the repository owner.

@@ -1,5 +1,13 @@
 # AI changelog
 
+## 2026-08-07 — multi-sheet XLSX provenance tranche
+
+- Expanded guarded XLSX extraction to as many as 64 bounded worksheets while retaining the 2,000,000-cell workbook ceiling.
+- Preserved worksheet index/title and cell coordinates; formulas remain non-evaluated review evidence.
+- Added worksheet-selectable authenticated table views and exact analyst source routing.
+- Added schema version 5 with worksheet-aware semantic-row uniqueness and a worksheet-one migration for legacy rows.
+- Added parser, HTTP, provenance, and cross-sheet collision regressions without adding a dependency or service.
+
 ## 2026-08-06 — Model-risk baselines
 
 - Added no-look-ahead walk-forward persistence and historical-mean-change benchmarks.

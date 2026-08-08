@@ -89,7 +89,7 @@ The deterministic `test3-ic-memo/2.0` artifact now contains all 18 required sect
 One live authenticated HTTP regression now proves the entire defined first-release workflow against three committed fictional OM/rent-roll/T-12 fixtures, including exact source retrieval, extracted-cell review, governed approvals, eleven discrepancies, resolution, immutable test2/memo artifacts, audit and final zero-network integrity. P0 product correctness is closed at its documented boundary. Next: P1 semantic tenant/lease/period/account entities, spreadsheet cell viewer and expanded test2 arrays.
 ## Tabular source navigation update
 
-CSV and first-worksheet XLSX candidates now open a bounded, non-executing logical table view with exact selected-cell highlighting. The endpoint is authenticated/organization-scoped and reports truncation plus formula non-execution. Next: semantic rent-roll, operating-period/account, lease-schedule/option and debt-term entities; the table viewer is now available to support their review.
+CSV and bounded multi-sheet XLSX candidates now open a non-executing logical table view with exact selected-cell highlighting. The endpoint is authenticated/organization-scoped and reports worksheet identity, truncation and formula non-execution. Semantic rows retain worksheet and row provenance.
 ## Semantic diligence entity update
 
 Schema version 3 and backup format 5 now preserve immutable rent-roll, operating-account/period, lease-schedule/options and debt-term entities. Each row is hash-bound to exact source cells and becomes approved only when all those cells are approved through the existing decision chain. Operational integrity verifies hashes and membership. Next: expose semantic rows in the analyst UI and map approved entities into real test2 arrays with parser evidence.
@@ -103,7 +103,7 @@ Fully approved, schema-complete rent-roll/lease rows now map to stable-ID spaces
 
 ## Semantic header corpus update
 
-Category-scoped aliases now normalize common rent-roll, operating-statement, lease and debt header variations without creating values. Negative tests prove those aliases do not cross category boundaries and unknown documents remain untyped. The corpus is fictional and intentionally bounded; first-worksheet-only XLSX ingestion remains explicit.
+Category-scoped aliases now normalize common rent-roll, operating-statement, lease and debt header variations without creating values. Negative tests prove those aliases do not cross category boundaries and unknown documents remain untyped. The corpus is fictional and intentionally bounded; XLSX limits remain explicit.
 
 ## Optional local-model provider update
 

@@ -47,6 +47,21 @@ def synthetic_xlsx() -> bytes:
     return out.getvalue()
 
 
+def synthetic_multisheet_xlsx() -> bytes:
+    out = io.BytesIO()
+    workbook = Workbook()
+    first = workbook.active
+    first.title = "North Wing"
+    first.append(["Tenant", "Rentable Area"])
+    first.append(["Fictional North LLC", 1000])
+    second = workbook.create_sheet("South Wing")
+    second.append(["Tenant", "Rentable Area"])
+    second.append(["Fictional South LLC", 1500])
+    workbook.save(out)
+    workbook.close()
+    return out.getvalue()
+
+
 def synthetic_pdf(stream: bytes = b"BT /F1 12 Tf 72 720 Td (Property Name: Example Plaza) Tj 0 -18 Td (Asking Price: $10,000,000) Tj ET") -> bytes:
     objects = [b"<< /Type /Catalog /Pages 2 0 R >>", b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>", b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>", b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>", b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream"]
     output = bytearray(b"%PDF-1.4\n")
@@ -197,6 +212,13 @@ class HttpSecurityTests(unittest.TestCase):
                 self.assertEqual(table["kind"], "xlsx")
                 self.assertEqual(table["rows"][1], ["Example LLC", "1250"])
                 self.assertFalse(table["formulasExecuted"])
+                multisheet = Handler.service.upload(bootstrap["user"]["organization_id"], bootstrap["user"]["id"], bootstrap["deals"][0]["id"], "fictional-multisheet-rent-roll.xlsx", synthetic_multisheet_xlsx())
+                connection.request("GET", f"/api/documents/{multisheet['id']}/table?sheet=2", headers={"Cookie": cookie})
+                response = connection.getresponse()
+                table = json.loads(response.read())
+                self.assertEqual(response.status, 200)
+                self.assertEqual((table["sheet"], table["sheetIndex"], table["sheetCount"]), ("South Wing", 2, 2))
+                self.assertEqual(table["rows"][1][0], "Fictional South LLC")
                 deal_id = bootstrap["deals"][0]["id"]
                 connection.request("POST", f"/api/deals/{deal_id}/export/memo", headers={"Cookie": cookie, "X-CSRF-Token": bootstrap["user"]["csrf_token"]})
                 response = connection.getresponse()
@@ -428,13 +450,21 @@ class ExtractionTests(unittest.TestCase):
         self.assertEqual(rows[1][0], "Example LLC")
         self.assertTrue(any(item.normalized == "1250" for item in candidates))
 
+    def test_xlsx_all_sheets_retain_sheet_index_provenance(self):
+        rows, candidates = parse_xlsx(synthetic_multisheet_xlsx())
+        self.assertEqual(rows[1][0], "Fictional North LLC")
+        south = next(item for item in candidates if item.raw == "Fictional South LLC")
+        self.assertEqual(south.page, 2)
+        self.assertIn("South Wing", south.excerpt)
+        self.assertEqual(south.method, "xlsx_cell_v3")
+
     def test_xlsx_formula_is_never_evaluated(self):
         content = synthetic_xlsx()
         workbook = Workbook(); sheet = workbook.active; sheet.append(["Total"]); sheet.append(["=1+1"]); out = io.BytesIO(); workbook.save(out); workbook.close()
         _, candidates = parse_xlsx(out.getvalue())
         self.assertEqual(candidates[0].raw, "=1+1")
         self.assertIsNone(candidates[0].normalized)
-        self.assertEqual(candidates[0].method, "xlsx_formula_not_evaluated_v2")
+        self.assertEqual(candidates[0].method, "xlsx_formula_not_evaluated_v3")
 
     def test_pdfium_pdf_source_bbox(self):
         status, candidates, warning = process("fictional-om.pdf", "application/pdf", synthetic_pdf())
@@ -504,6 +534,18 @@ class SemanticHeaderContractTests(unittest.TestCase):
             {"id": f"cell-{index}", "field_name": f"row.2.{header}", "raw_value": value, "normalized_value": value}
             for index, (header, value) in enumerate(headers_and_values, 1)
         ]
+
+    def test_same_row_numbers_on_different_worksheets_do_not_merge(self):
+        cells = [
+            {"id":"north-tenant", "field_name":"row.2.tenant", "raw_value":"North LLC", "normalized_value":"North LLC", "page_number":1},
+            {"id":"north-area", "field_name":"row.2.rentable_area", "raw_value":"1000", "normalized_value":"1000", "page_number":1},
+            {"id":"south-tenant", "field_name":"row.2.tenant", "raw_value":"South LLC", "normalized_value":"South LLC", "page_number":2},
+            {"id":"south-area", "field_name":"row.2.rentable_area", "raw_value":"1500", "normalized_value":"1500", "page_number":2},
+        ]
+        entities = derive_entities("rent_roll", cells)
+        self.assertEqual([entity["data"]["tenant_name"] for entity in entities], ["North LLC", "South LLC"])
+        self.assertEqual([entity["source_page"] for entity in entities], [1, 2])
+        self.assertEqual([len(entity["source_value_ids"]) for entity in entities], [2, 2])
 
     def test_rent_roll_header_variants_map_to_canonical_fields(self):
         entities = derive_entities("rent_roll", self.cells([
@@ -1080,7 +1122,7 @@ class ServiceTests(unittest.TestCase):
         report = verify_backup(destination)
         self.assertTrue(report["valid"])
         self.assertEqual(report["format"], "test3-backup/6.0")
-        self.assertEqual(report["schemaVersion"], 4)
+        self.assertEqual(report["schemaVersion"], 5)
         self.assertTrue(report["restoredOperationalIntegrity"])
         self.assertEqual(report["counts"]["documents"], 1)
         self.assertEqual(report["counts"]["semantic_entities"], 1)

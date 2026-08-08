@@ -8,7 +8,7 @@ Every phase begins and ends with the cost guard. Required confirmation: “ZERO-
 | 1 — foundation | Tested locally | Fail-closed admin bootstrap, SQLite schema, organizations/roles, CI guards |
 | 2 — ingestion | Tested locally | MIME/limits/hashes/duplicates/UUID storage, viewer, controlled purge and crash recovery |
 | 3 — deterministic processing | Tested, bounded | PDFium/openpyxl/Pillow and optional local Tesseract with honest unavailable state |
-| 4 — extraction review | Tested, bounded | Immutable semantic rows and first-worksheet exact logical source navigation are proven; broader header corpus and multi-sheet ingestion remain |
+| 4 — extraction review | Tested, bounded | Immutable worksheet/row-provenance semantic rows and bounded multi-sheet logical source navigation are proven; broader fictional header corpus remains |
 | 5 — reconciliation | Tested, bounded | 19 rules, immutable runs and combined live HTTP workflow are proven; broader semantic-list reconciliation remains |
 | 6 — test2 export | Tested, bounded | Actual parser accepted minimal and expanded space/tenant/lease/expense/debt models; advanced test2 arrays remain unmapped |
 | 7 — test1 adapter | Tested, optional | Actual local snapshot match/fallback, integrity, freshness and zero-network evidence |
@@ -16,4 +16,4 @@ Every phase begins and ends with the cost guard. Required confirmation: “ZERO-
 | 9 — optional local model | Tested, opt-in | Explicit loopback probe/generation, structured JSON validation and required metadata; no automatic invocation or approval authority |
 | 10 — hardening | Tested, bounded; final audit active | Auth, retention, readiness, load/restore and browser audit complete within documented limits |
 
-Next implementation slice: broaden fictional semantic header/category-negative coverage and multi-sheet ingestion only where direct source navigation can remain exact. See `docs/institutional-readiness-audit.md`.
+Next implementation slice: broaden fictional semantic header/category-negative coverage and add advanced test2 mappings only where approved source semantics remain complete. See `docs/institutional-readiness-audit.md`.

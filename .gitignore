@@ -11,5 +11,6 @@ data/*.db
 data/uploads/
 data/exports/
 data/market-data/
+data/warehouse/
 !data/.gitkeep
 

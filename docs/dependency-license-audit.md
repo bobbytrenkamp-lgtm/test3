@@ -7,6 +7,7 @@ Audit date: 2026-08-04.
 | test3 source | 0.1.0 | MIT | Yes | Yes | Repository license |
 | Python | 3.11+ | PSF-2.0 | Yes | Yes | Local interpreter |
 | SQLite | Python standard library | Public domain | Yes | Yes | Local only |
+| DuckDB | 1.5.5 | MIT | Yes | Yes | Embedded local analytical engine and Parquet reader/writer; no service or transitive Python dependency |
 | actions/checkout | v4 | MIT | CI only | Yes | GitHub-maintained public action |
 | actions/setup-python | v5 | MIT | CI only | Yes | GitHub-maintained public action |
 | pypdfium2/PDFium | 5.12.1 | Apache-2.0 OR BSD-3-Clause; bundled PDFium and notices | Yes | Yes | Local PDF text/rendering; wheel notices retained by installation |

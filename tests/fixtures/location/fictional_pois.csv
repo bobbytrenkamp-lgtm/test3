@@ -1,0 +1,5 @@
+name,category,latitude,longitude,source_reference
+Fictional Central School,school,35.7820,-78.6400,fixture://pois/row/2
+Fictional Market Center,shopping_center,35.7900,-78.6450,fixture://pois/row/3
+Fictional Downtown Anchor,downtown,35.7790,-78.6390,fixture://pois/row/4
+Fictional Hospital,hospital,36.0000,-78.9000,fixture://pois/row/5

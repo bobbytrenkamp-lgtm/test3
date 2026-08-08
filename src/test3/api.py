@@ -259,6 +259,12 @@ class Handler(SimpleHTTPRequestHandler):
             if len(parts) == 4 and parts[:2] == ["api", "deals"] and parts[3] == "reconcile":
                 self._authorize_post(user, "reconcile.run")
                 return self._json(200, self.service.run_reconciliation(user["organization_id"], user["id"], parts[2]))
+            if len(parts) == 4 and parts[:2] == ["api", "deals"] and parts[3] == "location-analysis":
+                self._authorize_post(user, "assumption.create")
+                length = int(self.headers.get("Content-Length", "0"))
+                if length < 0 or length > 16 * 1024 * 1024:
+                    raise ValueError("Location analysis request exceeds 16 MiB")
+                return self._json(200, self.service.location_analysis(user["organization_id"], user["id"], parts[2], json.loads(self.rfile.read(length) or b"{}")))
             if len(parts) == 4 and parts[:2] == ["api", "deals"] and parts[3] == "assumptions":
                 self._authorize_post(user, "assumption.create")
                 return self._json(201, self.service.create_assumption(user["organization_id"], user["id"], parts[2], self._payload()))

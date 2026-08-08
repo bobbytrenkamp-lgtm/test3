@@ -1,0 +1,5 @@
+address,latitude,longitude,property_type,asking_rent,rent_unit,observed_date,units,year_built,source_reference
+10 Fictional Oak Street,35.7810,-78.6380,multifamily,1850,USD/unit/month,2026-06-01,210,2018,fixture://rent-comps/row/2
+20 Fictional Pine Street,35.7900,-78.6500,multifamily,1775,USD/unit/month,2026-05-15,180,2015,fixture://rent-comps/row/3
+30 Fictional Office Way,35.7820,-78.6390,office,32,USD/sf/year,2026-06-01,0,2020,fixture://rent-comps/row/4
+40 Fictional Far Road,36.5000,-79.5000,multifamily,1600,USD/unit/month,2026-04-01,220,2017,fixture://rent-comps/row/5

@@ -14,6 +14,7 @@
 | Approval governance and manual assumptions | Tested | Immutable source values, typed approvals, append-only/hash-chained decisions and explicit supersession |
 | test2 export | Tested, bounded | Minimal and expanded `cre-platform-model` shapes passed test2's own `parseModelInput`; fully approved rows map to spaces/tenants/leases/expenses/debt with fail-closed row diagnostics; advanced arrays remain intentionally unmapped |
 | test1 enrichment | Tested, optional | Actual seven-file test1 data directory loaded by hash with freshness/citations; approved FIPS required; no networking |
+| Rent comps and area proximity | Tested, local evidence required | Like-property distance/similarity ranking, unit-safe rent benchmarks, sourced school/retail/downtown/amenity distances, missing-coverage disclosures and audit hashes; no scraping, geocoding, school ratings or hosted maps |
 | Draft IC memo | Tested | Stable 18-section schema; approved-only source-linked facts, missing/unverified states, deterministic risks/questions, qualified-review labels, source appendix and immutable artifact history |
 | Optional local model | Tested, opt-in | Loopback-only Ollama probe/generation interface, bounded prompts, JSON-object validation and full model/prompt/input-hash/time metadata; outputs are candidate-only and no core workflow depends on it |
 | Audit history | Tested | Independent serialized audit and review-decision hash chains with tamper verifiers |

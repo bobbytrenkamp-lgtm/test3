@@ -28,6 +28,7 @@ from .assumptions.public_sources import public_series_catalog
 from .assumptions.factors import derived_change_factors, market_factor_scorecards
 from .assumptions.governance import cadence_findings, research_manifest, revision_conflicts, source_scorecards
 from .assumptions.validation import market_regimes, walk_forward_baselines
+from .research.comparables import analyze_location, parse_csv_records
 
 
 def _sha256_file(path: Path) -> str:
@@ -235,6 +236,29 @@ class Service:
             for key in ("evidence_snapshot_ids_json", "input_features_json", "confidence_components_json", "limitations_json"):
                 run[key.removesuffix("_json")] = json.loads(run.pop(key))
         return {"deal": dict(deal), "documents": documents, "values": values, "entities": entities, "findings": findings, "audit": audit, "review_decisions": decisions, "assumption_runs": runs, "data_source_snapshots": snapshots, "market_observations": observations, "data_profile": profile_observations(observations), "benchmark_matrix": benchmark_matrix(observations), "correlation_matrix": correlation_matrix(observations), "time_series_diagnostics": time_series_diagnostics(observations), "stress_scenarios": stress_scenarios(observations), "lead_lag_matrix": lead_lag_matrix(observations), "derived_change_factors": derived_change_factors(observations), "market_factor_scorecards": market_factor_scorecards(observations), "revision_conflicts": revision_conflicts(observations), "cadence_findings": cadence_findings(observations), "source_scorecards": source_scorecards(observations, snapshots), "research_manifest": research_manifest(observations, snapshots), "walk_forward_baselines": walk_forward_baselines(observations), "market_regimes": market_regimes(observations), "assumption_decision_contexts": decision_contexts}
+
+    def location_analysis(self, organization_id: str, user_id: str, deal_id: str, payload: dict) -> dict:
+        with self.db.connect() as connection:
+            deal = connection.execute("SELECT * FROM deals WHERE id=? AND organization_id=?", (deal_id, organization_id)).fetchone()
+        if not deal:
+            raise LookupError("Deal not found")
+        subject = dict(payload.get("subject") or {})
+        subject.setdefault("address", deal["address"])
+        subject.setdefault("property_type", deal["property_type"])
+        comps_text, pois_text = str(payload.get("comps_csv") or ""), str(payload.get("pois_csv") or "")
+        if not comps_text or not pois_text:
+            raise ValueError("Both comparable-rent and point-of-interest CSV files are required")
+        comps, pois = parse_csv_records(comps_text, "comps"), parse_csv_records(pois_text, "pois")
+        result = analyze_location(subject, comps, pois, max_comp_distance_miles=float(payload.get("max_comp_distance_miles", 15)), limit=int(payload.get("limit", 10)))
+        result["provenance"] = {
+            "compsFileSha256": hashlib.sha256(comps_text.encode()).hexdigest(), "compsRows": len(comps),
+            "poisFileSha256": hashlib.sha256(pois_text.encode()).hexdigest(), "poisRows": len(pois),
+            "analysisVersion": "location-comparables/1.0", "generatedAt": now(),
+        }
+        self.db.audit(organization_id, user_id, "research.location_analysis", "deal", deal_id,
+                      {"comps_file_sha256": result["provenance"]["compsFileSha256"], "pois_file_sha256": result["provenance"]["poisFileSha256"],
+                       "comp_count": len(result["rentComparables"]), "poi_count": len(pois), "analysis_version": "location-comparables/1.0"}, deal_id)
+        return result
 
     def import_market_panel(self, organization_id: str, user_id: str, deal_id: str | None, filename: str, content: bytes, metadata: dict) -> dict:
         parsed, rows, errors = parse_market_panel(content)

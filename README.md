@@ -21,6 +21,7 @@
 - Approved-only, parser-validated bounded `test2` JSON adapter; local test1 snapshot adapter; immutable 18-section source-linked memo
 - Immutable semantic rent-roll, operations, lease and debt rows with exact source-cell membership and analyst review navigation
 - Optional, explicitly invoked loopback-only Ollama JSON provider whose output remains candidate-only
+- Local, source-linked rent-comparable ranking and school/retail/downtown/amenity proximity context from reviewed CSV evidence and Test1/user coordinates
 - SQLite audit history with a hash chain
 - No required account, credentials, hosted API, telemetry or document transmission
 

@@ -48,7 +48,13 @@ def ingest_observations(paths: WarehousePaths, *, source_id: str, dataset_id: st
     connection = duckdb.connect(":memory:")
     try:
         connection.execute(f"CREATE TABLE observations ({DUCKDB_SCHEMA}, UNIQUE(observation_id))")
-        placeholders = ",".join("?" for _ in CANONICAL_COLUMNS)
+        batch_path = final_dir / ".normalized-batch.jsonl"
+        def insert_batch(items):
+            with batch_path.open("w", encoding="utf-8", newline="\n") as stream:
+                for item in items:
+                    stream.write(json.dumps(dict(zip(CANONICAL_COLUMNS, item, strict=True)), separators=(",", ":")) + "\n")
+            connection.execute(f"INSERT INTO observations BY NAME SELECT * FROM read_json_auto({sql_literal(str(batch_path))}, format='newline_delimited', hive_partitioning=false)")
+            batch_path.unlink(missing_ok=True)
         count, batch = 0, []
         for raw in rows:
             row = normalize_observation(raw)
@@ -56,11 +62,11 @@ def ingest_observations(paths: WarehousePaths, *, source_id: str, dataset_id: st
                 raise ValueError("row source identifiers must match the ingest request")
             batch.append(tuple(row[column] for column in CANONICAL_COLUMNS))
             if len(batch) >= batch_size:
-                connection.executemany(f"INSERT INTO observations VALUES ({placeholders})", batch)
+                insert_batch(batch)
                 count += len(batch)
                 batch.clear()
         if batch:
-            connection.executemany(f"INSERT INTO observations VALUES ({placeholders})", batch)
+            insert_batch(batch)
             count += len(batch)
         if count == 0:
             raise ValueError("an analytical dataset cannot be empty")
@@ -84,6 +90,7 @@ def ingest_observations(paths: WarehousePaths, *, source_id: str, dataset_id: st
         write_manifest_atomic(manifest_path, manifest)
         return IngestResult(final_path, manifest_path, count, manifest.content_hash)
     except Exception:
+        (final_dir / ".normalized-batch.jsonl").unlink(missing_ok=True)
         temporary.unlink(missing_ok=True)
         if final_path.exists() and not manifest_path.exists():
             final_path.unlink()

@@ -1,5 +1,9 @@
 # Local analytical warehouse
 
+Milestone 2 adds governed raw acquisition and deterministic source normalizers without replacing the Milestone 1 storage contract. See `public-data-ingestion.md`, `data-refresh.md`, `metric-dictionary.md`, and `geography-crosswalks.md`.
+
+The opt-in command `scripts/warehouse_load_benchmark.py --rows 100000` measured 100,000 canonical observations in 6.932 seconds (14,426.4 rows/second) on the development machine on 2026-08-08. This is one local measurement, not a 100-million-row scalability claim. Ingestion uses bounded JSONL batches and DuckDB bulk insertion.
+
 Test3 separates application state from analytical data:
 
 - SQLite owns workflow, approvals, provenance metadata, audit history and model governance.

@@ -31,7 +31,7 @@ def normalize_period(value: str | date | datetime, period_type: str | None = Non
             raise ValueError(f"unsupported observation period: {raw!r}") from exc
         inferred = inferred or "irregular"
         result = Period(raw, inferred, parsed)
-    expected = {"annual": 4, "quarterly": 7, "monthly": 7, "irregular": 10}
+    expected = {"annual": 4, "quarterly": 7, "monthly": 7, "daily": 10, "weekly": 10, "irregular": 10}
     if inferred not in expected or (inferred != "irregular" and len(raw) != expected[inferred]):
         raise ValueError(f"period {raw!r} does not match period_type {inferred!r}")
     return result

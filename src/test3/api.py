@@ -18,6 +18,7 @@ from .auth import DUMMY_PASSWORD_HASH, SigninLimiter, session_token, verify_pass
 from .db import now
 from .extraction import parse_csv, parse_xlsx_sheets
 from .permissions import require
+from .research.lab import research_lab_report
 import pypdfium2 as pdfium
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -98,6 +99,10 @@ class Handler(SimpleHTTPRequestHandler):
                 user = self._identity()
                 require(user["role"], "operations.inspect")
                 return self._json(200, self.service.operational_integrity(user["organization_id"]))
+            if parsed.path == "/api/research-lab":
+                user = self._identity()
+                require(user["role"], "read")
+                return self._json(200, research_lab_report(self.service.data_dir, self.service.db, user["organization_id"]))
             if parsed.path.startswith("/api/deals/"):
                 user = self._identity()
                 parts = parsed.path.strip("/").split("/")

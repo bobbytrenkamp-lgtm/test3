@@ -45,10 +45,21 @@ METRICS = {item.metric: item for item in (
     _level("average_annual_pay", "Average annual pay", "USD_current_per_year"),
     MetricSpec("county_cbsa_membership", "County-to-CBSA membership", "Vintage-specific official county component membership in a CBSA.", "membership", "category", "not_applicable", ("county",), ("irregular",), 1, 1),
     MetricSpec("fair_market_rent", "HUD Fair Market Rent", "HUD fiscal-year 40th-percentile monthly gross rent by bedroom count.", "USD_per_month", "level", "last_observation", ("county", "county_subdivision"), ("annual",), 0, None),
+    MetricSpec("rental_vacancy_rate", "Residential rental vacancy rate", "CPS/HVS rental vacancy rate for the rental housing stock; not institutional multifamily market vacancy.", "percent", "rate", "mean", ("national", "region", "state", "cbsa"), ("quarterly", "annual"), 0, 100),
+    MetricSpec("median_asking_rent_vacant_units", "Median asking rent for vacant rental units", "CPS/HVS asking rent for vacant units offered for rent; not institutional effective rent.", "USD_current_per_month", "level", "last_observation", ("national", "region"), ("quarterly", "annual"), 0, None),
     MetricSpec("unemployment_rate", "Unemployment rate", "Share of labor force unemployed.", "percent", "rate", "mean", ("national", "state", "county", "cbsa"), ("monthly", "annual"), 0, 100),
     MetricSpec("fed_funds_rate", "Federal funds rate", "Effective federal funds rate.", "percent", "rate", "mean", ("national",), ("daily",), None, None),
     *[MetricSpec(name, label, "Market interest-rate series.", "percent", "rate", "mean", ("national",), ("daily", "weekly"), None, None) for name, label in (("sofr", "SOFR"), ("treasury_2y", "2-year Treasury"), ("treasury_5y", "5-year Treasury"), ("treasury_10y", "10-year Treasury"), ("treasury_30y", "30-year Treasury"), ("mortgage_rate", "30-year mortgage rate"))],
     MetricSpec("cpi", "Consumer Price Index", "Consumer price index level.", "index_1982_1984_100", "index", "mean", ("national",), ("monthly",), 0, None),
+    *[MetricSpec(name, label, description, unit, measure, "mean", ("national",), frequencies, minimum, maximum)
+      for name, label, description, unit, measure, frequencies, minimum, maximum in (
+        ("cre_lending_standards_multifamily", "Multifamily CRE lending standards", "SLOOS net percentage of banks tightening standards for CRE loans secured by multifamily properties.", "percent_net_respondents", "rate", ("quarterly",), -100, 100),
+        ("cre_lending_standards_nonresidential", "Nonresidential CRE lending standards", "SLOOS net percentage of banks tightening standards for loans secured by nonfarm nonresidential properties.", "percent_net_respondents", "rate", ("quarterly",), -100, 100),
+        ("cre_loan_demand_multifamily", "Multifamily CRE loan demand", "SLOOS net percentage of banks reporting stronger demand for multifamily CRE loans.", "percent_net_respondents", "rate", ("quarterly",), -100, 100),
+        ("cre_loan_demand_nonresidential", "Nonresidential CRE loan demand", "SLOOS net percentage of banks reporting stronger demand for nonfarm nonresidential CRE loans.", "percent_net_respondents", "rate", ("quarterly",), -100, 100),
+        ("cre_loan_delinquency_rate", "CRE loan delinquency rate", "Delinquency rate on CRE loans excluding farmland at all commercial banks.", "percent", "rate", ("quarterly",), 0, 100),
+        ("cre_bank_loans", "Commercial real estate bank loans", "Commercial real estate loans held by all commercial banks.", "billions_USD_current", "level", ("monthly",), 0, None),
+      )],
 )}
 
 

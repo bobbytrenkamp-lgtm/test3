@@ -13,6 +13,8 @@ The publication path is: official response -> immutable raw bytes and metadata -
 | Census Building Permits | Permits and authorized units by structure size | County where reported | Annual | Permit-issuing areas are not treated as counties without an explicit crosswalk. |
 | Census/OMB delineations | County membership in CBSAs | County and CBSA | Irregular vintage | Membership is effective-date and vintage specific. Non-CBSA counties are not inferred. |
 | HUD FMR history | Fiscal-year Fair Market Rents by bedroom count | County and county subdivision | Annual, 1983-present | New England county subdivisions remain distinct; FMR is a 40th-percentile program rent, not observed asking rent. |
+| Census CPS/HVS | Rental vacancy rate; median asking rent for vacant units offered for rent | US | Quarterly, 1956-present for vacancy and 1988-present for asking rent | Residential context only. These are not institutional multifamily market vacancy, effective rent, or brokerage asking rent. Historical tables lack real-time release vintages. |
+| Federal Reserve CRE credit | SLOOS multifamily/nonresidential standards and demand; CRE loan delinquency; CRE bank-loan level | US | Monthly or quarterly | National credit conditions, not market-level property outcomes. SLOOS values are net respondent percentages. |
 
 No adapter requires an account, API key, payment method, cloud resource, or billable plan. As of May 2026, Census Data API calls require a key, so Test3 uses credential-free official table files instead.
 
@@ -24,6 +26,11 @@ test3-data refresh --source fred --series DGS10
 test3-data refresh --source building_permits --from-year 2000 --to-year 2024
 test3-data refresh --source crosswalk --vintage 2023
 test3-data refresh --source hud
+test3-data refresh --source hvs
+test3-data refresh --source fred --series SUBLPDRCSM
+test3-data refresh --source fred --series SUBLPDRCDM
+test3-data refresh --source fred --series DRCRELEXFACBS
+test3-data refresh --source fred --series CREACBM027SBOG
 ```
 
 If BLS blocks automation, download the linked official annual county workbook in a normal browser and preserve it with:
@@ -35,3 +42,7 @@ test3-data refresh --source bls --annual-county --from-year 2025 --to-year 2025 
 ```
 
 The file is copied into immutable raw storage, hashed, schema validated, normalized, and source-linked. An arbitrary URL, wrong host, empty file, oversized file, or changed schema fails closed. Correctness tests use committed fictional fixtures; live probes remain separate operational evidence.
+
+HUD's aggregated USPS vacancy data is not an automatic source. HUD restricts access to registered governmental entities and nonprofit organizations under a stated-purpose sublicense. Test3 does not register, accept terms, or download it for the repository owner. An eligible organization may use the governed local-file import only after independently documenting its sublicense and redistribution restrictions.
+
+Brokerage reports remain manual, rights-documented CRE imports. Test3 does not scrape CBRE, JLL, Cushman & Wakefield, Colliers, Newmark, Marcus & Millichap, CoStar, RealPage, or other commercial sources.

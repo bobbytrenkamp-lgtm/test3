@@ -30,6 +30,7 @@
   <div class="shell" inert aria-hidden="true">
     <nav class="sidebar" aria-label="Primary navigation">
       <button class="nav-item active" data-view="pipeline"><span>▦</span> Deal pipeline</button>
+      <button class="nav-item" data-view="research"><span>Σ</span> Research lab</button>
       <button class="nav-item" data-view="documents"><span>▤</span> Document room</button>
       <button class="nav-item" data-view="review"><span>◫</span> Data review</button>
       <button class="nav-item" data-view="findings"><span>△</span> Discrepancies</button>
@@ -48,6 +49,18 @@
         <div class="page-head"><div><p class="eyebrow">DEAL INTAKE</p><h1 id="pipeline-title">Diligence pipeline</h1><p>Move raw documents into verified underwriting inputs.</p></div><button id="new-deal" class="primary">+ New deal</button></div>
         <div class="metrics"><article><span>Active deals</span><strong id="metric-deals">—</strong><small>Local workspace</small></article><article><span>Needs review</span><strong id="metric-review">—</strong><small>Human decision required</small></article><article><span>Open findings</span><strong id="metric-findings">—</strong><small>Deterministic checks</small></article><article><span>Approved values</span><strong id="metric-approved">—</strong><small>Export eligible</small></article></div>
         <div class="panel"><div class="panel-head"><h2>Current deals</h2><input id="deal-search" type="search" placeholder="Search deals" aria-label="Search deals"></div><div id="deal-list" class="deal-list"><p class="empty">Loading local workspace…</p></div></div>
+      </section>
+      <section id="research" class="view" aria-labelledby="research-title">
+        <div class="page-head"><div><p class="eyebrow">QUANTITATIVE RESEARCH</p><h1 id="research-title">Research lab</h1><p>Actual warehouse coverage, verified CRE targets, feature panels and governed model evidence.</p></div><button id="research-refresh" class="secondary" type="button">Refresh evidence</button></div>
+        <div id="research-readiness" class="notice">Loading local research evidence…</div>
+        <div class="metrics research-metrics"><article><span>Warehouse observations</span><strong id="research-observations">—</strong><small>Active validated snapshots</small></article><article><span>Governed metrics</span><strong id="research-metrics">—</strong><small>Public predictors and targets</small></article><article><span>Verified CRE targets</span><strong id="research-targets">—</strong><small>Property-type observations</small></article><article><span>Validated real models</span><strong id="research-models">—</strong><small>Synthetic models excluded</small></article></div>
+        <div class="research-grid">
+          <article class="panel research-card"><div class="panel-head"><h2>Warehouse coverage</h2><span id="research-window" class="badge">No data</span></div><div id="research-coverage" class="table-wrap"><p class="empty">No warehouse observations.</p></div></article>
+          <article class="panel research-card"><div class="panel-head"><h2>Feature panels</h2></div><div id="research-features" class="table-wrap"><p class="empty">No feature panels built.</p></div></article>
+          <article class="panel research-card research-wide"><div class="panel-head"><h2>CRE target coverage</h2><span class="badge">No automatic source averaging</span></div><div id="research-target-coverage" class="table-wrap"><p class="empty">Import authorized historical CRE observations to populate this table.</p></div></article>
+          <article class="panel research-card research-wide"><div class="panel-head"><h2>Model registry</h2><span class="badge">Out-of-sample gates required</span></div><div id="research-model-registry" class="table-wrap"><p class="empty">No installed model artifacts.</p></div></article>
+        </div>
+        <details class="panel research-method"><summary>Evidence boundary and methodology</summary><div id="research-methodology"></div></details>
       </section>
       <section id="documents" class="view" aria-labelledby="documents-title">
         <div class="page-head"><div><p class="eyebrow">SOURCE ROOM</p><h1 id="documents-title">Document room</h1><p id="documents-subtitle">Originals are preserved with SHA-256 provenance.</p></div><div><button id="upload-trigger" class="primary" type="button">Upload document</button><input id="upload" type="file" accept=".pdf,.csv,.xlsx,.png,.jpg,.jpeg" multiple hidden></div></div>

@@ -42,8 +42,9 @@ SOURCE_CATALOG = {
         _public("census_acs", "U.S. Census Bureau", "American Community Survey", ("population", "households", "income", "housing_units", "vacancy"), ("state", "county", "place"), ("annual",), "2005", "annual", "U.S. federal government data; verify table-specific notes."),
         _public("bls_laus_ces", "U.S. Bureau of Labor Statistics", "LAUS and QCEW", ("employment", "unemployment_rate", "labor_force", "covered_employment", "establishments", "wages", "pay"), ("national", "state", "county", "cbsa"), ("monthly", "annual"), "1975", "monthly/quarterly", "U.S. federal government data; preserve series IDs, disclosure status, footnotes and revisions."),
         _public("bea_regional", "U.S. Bureau of Economic Analysis", "Regional accounts", ("gdp", "personal_income", "economic_output"), ("state", "county", "cbsa"), ("quarterly", "annual"), "1969", "quarterly", "U.S. federal government data; attribution requested."),
-        _public("fred_public", "Federal Reserve Bank of St. Louis", "FRED public series", ("treasury_rate", "sofr", "fed_funds", "mortgage_rate", "inflation"), ("national",), ("daily", "monthly", "quarterly"), "1954", "varies", "Series rights vary; record each series' source and copyright notes."),
+        _public("fred_public", "Federal Reserve Bank of St. Louis", "FRED public series", ("treasury_rate", "sofr", "fed_funds", "mortgage_rate", "inflation", "cre_lending_standards", "cre_loan_demand", "cre_loan_delinquency", "cre_bank_loans"), ("national",), ("daily", "weekly", "monthly", "quarterly"), "1954", "varies", "Series rights vary; governed CRE additions are Federal Reserve Board public-domain series with citation requested."),
         _public("hud_public", "U.S. Department of Housing and Urban Development", "Fair Market Rent history", ("fair_market_rent",), ("county", "county_subdivision"), ("annual",), "1983", "annual", "U.S. federal government data; preserve fiscal year, bedroom count and HUD area definitions."),
+        _public("census_hvs", "U.S. Census Bureau", "Housing Vacancy Survey historical tables", ("rental_vacancy_rate", "median_asking_rent_vacant_units"), ("national",), ("quarterly",), "1956", "quarterly", "U.S. federal government data; HVS residential measures are not institutional brokerage CRE metrics and historical tables do not provide real-time release vintages."),
         _public("census_cbsa_crosswalk", "U.S. Census Bureau / Office of Management and Budget", "Metropolitan and Micropolitan Delineation Files", ("county_cbsa_membership",), ("county", "cbsa"), ("irregular",), "2023-07-21", "when OMB revises delineations", "U.S. federal government data; preserve the OMB delineation vintage and effective date."),
         _public("census_bps", "U.S. Census Bureau", "Building Permits Survey", ("permits", "units_authorized", "multifamily_permits"), ("state", "county", "place"), ("monthly", "annual"), "1980", "monthly", "U.S. federal government data."),
         SourceSpec("test1_local", "Test1", "Normalized local exports", ("geography", "zoning", "policy", "facilities"), ("state", "county", "place", "property"), ("irregular",), None, "user controlled", "User-owned local output; Test3 does not redistribute Test1 data.", "local_file", False, False, False, False, False, "Contract-validated local adapter; do not duplicate Test1 pipelines."),
@@ -56,6 +57,7 @@ SOURCE_CATALOG = {
 # Never add a fingerprint here without reviewing the exact prior SourceSpec and documenting the change.
 LEGACY_SOURCE_FINGERPRINTS = {
     "hud_public": frozenset({"8538dffbf9024742f0a04dd10929919fe744f9609221d059117b24abf7006e92"}),
+    "fred_public": frozenset({"300f45bdff85f2eabda787fdf6d9b43fe68d26388445da0e3f4723a80eda009d"}),
 }
 
 

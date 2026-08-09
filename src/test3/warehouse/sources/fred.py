@@ -11,6 +11,12 @@ SERIES = {
     "DGS2": ("treasury_2y", "percent", "daily"), "DGS5": ("treasury_5y", "percent", "daily"),
     "DGS10": ("treasury_10y", "percent", "daily"), "DGS30": ("treasury_30y", "percent", "daily"),
     "MORTGAGE30US": ("mortgage_rate", "percent", "weekly"), "CPIAUCSL": ("cpi", "index_1982_1984_100", "monthly"),
+    "SUBLPDRCSM": ("cre_lending_standards_multifamily", "percent_net_respondents", "quarterly"),
+    "SUBLPDRCSN": ("cre_lending_standards_nonresidential", "percent_net_respondents", "quarterly"),
+    "SUBLPDRCDM": ("cre_loan_demand_multifamily", "percent_net_respondents", "quarterly"),
+    "SUBLPDRCDN": ("cre_loan_demand_nonresidential", "percent_net_respondents", "quarterly"),
+    "DRCRELEXFACBS": ("cre_loan_delinquency_rate", "percent", "quarterly"),
+    "CREACBM027SBOG": ("cre_bank_loans", "billions_USD_current", "monthly"),
 }
 
 
@@ -53,7 +59,11 @@ class FredPublic(PublicDataSource):
                 if value in ("", "."):
                     continue
                 observed = date.fromisoformat(raw[date_field]).isoformat()
+                methodology = ("Original-frequency public Federal Reserve series; no aggregation or interpolation. "
+                               "SLOOS values are net respondent percentages, not property-market observations."
+                               if series.startswith("SUBLP") else
+                               "Original-frequency public Federal Reserve series; no aggregation or interpolation.")
                 yield canonical_row(snapshot, series=series, geography_type="national", geography_id="US",
                                     observation_date=observed, period_type=frequency, metric=metric, value=value,
                                     unit=unit, source_row=row_number, raw=raw,
-                                    methodology="Original-frequency public Federal Reserve series; no aggregation or interpolation.")
+                                    methodology=methodology)

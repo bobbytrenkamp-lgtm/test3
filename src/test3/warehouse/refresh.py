@@ -77,6 +77,8 @@ def refresh_source(paths: WarehousePaths, source: str, request: PublicDataReques
         dataset_id = "county_cbsa_" + str(request.parameters.get("vintage", "2023"))
     elif adapter.source_id == "hud_public":
         dataset_id = "fair_market_rents_history"
+    elif adapter.source_id == "census_hvs":
+        dataset_id = "hvs_" + request.parameters.get("series", "rental_vacancy_rate")
     request = PublicDataRequest(dataset_id, request.from_year, request.to_year, request.geography, request.parameters)
     urls = adapter.discover(request)
     if dry_run:

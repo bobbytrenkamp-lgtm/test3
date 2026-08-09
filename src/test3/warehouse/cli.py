@@ -23,7 +23,7 @@ from test3.cre_data.schema import parse_cre_csv
 from test3.cre_data.verification import available_as_of, verify_observations
 
 
-PUBLIC_SOURCES = ("census", "bls", "bea", "fred", "building_permits", "crosswalk", "hud")
+PUBLIC_SOURCES = ("census", "bls", "bea", "fred", "building_permits", "crosswalk", "hud", "hvs")
 
 
 def _parser():
@@ -93,6 +93,8 @@ def main(argv=None):
         for source in targets:
             if source == "hud":
                 end, start = args.to_year or datetime.now().year, args.from_year or 1983
+            elif source == "hvs":
+                end, start = args.to_year or datetime.now().year, args.from_year or 1956
             elif source in ("bea", "crosswalk", "fred"):
                 end, start = args.to_year, args.from_year
             else:
@@ -108,6 +110,8 @@ def main(argv=None):
             elif source == "bea": parameter_sets = [{"table": args.table}] if args.table else [{"table": item} for item in ("CAINC1", "CAGDP1")]
             elif source == "crosswalk": parameter_sets = [{"vintage": args.vintage}]
             elif source == "hud": parameter_sets = [{}]
+            elif source == "hvs": parameter_sets = ([{"series": args.series}] if args.series else
+                                                       [{"series": "rental_vacancy_rate"}, {"series": "median_asking_rent_vacant_units"}])
             else: parameter_sets = [{}]
             years = range(start, end + 1) if source in ("census", "building_permits") else (None,)
             for year in years:

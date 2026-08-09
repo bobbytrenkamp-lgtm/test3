@@ -99,7 +99,7 @@ def preserve_raw_snapshot(paths: WarehousePaths, source_id: str, request: Public
     version = f"{digest[:24]}-{request_digest[:12]}"
     raw_names = {"census_acs": "census", "bls_laus_ces": "bls", "bea_regional": "bea",
                  "fred_public": "fred", "census_bps": "building_permits", "hud_public": "hud",
-                 "census_cbsa_crosswalk": "census", "test1_local": "test1"}
+                 "census_hvs": "census", "census_cbsa_crosswalk": "census", "test1_local": "test1"}
     directory = paths.contained(Path("raw") / raw_names.get(source_id, source_id) /
                                 request.dataset_id / version)
     if directory.exists():

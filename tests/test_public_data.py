@@ -19,6 +19,7 @@ from test3.warehouse.sources.census import CensusACS
 from test3.warehouse.sources.census_crosswalk import CensusCBSACrosswalk
 from test3.warehouse.sources.fred import FredPublic
 from test3.warehouse.sources.hud import HUDFairMarketRents
+from test3.warehouse.sources.hvs import CensusHousingVacancySurvey
 from test3.warehouse.sources.http import GovernedHttpClient
 from test3.warehouse.ingestion import ingest_observations
 from test3.warehouse.manifests import active_manifests
@@ -41,6 +42,33 @@ def snapshot(source_id, dataset_id, path, request):
 
 
 class PublicDataTests(unittest.TestCase):
+    def test_hvs_preserves_residential_vacancy_definition_and_revisions(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "hvs.xlsx"
+            workbook = Workbook(); sheet = workbook.active
+            sheet.append(["Table 1. Quarterly Rental Vacancy Rates"]); sheet.append(["Year and Quarter", "United States"])
+            sheet.append([2024, None]); sheet.append(["1st", 6.6]); sheet.append(["2nd", "NA"])
+            sheet.append(["2024r1", None]); sheet.append(["1st", 6.5])
+            workbook.save(path); workbook.close()
+            request = PublicDataRequest("housing_vacancy_survey", 2024, 2024, parameters={"series": "rental_vacancy_rate"})
+            rows = list(CensusHousingVacancySurvey().normalize(snapshot("census_hvs", "housing_vacancy_survey", path, request)))
+            self.assertEqual([row["value"] for row in rows], ["6.6", "6.5"])
+            self.assertEqual({row["period_type"] for row in rows}, {"quarterly"})
+            self.assertTrue(all("not an institutional multifamily" in row["methodology"] for row in rows))
+            self.assertEqual({row["source_series"].rsplit("_", 1)[-1] for row in rows}, {"published", "revised"})
+
+    def test_hvs_asking_rent_stops_before_home_sales_table(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "hvs-rent.xlsx"
+            workbook = Workbook(); sheet = workbook.active
+            sheet.append(["Table 11A. Median Asking Rent"]); sheet.append([1988]); sheet.append(["1st", 330])
+            sheet.append(["Table 11B. Median Asking Sales Price"]); sheet.append([1988]); sheet.append(["1st", 100000])
+            workbook.save(path); workbook.close()
+            request = PublicDataRequest("housing_vacancy_survey", 1988, 1988, parameters={"series": "median_asking_rent_vacant_units"})
+            rows = list(CensusHousingVacancySurvey().normalize(snapshot("census_hvs", "housing_vacancy_survey", path, request)))
+            self.assertEqual(len(rows), 1); self.assertEqual(rows[0]["metric"], "median_asking_rent_vacant_units")
+            self.assertIn("not an institutional effective-rent", rows[0]["methodology"])
+
     def test_http_client_rejects_arbitrary_urls(self):
         client = GovernedHttpClient(("api.census.gov",))
         with self.assertRaisesRegex(ValueError, "allowed official"):
@@ -65,6 +93,16 @@ class PublicDataTests(unittest.TestCase):
         bps_request = PublicDataRequest("annual_county", 2025, 2025, "county")
         permits = list(CensusBuildingPermits().normalize(snapshot("census_bps", "annual_county", FIXTURES / "building_permits.csv", bps_request)))
         self.assertEqual(len(permits), 5); self.assertEqual(permits[-1]["metric"], "residential_permits_total")
+
+    def test_fred_cre_credit_series_is_not_mislabeled_as_market_outcome(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "sloos.csv"
+            path.write_text("observation_date,SUBLPDRCSM\n2025-10-01,1.6\n", encoding="utf-8")
+            request = PublicDataRequest("macro_sublpdrcsm", parameters={"series": "SUBLPDRCSM"})
+            rows = list(FredPublic().normalize(snapshot("fred_public", "macro_sublpdrcsm", path, request)))
+            self.assertEqual(rows[0]["metric"], "cre_lending_standards_multifamily")
+            self.assertEqual(rows[0]["period_type"], "quarterly")
+            self.assertIn("not property-market observations", rows[0]["methodology"])
 
     def test_bls_public_api_scales_published_thousands_deterministically(self):
         request = PublicDataRequest("national_lns12000000", parameters={"series": "LNS12000000"})

@@ -20,6 +20,10 @@ Every analytical query verifies manifest integrity, the governed source-definiti
 
 Large runtime datasets under `data/warehouse/` are ignored by Git. Only schemas, catalog definitions, documentation and explicitly fictional fixtures are committed.
 
+## Analysis-ready features
+
+Milestone 3A adds immutable county/CBSA annual and quarterly feature panels under `data/warehouse/features/`. Wide model inputs are paired with a normalized lineage DAG and a separate feature manifest; they are not inserted back into the canonical observation store. See [feature-engineering.md](feature-engineering.md).
+
 ## Canonical lineage
 
 Every observation carries source, dataset, series and version identifiers; retrieval and as-of dates; stable geography fields; original frequency; metric, unit and value; quality/methodology metadata; a raw source reference; and raw and normalized row hashes. Annual data remains annual. Missing data remains null; it is never changed to zero or silently forward-filled.

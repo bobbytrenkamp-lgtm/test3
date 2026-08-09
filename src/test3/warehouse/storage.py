@@ -10,8 +10,8 @@ WAREHOUSE_DIRS = (
     "normalized/demographics", "normalized/labor", "normalized/income", "normalized/housing",
     "normalized/construction", "normalized/capital_markets", "normalized/rent", "normalized/vacancy",
     "normalized/supply", "normalized/transactions", "normalized/expenses", "normalized/geography",
-    "features/county_month", "features/county_quarter", "features/cbsa_month",
-    "features/cbsa_quarter", "features/market_quarter", "features/property_type_market_quarter",
+    "features/county_month", "features/county_quarter", "features/county_year", "features/cbsa_month",
+    "features/cbsa_quarter", "features/cbsa_year", "features/market_quarter", "features/property_type_market_quarter",
     "models", "manifests",
 )
 

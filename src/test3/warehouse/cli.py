@@ -16,6 +16,8 @@ from .sources.fred import SERIES
 from .sources.census import ACS_VARIABLES
 from .sources.bls import BLSLAUS
 from .storage import WarehousePaths
+from test3.features.builder import build_feature_table
+from test3.features.panel import FeaturePanel
 
 
 PUBLIC_SOURCES = ("census", "bls", "bea", "fred", "building_permits", "crosswalk", "hud")
@@ -29,6 +31,11 @@ def _parser():
                             ("status", "verify versions and refresh history"), ("summary", "bounded DuckDB summary"),
                             ("coverage", "actual coverage by metric and geography")):
         commands.add_parser(name, help=help_text)
+    features = commands.add_parser("build-features", help="build an immutable governed feature table")
+    features.add_argument("--geography", choices=("county", "cbsa"), required=True)
+    features.add_argument("--frequency", choices=("annual", "quarterly"), required=True)
+    feature_status = commands.add_parser("feature-status", help="verify immutable feature-table versions")
+    feature_status.add_argument("--table", choices=("county_year", "county_quarter", "cbsa_year", "cbsa_quarter"))
     refresh = commands.add_parser("refresh", help="download, preserve, normalize, validate and publish official data")
     refresh.add_argument("--source", choices=(*PUBLIC_SOURCES, "all"), required=True)
     refresh.add_argument("--from-year", type=int); refresh.add_argument("--to-year", type=int)
@@ -55,6 +62,10 @@ def main(argv=None):
     elif args.command == "summary": output = WarehouseEngine(paths).summary()
     elif args.command == "coverage": output = coverage_report(paths)
     elif args.command == "lineage": output = observation_lineage(paths, args.observation_id)
+    elif args.command == "build-features": output = asdict(build_feature_table(paths, geography=args.geography, frequency=args.frequency))
+    elif args.command == "feature-status":
+        tables = (args.table,) if args.table else ("county_year", "county_quarter", "cbsa_year", "cbsa_quarter")
+        output = {table: FeaturePanel(paths, table).versions() for table in tables}
     else:
         targets = PUBLIC_SOURCES if args.source == "all" else (args.source,)
         output, failures = [], 0

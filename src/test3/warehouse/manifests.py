@@ -7,7 +7,7 @@ import json
 import os
 from pathlib import Path
 
-from .catalog import get_source
+from .catalog import approved_source_fingerprints
 from .storage import WarehousePaths
 
 
@@ -75,7 +75,7 @@ def verify_manifest(paths: WarehousePaths, manifest_path: Path) -> dict:
         raise ManifestIntegrityError(f"manifest schema mismatch: {manifest_path}")
     if payload["status"] != "validated" or payload["manifest_version"] != "1.0.0":
         raise ManifestIntegrityError(f"manifest is not a supported validated snapshot: {manifest_path}")
-    if payload["source_spec_hash"] != get_source(payload["source_id"]).fingerprint:
+    if payload["source_spec_hash"] not in approved_source_fingerprints(payload["source_id"]):
         raise ManifestIntegrityError(f"source catalog fingerprint mismatch: {manifest_path}")
     if not payload["parquet_files"]:
         raise ManifestIntegrityError(f"manifest contains no Parquet files: {manifest_path}")

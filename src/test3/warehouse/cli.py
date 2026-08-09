@@ -18,7 +18,7 @@ from .sources.bls import BLSLAUS
 from .storage import WarehousePaths
 
 
-PUBLIC_SOURCES = ("census", "bls", "bea", "fred", "building_permits")
+PUBLIC_SOURCES = ("census", "bls", "bea", "fred", "building_permits", "crosswalk", "hud")
 
 
 def _parser():
@@ -37,6 +37,10 @@ def _parser():
     refresh.add_argument("--variable", help="governed Census ACS variable ID")
     refresh.add_argument("--chunk", help="governed BLS series-suffix chunk")
     refresh.add_argument("--state", help="two-digit state FIPS for a bounded BLS state file")
+    refresh.add_argument("--annual-county", action="store_true", help="use the official BLS annual county workbook")
+    refresh.add_argument("--local-file", help="operator-downloaded official file for a source that blocks automation")
+    refresh.add_argument("--source-url", help="exact allowed official HTTPS URL for --local-file evidence")
+    refresh.add_argument("--vintage", default="2023", help="governed geography vintage")
     lineage = commands.add_parser("lineage", help="trace one observation to raw evidence and manifest")
     lineage.add_argument("observation_id")
     return parser
@@ -53,24 +57,37 @@ def main(argv=None):
     elif args.command == "lineage": output = observation_lineage(paths, args.observation_id)
     else:
         targets = PUBLIC_SOURCES if args.source == "all" else (args.source,)
-        output = []
+        output, failures = [], 0
         for source in targets:
-            end = args.to_year or datetime.now().year - 1
-            start = args.from_year or end
+            if source == "hud":
+                end, start = args.to_year or datetime.now().year, args.from_year or 1983
+            elif source in ("bea", "crosswalk", "fred"):
+                end, start = args.to_year, args.from_year
+            else:
+                end = args.to_year or datetime.now().year - 1
+                start = args.from_year or end
             if source == "fred": parameter_sets = [{"series": args.series}] if args.series else [{"series": item} for item in SERIES]
             elif source == "census": parameter_sets = [{"variable": args.variable}] if args.variable else [{"variable": item} for item in ACS_VARIABLES]
-            elif source == "bls": parameter_sets = ([{"state": args.state}] if args.state else
+            elif source == "bls": parameter_sets = ([{"annual_county": "true", "local_file": args.local_file,
+                                                         "source_url": args.source_url}] if args.local_file or args.annual_county else
+                                                       [{"state": args.state}] if args.state else
                                                        [{"series": args.series}] if args.series else
-                                                       [{"series": item} for item in BLSLAUS.NATIONAL_SERIES])
+                                                       [{"qcew_year": str(end)}])
             elif source == "bea": parameter_sets = [{"table": args.table}] if args.table else [{"table": item} for item in ("CAINC1", "CAGDP1")]
+            elif source == "crosswalk": parameter_sets = [{"vintage": args.vintage}]
+            elif source == "hud": parameter_sets = [{}]
             else: parameter_sets = [{}]
             years = range(start, end + 1) if source in ("census", "building_permits") else (None,)
             for year in years:
                 for parameters in parameter_sets:
-                    request = PublicDataRequest("auto", year if year else args.from_year, year if year else args.to_year,
+                    request = PublicDataRequest("auto", year if year else start, year if year else end,
                                                 args.geography, parameters)
-                    output.append(refresh_source(paths, source, request, dry_run=args.dry_run))
-    print(json.dumps(output, indent=2, default=str, sort_keys=True)); return 0
+                    try:
+                        output.append(refresh_source(paths, source, request, dry_run=args.dry_run))
+                    except Exception as exc:
+                        failures += 1
+                        output.append({"source": source, "status": "failed", "request": request.serializable(), "error": str(exc)})
+    print(json.dumps(output, indent=2, default=str, sort_keys=True)); return 1 if args.command == "refresh" and failures else 0
 
 
 if __name__ == "__main__": raise SystemExit(main())

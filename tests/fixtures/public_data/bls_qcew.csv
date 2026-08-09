@@ -1,0 +1,3 @@
+area_fips,own_code,industry_code,agglvl_code,size_code,year,qtr,disclosure_code,annual_avg_estabs_count,annual_avg_emplvl,total_annual_wages,taxable_annual_wages,annual_contributions,annual_avg_wkly_wage,avg_annual_pay
+37001,0,10,70,0,2024,A,,2500,45000,2500000000,0,0,1068,55556
+37003,5,10,70,0,2024,A,,100,1000,40000000,0,0,769,40000

@@ -53,6 +53,8 @@ class RefreshLog:
 
 def refresh_source(paths: WarehousePaths, source: str, request: PublicDataRequest, *, dry_run=False) -> dict:
     adapter = get_adapter(source)
+    request = PublicDataRequest(request.dataset_id, request.from_year, request.to_year, request.geography,
+                                {**request.parameters, "_normalizer_version": adapter.normalizer_version})
     dataset_id = adapter.dataset_id
     if adapter.source_id == "census_acs":
         variable = request.parameters.get("variable", "B01003_001E").lower()
@@ -60,13 +62,21 @@ def refresh_source(paths: WarehousePaths, source: str, request: PublicDataReques
     elif adapter.source_id == "census_bps":
         dataset_id = f"annual_county_{request.to_year or request.from_year}"
     elif adapter.source_id == "bls_laus_ces":
-        if request.parameters.get("series"): dataset_id = "national_" + request.parameters["series"].lower()
+        if request.parameters.get("annual_county"):
+            dataset_id = f"laus_county_annual_{request.to_year or request.from_year}"
+        elif request.parameters.get("qcew_year"):
+            dataset_id = f"qcew_county_annual_{request.parameters['qcew_year']}"
+        elif request.parameters.get("series"): dataset_id = "national_" + request.parameters["series"].lower()
         elif request.parameters.get("state"): dataset_id = "laus_county_state_" + request.parameters["state"]
         else: dataset_id = "laus_county_chunk_" + request.parameters.get("chunk", "00-04").replace("-", "_")
     elif adapter.source_id == "fred_public":
         dataset_id = "macro_" + request.parameters.get("series", "DGS10").lower()
     elif adapter.source_id == "bea_regional":
         dataset_id = "regional_" + request.parameters.get("table", "CAINC1").lower()
+    elif adapter.source_id == "census_cbsa_crosswalk":
+        dataset_id = "county_cbsa_" + str(request.parameters.get("vintage", "2023"))
+    elif adapter.source_id == "hud_public":
+        dataset_id = "fair_market_rents_history"
     request = PublicDataRequest(dataset_id, request.from_year, request.to_year, request.geography, request.parameters)
     urls = adapter.discover(request)
     if dry_run:

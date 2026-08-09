@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-GEOGRAPHY_TYPES = {"national", "state", "county", "cbsa", "place", "zip", "city", "submarket", "market", "property"}
+GEOGRAPHY_TYPES = {"national", "state", "county", "county_subdivision", "cbsa", "place", "zip", "city", "submarket", "market", "property"}
 
 
 def validate_geography(row: dict) -> None:

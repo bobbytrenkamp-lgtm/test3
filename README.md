@@ -2,6 +2,8 @@
 
 Populate the local analytical warehouse with `test3-data refresh --source census --to-year 2024 --geography county`; inspect it with `test3-data status`, `test3-data coverage`, and `test3-data lineage OBSERVATION_ID`. Build immutable analysis-ready panels with `test3-data build-features --geography county --frequency annual` and inspect versions with `test3-data feature-status`. See `docs/public-data-ingestion.md` and `docs/feature-engineering.md`.
 
+Run governed local panel research with `test3-research train --input panel.parquet --target rent_growth --features employment_growth,population_growth --property-type multifamily`. The research engine supports fixed effects, robust/market-clustered standard errors, exact-period lag research, leakage-safe walk-forward tests, market holdouts, diagnostics, and baseline competition. See `docs/panel-modeling.md` and `docs/model-validation.md`.
+
 `test3` is an open-source, local-first Commercial Real Estate Deal Intake and Due Diligence Engine. It turns raw deal documents into source-linked, human-approved underwriting inputs and a versioned `test2` handoff package.
 
 > ZERO-COST CHECK PASSED: No application component can create a charge for the repository owner.

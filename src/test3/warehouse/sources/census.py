@@ -11,12 +11,13 @@ ACS_VARIABLES = {
     "B19013_001E": ("median_household_income", "USD_current"), "B19301_001E": ("per_capita_income", "USD_current"),
     "B25001_001E": ("housing_units", "units"), "B25002_002E": ("occupied_housing_units", "units"),
     "B25002_003E": ("vacant_housing_units", "units"), "B25010_001E": ("average_household_size", "persons_per_household"),
-    "B23001_001E": ("working_age_population_universe", "persons"), "B15003_022E": ("bachelors_degree_population", "persons"),
+    "B23025_001E": ("civilian_population_16_plus", "persons"), "B15003_022E": ("bachelors_degree_population", "persons"),
 }
 
 
 class CensusACS(PublicDataSource):
     source_id, dataset_id, domain = "census_acs", "acs5_profile", "demographics"
+    normalizer_version = "2.0.0"
     allowed_hosts = ("www2.census.gov",)
 
     def discover(self, request: PublicDataRequest) -> list[str]:

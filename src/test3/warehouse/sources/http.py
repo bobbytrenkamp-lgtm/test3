@@ -4,12 +4,16 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import time
+from threading import Lock
 from urllib.error import HTTPError
 from urllib.parse import urljoin, urlsplit
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 
 
 MAX_RESPONSE_BYTES = 256 * 1024 * 1024
+_HOST_REQUEST_TIMES: dict[str, float] = {}
+_HOST_RATE_LOCK = Lock()
+MIN_HOST_INTERVAL_SECONDS = 1.0
 
 
 @dataclass(frozen=True)
@@ -47,9 +51,11 @@ class GovernedHttpClient:
         parsed = urlsplit(url)
         if parsed.scheme != "https" or parsed.hostname not in self.allowed_hosts or parsed.username or parsed.password:
             raise ValueError("URL is not an allowed official HTTPS endpoint")
-        elapsed = time.monotonic() - self._last_request
-        if elapsed < 0.2:
-            time.sleep(0.2 - elapsed)
+        with _HOST_RATE_LOCK:
+            elapsed = time.monotonic() - _HOST_REQUEST_TIMES.get(parsed.hostname, 0.0)
+            if elapsed < MIN_HOST_INTERVAL_SECONDS:
+                time.sleep(MIN_HOST_INTERVAL_SECONDS - elapsed)
+            _HOST_REQUEST_TIMES[parsed.hostname] = time.monotonic()
         handler = _RestrictedRedirect(self.allowed_hosts)
         opener = build_opener(handler)
         request = Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; Test3PublicData/0.1; local open-source research; no credentials)", "Accept": "*/*", "Connection": "close"})

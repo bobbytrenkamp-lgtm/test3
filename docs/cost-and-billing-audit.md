@@ -1,10 +1,10 @@
 # Cost and billing audit
 
-Audit date: 2026-08-04. “Possibility of charges” covers this repository’s configured use, not hypothetical unrelated products from a provider.
+Audit date: 2026-08-09. “Possibility of charges” covers this repository’s configured use, not hypothetical unrelated products from a provider.
 
 | Component | Purpose | Provider | Account required | Payment method required | Usage limit | Possibility of charges | Local alternative | Approved/rejected | Reason |
 |---|---|---|---|---|---|---|---|---|---|
-| Governed public-data adapters | Census, labor, regional accounts, macro and permits downloads | Census, BLS, BEA, Federal Reserve | No | No | Public-source and local safety limits | None; no billing mechanism or credentials connected | Validated manual file import | Approved | Official HTTPS public distribution; stdlib client; no account, key, card or overage billing |
+| Governed public-data adapters | Census, labor/wages, regional accounts, macro, permits, CBSA delineations and HUD rents | Census, BLS, BEA, Federal Reserve, HUD | No | No | Public-source and local safety limits | None; no billing mechanism or credentials connected | Validated manual official-file import | Approved | Official HTTPS public distribution; local processing; no account, key, card, credits or overage billing |
 | Python 3.11+ | Local runtime | Python Software Foundation | No | No | Local resources | None | N/A | Approved | PSF-2.0; open source, local |
 | SQLite | Local metadata DB | Public domain / Python stdlib | No | No | Local disk | None | Flat files | Approved | Public domain; no service |
 | DuckDB 1.5.5 + Apache Parquet | Embedded analytical queries and immutable columnar datasets | DuckDB open-source project | No | No | Local CPU and disk | None; no billing mechanism | SQLite/CSV for small datasets | Approved | MIT-licensed local library; exact-pinned; no account, key, network call or transitive Python dependency |

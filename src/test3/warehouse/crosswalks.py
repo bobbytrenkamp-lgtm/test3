@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
+from .duckdb_engine import WarehouseEngine
+
 
 @dataclass(frozen=True)
 class CountyCrosswalk:
@@ -25,3 +27,18 @@ def validate_crosswalk(row: CountyCrosswalk) -> CountyCrosswalk:
     if row.effective_to is not None and row.effective_to < row.effective_from:
         raise ValueError("crosswalk effective dates are reversed")
     return row
+
+
+def lookup_county_cbsa(paths, county_fips: str, on_date: date | None = None) -> dict | None:
+    """Return the latest official delineation effective on a date; never infer missing membership."""
+    if len(county_fips) != 5 or not county_fips.isdigit():
+        raise ValueError("county_fips must contain exactly five digits")
+    effective = on_date or date.today()
+    rows = WarehouseEngine(paths).query_observations(
+        metrics=("county_cbsa_membership",), geography_id=county_fips,
+        columns=("observation_id", "observation_date", "county_fips", "state_fips", "cbsa",
+                 "source_id", "source_dataset", "source_version", "methodology"),
+        limit=1000,
+    )
+    eligible = [row for row in rows if row["observation_date"] <= effective]
+    return max(eligible, key=lambda row: row["observation_date"]) if eligible else None

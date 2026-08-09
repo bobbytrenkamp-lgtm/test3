@@ -2,6 +2,14 @@
 
 ## Promotion policy
 
+Model execution modes are explicit:
+
+- `ad_hoc_research` may explore any structurally valid panel but is never controlling.
+- `governed_candidate` requires a registered `ModelSpecification` and remains a candidate.
+- `validated_production` requires real data, a registered specification, and every promotion gate.
+
+The registered model specification is authoritative for minimum observations, markets, periods, features, fixed effects, and covariance. `ValidationPolicy.from_model_specification()` derives the gates; a caller cannot weaken them with generic defaults. The CLI therefore requires `--model-specification` for governed candidate or production mode. Merely declaring `--data-status real` cannot promote an ad-hoc regression.
+
 A model is not eligible to control an assumption unless all configured gates pass:
 
 1. minimum sample, market, and period coverage;

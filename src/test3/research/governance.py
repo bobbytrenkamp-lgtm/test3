@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .datasets import PanelDataset
+from .specifications import ModelSpecification
+
+
+MODEL_MODES = frozenset({"ad_hoc_research", "governed_candidate", "validated_production"})
 
 
 @dataclass(frozen=True)
@@ -12,16 +16,39 @@ class ValidationPolicy:
     minimum_periods: int = 6
     require_baseline_improvement: bool = True
     require_market_holdout: bool = True
+    require_python_reference: bool = True
+    allow_r_unavailable: bool = True
+
+    @classmethod
+    def from_model_specification(cls, specification: ModelSpecification) -> "ValidationPolicy":
+        """Build promotion gates from the authoritative governed model specification."""
+        return cls(
+            minimum_sample_size=specification.minimum_sample,
+            minimum_markets=specification.minimum_markets,
+            minimum_periods=specification.minimum_periods,
+        )
 
 
 def assess_model(panel: PanelDataset, walk_forward: dict, market_holdout: dict | None,
                  *, source_manifest_hashes: tuple[str, ...] = (), data_status: str = "research",
                  policy: ValidationPolicy = ValidationPolicy(), python_reference: dict | None = None,
                  r_reference: dict | None = None, stability: dict | None = None,
-                 target_dataset_hashes: tuple[str, ...] = (), feature_table_hash: str | None = None) -> dict:
+                 target_dataset_hashes: tuple[str, ...] = (), feature_table_hash: str | None = None,
+                 model_mode: str = "ad_hoc_research",
+                 model_specification: ModelSpecification | None = None) -> dict:
     if data_status not in {"research", "fictional_synthetic", "real"}:
         raise ValueError("unsupported model data status")
+    if model_mode not in MODEL_MODES:
+        raise ValueError("unsupported model mode")
     failures = []
+    if model_specification is not None:
+        governed_policy = ValidationPolicy.from_model_specification(model_specification)
+        if policy.minimum_sample_size < governed_policy.minimum_sample_size or policy.minimum_markets < governed_policy.minimum_markets or policy.minimum_periods < governed_policy.minimum_periods:
+            failures.append("validation policy is weaker than the governed model specification")
+    if model_mode in {"governed_candidate", "validated_production"} and model_specification is None:
+        failures.append("governed model mode requires a registered model specification")
+    if model_mode == "validated_production" and data_status != "real":
+        failures.append("production validation requires real data")
     if len(panel.rows) < policy.minimum_sample_size:
         failures.append(f"sample size {len(panel.rows)} is below {policy.minimum_sample_size}")
     if len(panel.entities) < policy.minimum_markets:
@@ -42,16 +69,27 @@ def assess_model(panel: PanelDataset, walk_forward: dict, market_holdout: dict |
         failures.append("real-data model has no target dataset hashes")
     if data_status == "real" and not feature_table_hash:
         failures.append("real-data model has no immutable feature-table hash")
-    if data_status == "real" and (not python_reference or python_reference.get("status") != "passed"):
+    if data_status == "real" and policy.require_python_reference and (not python_reference or python_reference.get("status") != "passed"):
         failures.append("independent Python reference validation did not pass")
-    if r_reference and r_reference.get("status") not in {"passed", "not_available"}:
+    if r_reference and r_reference.get("status") == "not_available" and not policy.allow_r_unavailable:
+        failures.append("R cross-check is required but unavailable")
+    elif r_reference and r_reference.get("status") not in {"passed", "not_available"}:
         failures.append("R cross-check failed")
     if stability and stability.get("severe_instability"):
         failures.append("severe coefficient instability was detected")
-    status = "validated" if not failures and data_status == "real" else ("candidate" if not failures else "rejected")
+    if failures:
+        status = "rejected"
+    elif model_mode == "validated_production" and data_status == "real":
+        status = "validated"
+    elif model_mode == "governed_candidate":
+        status = "candidate"
+    else:
+        status = "research"
     return {
         "status": status, "eligible_for_controlling_forecast": status == "validated", "failures": failures,
-        "policy": policy.__dict__, "data_status": data_status,
+        "policy": policy.__dict__, "data_status": data_status, "model_mode": model_mode,
+        "model_specification": ({"name": model_specification.name, "version": model_specification.version}
+                                if model_specification else None),
         "python_reference_status": (python_reference or {}).get("status", "not_run"),
         "r_cross_check_status": (r_reference or {}).get("status", "not_run"),
         "note": "Synthetic models can test machinery but can never become controlling forecasts.",

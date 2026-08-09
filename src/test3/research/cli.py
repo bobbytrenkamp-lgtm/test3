@@ -10,7 +10,8 @@ import duckdb
 from .datasets import prepare_panel
 from .lags import evaluate_candidate_lags
 from .modeling import train_panel_candidate
-from .target_panel import build_target_panel, target_readiness
+from .specifications import MODEL_SPECIFICATIONS
+from .target_panel import build_target_panel, target_readiness, target_readiness_for_specification
 from test3.warehouse.storage import WarehousePaths
 
 
@@ -52,6 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
     readiness = subparsers.add_parser("target-readiness", help="report real CRE target eligibility without fabricating readiness")
     readiness.add_argument("--data-root", default="data")
+    readiness.add_argument("--model-specification", choices=tuple(sorted(MODEL_SPECIFICATIONS)))
     target_panel = subparsers.add_parser("build-target-panel", help="join approved CRE targets to immutable feature panels")
     target_panel.add_argument("--data-root", default="data")
     target_panel.add_argument("--property-type", required=True, choices=("multifamily", "industrial", "office", "retail"))
@@ -74,6 +76,9 @@ def main(argv: list[str] | None = None) -> int:
     train = subparsers.choices["train"]
     train.add_argument("--features", required=True, help="Comma-separated governed feature columns")
     train.add_argument("--data-status", choices=("research", "fictional_synthetic", "real"), default="research")
+    train.add_argument("--model-mode", choices=("ad_hoc_research", "governed_candidate", "validated_production"),
+                       default="ad_hoc_research")
+    train.add_argument("--model-specification", choices=tuple(sorted(MODEL_SPECIFICATIONS)))
     train.add_argument("--source-manifest-hash", action="append", default=[])
     train.add_argument("--target-dataset-hash", action="append", default=[])
     train.add_argument("--feature-table-hash")
@@ -87,7 +92,10 @@ def main(argv: list[str] | None = None) -> int:
     lags.add_argument("--lags", default="0,1,2,4,6,8")
     args = parser.parse_args(argv)
     if args.command == "target-readiness":
-        print(json.dumps(target_readiness(WarehousePaths.from_data_root(Path(args.data_root))), indent=2, sort_keys=True))
+        paths = WarehousePaths.from_data_root(Path(args.data_root))
+        output = (target_readiness_for_specification(paths, MODEL_SPECIFICATIONS[args.model_specification])
+                  if args.model_specification else target_readiness(paths))
+        print(json.dumps(output, indent=2, sort_keys=True))
         return 0
     if args.command == "build-target-panel":
         try:
@@ -123,7 +131,9 @@ def main(argv: list[str] | None = None) -> int:
             target_dataset_hashes=tuple(saved.get("target_dataset_hashes", ())),
             feature_table_hash=saved.get("feature_table_hash"),
             feature_registry_version=saved.get("feature_registry_version"),
-            model_specification=saved.get("model_specification"), code_commit=saved.get("code_commit"),
+            model_specification=(MODEL_SPECIFICATIONS.get((saved.get("model_specification") or {}).get("name"))),
+            model_mode=saved.get("governance", {}).get("model_mode", "ad_hoc_research"),
+            code_commit=saved.get("code_commit"),
         )
         matches = reproduced["model_result_hash"] == saved["model_result_hash"]
         print(json.dumps({"status": "passed" if matches else "failed", "matches": matches,
@@ -132,6 +142,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if matches else 1
     rows = _records(args.input)
     if args.command == "train":
+        specification = MODEL_SPECIFICATIONS.get(args.model_specification)
+        if args.model_mode != "ad_hoc_research" and specification is None:
+            raise ValueError("governed candidate and production modes require --model-specification")
+        if args.data_status == "real" and args.model_mode == "validated_production" and specification is None:
+            raise ValueError("real production validation requires --model-specification")
         panel = prepare_panel(rows, target=args.target, features=_features(args.features), entity_column=args.entity,
                               time_column=args.time, required_property_type=args.property_type)
         result = train_panel_candidate(panel, entity_fixed_effects=not args.no_entity_effects,
@@ -142,6 +157,7 @@ def main(argv: list[str] | None = None) -> int:
                                        target_dataset_hashes=tuple(args.target_dataset_hash),
                                        feature_table_hash=args.feature_table_hash,
                                        feature_registry_version=args.feature_registry_version,
+                                       model_specification=specification, model_mode=args.model_mode,
                                        code_commit=args.code_commit)
     else:
         lag_values = tuple(int(value.strip()) for value in args.lags.split(",") if value.strip())

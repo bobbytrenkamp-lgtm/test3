@@ -18,10 +18,12 @@ from test3.features.panel import FeaturePanel
 from test3.cre_data.metrics import CRE_METRICS
 from test3.warehouse.manifests import canonical_json, file_sha256
 from test3.warehouse.storage import WarehousePaths
+from test3.research.specifications import ModelSpecification
 
 
 TARGET_PANEL_VERSION = "1.0.0"
-BLOCKING_FINDINGS = frozenset({"duplicate_observation", "source_conflict", "methodology_mismatch"})
+BLOCKING_FINDINGS = frozenset({"duplicate_observation", "source_conflict", "methodology_mismatch",
+                               "methodology_change", "market_geography_mismatch"})
 SUPPORTED_FREQUENCIES = frozenset({"annual", "quarterly"})
 
 
@@ -94,9 +96,19 @@ def _eligible_rows_from_reports(reports: list[dict], property_type: str | None =
     grouped = defaultdict(list)
     for row in candidates:
         grouped[(row["geography_id"], row["period"], row["frequency"], row["property_type"], row["metric"])].append(row)
+    longitudinal = defaultdict(list)
+    for row in candidates:
+        longitudinal[(row["geography_id"], row["frequency"], row["property_type"], row["metric"],
+                      row["source_name"], row["source_identifier"])].append(row)
+    incompatible = {
+        row["observation_id"] for rows in longitudinal.values()
+        if len({row["methodology"] for row in rows}) > 1 for row in rows
+    }
     eligible = []
     for rows in grouped.values():
-        if len(rows) != 1:
+        if any(row["observation_id"] in incompatible for row in rows):
+            exclusions["longitudinal_methodology_change"] += len(rows)
+        elif len(rows) != 1:
             exclusions["unresolved_multiple_sources"] += len(rows)
         else:
             eligible.append(rows[0])
@@ -140,6 +152,21 @@ def target_readiness(paths: WarehousePaths, *, policy: ReadinessPolicy = Readine
             "exclusions": dict(sorted(exclusions.items())), "policy": asdict(policy),
         })
     return output
+
+
+def target_readiness_for_specification(paths: WarehousePaths, specification: ModelSpecification) -> dict:
+    """Report target readiness against one model's authoritative promotion minimums."""
+    policy = ReadinessPolicy(
+        minimum_markets=specification.minimum_markets,
+        minimum_periods=specification.minimum_periods,
+        minimum_observations=specification.minimum_sample,
+    )
+    matches = [item for item in target_readiness(paths, policy=policy)
+               if item["property_type"] == specification.property_type and item["target"] == specification.target]
+    if not matches:
+        raise ValueError("model specification target is not registered")
+    return {**matches[0], "model_specification": specification.name,
+            "model_specification_version": specification.version}
 
 
 def _panel_period(value: object, frequency: str) -> str:

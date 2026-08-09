@@ -12,12 +12,32 @@ from test3.assumptions.observations import parse_market_panel, rows_to_observati
 from test3.assumptions.factors import derived_change_factors, market_factor_scorecards
 from test3.assumptions.governance import cadence_findings, research_manifest, revision_conflicts, source_scorecards
 from test3.assumptions.validation import market_regimes, walk_forward_baselines
+from test3.assumptions.recommend import recommend
 
 
 PANEL = b"""period,market_id,market_name,property_type,source,source_date,source_reference,usage_rights,county_fips,state_fips,rent_growth_12m,expense_growth,property_tax_growth,insurance_growth,vacancy_rate,effective_rent,renewal_probability,downtime_months,tenant_improvements,leasing_commission_rate,transaction_cap_rate,discount_rate,debt_interest_rate,construction_cost_growth,lease_up_units_per_month,lease_comp_count\n2025-01-01,BAL,Baltimore,office,Analyst panel,2025-02-01,local://panel,Internal use,24510,24,0.025,0.030,0.040,0.060,0.12,31.0,0.65,9,45,0.05,0.065,0.09,0.06,0.04,2,12\n2025-04-01,BAL,Baltimore,office,Analyst panel,2025-05-01,local://panel,Internal use,24510,24,0.030,0.035,0.045,0.070,0.11,32.0,0.67,8,47,0.05,0.067,0.095,0.062,0.045,2.2,14\n2025-07-01,BAL,Baltimore,office,Analyst panel,2025-08-01,local://panel,Internal use,24510,24,0.035,0.040,0.050,0.080,0.10,33.0,0.70,7,50,0.055,0.070,0.10,0.065,0.05,2.5,16\n"""
 
 
 class AssumptionIntelligenceTests(unittest.TestCase):
+    def test_validated_model_forecast_remains_distinct_from_underwriting_recommendation(self):
+        observations = [{"id": f"o{index}", "metric": "rent_growth_12m", "value": str(value),
+                         "observation_date": f"202{index}-01-01", "property_type": "multifamily",
+                         "geography_type": "market", "geography_id": "RDU"}
+                        for index, value in enumerate((.02, .03, .04, .05))]
+        artifact = {"id": "model-1", "data_status": "real", "validation_state": "validated",
+                    "target_assumption": "market_rent_growth", "property_types": ["multifamily"],
+                    "model_metrics": {"forecast": {"model": {"model_id": "model-1", "version": "1", "estimate": .06},
+                                                   "range": {"low": .025, "high": .075},
+                                                   "validation": {"walk_forward_mae": .01, "baseline_mae": .02,
+                                                                  "market_holdout_mae": .015},
+                                                   "candidate_only": True, "analyst_approval_required": True}}}
+        result = recommend("market_rent_growth", {"property_type": "multifamily"}, observations,
+                           {"market_id": "RDU"}, model_artifact=artifact)
+        self.assertEqual(result["modelEstimate"], "0.06")
+        self.assertNotEqual(result["base"], result["modelEstimate"])
+        self.assertEqual(result["historicalBenchmark"]["median"], result["benchmarkEstimate"])
+        self.assertTrue(result["candidateOnly"])
+
     def test_public_series_catalog_and_offline_adapters(self):
         self.assertGreaterEqual(len(PUBLIC_SERIES), 25)
         fred = parse_fred_csv(b"DATE,DGS10\n2025-01-01,4.25\n2025-01-02,.\n", "DGS10", "treasury_rate", "decimal_fraction")

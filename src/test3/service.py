@@ -306,14 +306,25 @@ class Service:
             if not deal:
                 raise LookupError("Deal not found")
             observations = [dict(row) for row in connection.execute("SELECT o.* FROM market_observations o JOIN data_source_snapshots s ON s.id=o.snapshot_id WHERE o.organization_id=? AND (s.deal_id=? OR s.deal_id IS NULL) ORDER BY o.observation_date", (organization_id, deal_id))]
-        recommendation = recommend(assumption_type, dict(deal), observations, dict(context or {}))
+            artifacts = connection.execute("""SELECT * FROM model_artifacts
+                WHERE organization_id=? AND target_assumption=? AND data_status='real' AND validation_state='validated'
+                ORDER BY created_at DESC LIMIT 20""", (organization_id, assumption_type)).fetchall()
+        model_artifact = None
+        for candidate in artifacts:
+            parsed = dict(candidate)
+            parsed["property_types"] = json.loads(parsed.pop("property_types_json"))
+            parsed["model_metrics"] = json.loads(parsed.pop("model_metrics_json"))
+            if deal["property_type"] in parsed["property_types"]:
+                model_artifact = parsed
+                break
+        recommendation = recommend(assumption_type, dict(deal), observations, dict(context or {}), model_artifact=model_artifact)
         run_id, created = str(uuid.uuid4()), now()
         recommendation["id"] = run_id
         run_hash = canonical_hash({**recommendation, "createdBy": user_id, "createdAt": created})
         snapshot_ids = sorted({row["snapshot_id"] for row in observations if row["id"] in recommendation.get("supportingEvidence", [])})
         with self.db.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            connection.execute("INSERT INTO assumption_runs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (run_id, organization_id, deal_id, assumption_type, None, json.dumps(snapshot_ids), json.dumps(recommendation.get("inputFeatures", {}), sort_keys=True), recommendation.get("inputSha256", canonical_hash({})), created, recommendation.get("low"), recommendation.get("base"), recommendation.get("high"), recommendation.get("modelEstimate"), recommendation.get("benchmarkEstimate"), recommendation.get("confidence", "unavailable"), json.dumps(recommendation.get("confidenceComponents", {}), sort_keys=True), recommendation.get("dataCompleteness", 0), recommendation.get("freshnessScore", 0), recommendation.get("geographicMatchScore", 0), recommendation.get("propertyMatchScore", 0), int(recommendation.get("outOfDomain", False)), recommendation.get("method", "unavailable"), recommendation.get("fallbackLevel", "unavailable"), json.dumps(recommendation.get("limitations", [])), recommendation.get("rationale", "Candidate only; analyst approval required."), json.dumps(recommendation.get("dataWindow")) if recommendation.get("dataWindow") else None, recommendation.get("sampleCount", 0), run_hash, user_id, created))
+            connection.execute("INSERT INTO assumption_runs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (run_id, organization_id, deal_id, assumption_type, recommendation.get("modelArtifactId"), json.dumps(snapshot_ids), json.dumps(recommendation.get("inputFeatures", {}), sort_keys=True), recommendation.get("inputSha256", canonical_hash({})), created, recommendation.get("low"), recommendation.get("base"), recommendation.get("high"), recommendation.get("modelEstimate"), recommendation.get("benchmarkEstimate"), recommendation.get("confidence", "unavailable"), json.dumps(recommendation.get("confidenceComponents", {}), sort_keys=True), recommendation.get("dataCompleteness", 0), recommendation.get("freshnessScore", 0), recommendation.get("geographicMatchScore", 0), recommendation.get("propertyMatchScore", 0), int(recommendation.get("outOfDomain", False)), recommendation.get("method", "unavailable"), recommendation.get("fallbackLevel", "unavailable"), json.dumps(recommendation.get("limitations", [])), recommendation.get("rationale", "Candidate only; analyst approval required."), json.dumps(recommendation.get("dataWindow")) if recommendation.get("dataWindow") else None, recommendation.get("sampleCount", 0), run_hash, user_id, created))
             for observation_id in recommendation.get("supportingEvidence", []):
                 connection.execute("INSERT INTO assumption_evidence VALUES(?,?,?,?,?,?,?)", (str(uuid.uuid4()), organization_id, run_id, observation_id, "included", "Selected by the documented fallback hierarchy.", created))
         self.db.audit(organization_id, user_id, "assumption_run.created", "assumption_run", run_id, {"assumption_type": assumption_type, "run_hash": run_hash, "candidate_only": True}, deal_id)
@@ -672,11 +683,27 @@ class Service:
             item["document_sha256"] = document["sha256"] if document else None
         if kind == "test2":
             approved_intelligence = [item for item in approved if item["field_name"] in BY_NAME]
+            model_ids = sorted({item.get("model_artifact_id") for item in snapshot.get("assumption_runs", []) if item.get("model_artifact_id")})
+            model_evidence = []
+            if model_ids:
+                with self.db.connect() as connection:
+                    placeholders = ",".join("?" for _ in model_ids)
+                    rows = connection.execute(f"""SELECT id,model_name,model_version,target_assumption,
+                        training_data_snapshot_hash,feature_schema_version,training_window,validation_window,
+                        model_metrics_json,residual_diagnostics_json,artifact_content_hash,data_status,validation_state
+                        FROM model_artifacts WHERE organization_id=? AND id IN ({placeholders})""",
+                        (organization_id, *model_ids)).fetchall()
+                for row in rows:
+                    item = dict(row)
+                    item["model_metrics"] = json.loads(item.pop("model_metrics_json"))
+                    item["residual_diagnostics"] = json.loads(item.pop("residual_diagnostics_json"))
+                    model_evidence.append(item)
             intelligence = {
                 "observedEvidence": snapshot.get("market_observations", []),
                 "modelRecommendations": snapshot.get("assumption_runs", []),
                 "analystApprovedAssumptions": [{"id": item["id"], "field": item["field_name"], "value": item["normalized_value"], "decisionId": item.get("latest_decision_id")} for item in approved_intelligence],
                 "provenance": snapshot.get("assumption_decision_contexts", []),
+                "modelEvidence": model_evidence,
                 "snapshotMetadata": snapshot.get("data_source_snapshots", []),
                 "mappingNote": "Only analyst-approved supported growth assumptions map to standalone Test2 growth curves. Linking curves or unsupported assumptions to specific underwriting objects remains an explicit Test2 analyst action.",
             }

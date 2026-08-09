@@ -12,6 +12,11 @@ from test3.research import (
     train_panel_candidate,
     walk_forward_validate,
 )
+from test3.research.forecasting import create_forecast
+from test3.research.reference import cross_check_statsmodels
+from test3.research.specifications import MODEL_SPECIFICATIONS
+from test3.features.registry import FEATURE_REGISTRY
+from test3.assumptions.artifacts import validate_promotion_evidence
 
 
 def synthetic_panel(markets=4, periods=12):
@@ -104,6 +109,63 @@ class ResearchEngineTests(unittest.TestCase):
                               required_property_type="multifamily")
         self.assertEqual(panel.excluded_missing, 1)
         self.assertEqual(len(panel.rows), len(rows) - 1)
+
+    def test_target_release_dates_are_enforced_in_walk_forward_training(self):
+        rows = synthetic_panel(periods=12)
+        for row in rows:
+            row["rent_growth__available_at"] = row["period"]
+        rows[0]["rent_growth__available_at"] = "2030-01-01"
+        panel = prepare_panel(rows, target="rent_growth", features=("employment_growth", "supply_growth"),
+                              required_property_type="multifamily")
+        result = walk_forward_validate(panel, minimum_training_periods=5)
+        self.assertTrue(result["target_availability_enforced"])
+        self.assertGreater(result["excluded_unreleased_targets"], 0)
+
+    def test_formal_forecast_rejects_unvalidated_model_and_uses_empirical_errors(self):
+        candidate = {"governance": {"status": "candidate", "eligible_for_controlling_forecast": False}}
+        with self.assertRaisesRegex(ValueError, "validated"):
+            create_forecast(model_result=candidate, feature_row={}, market="M1", period="2027-Q1",
+                            property_type="multifamily", target="rent_growth_yoy", data_as_of="2026-12-31")
+        validated = {
+            "model_id": "model-1", "model_version": "1.0", "governance": {"status": "validated", "eligible_for_controlling_forecast": True},
+            "model": {"coefficients": {"intercept": .02, "employment_growth": 1.5}},
+            "walk_forward": {"metrics": {"model": {"mae": .01}, "last_observation": {"mae": .02}},
+                             "predictions": [{"actual": .03, "prediction": .02}, {"actual": .01, "prediction": .02}]},
+            "market_holdout": {"metrics": {"mae": .015}}, "limitations": [],
+        }
+        forecast = create_forecast(model_result=validated, feature_row={"employment_growth": .01}, market="M1",
+                                   period="2027-Q1", property_type="multifamily", target="rent_growth_yoy", data_as_of="2026-12-31")
+        self.assertAlmostEqual(forecast["model"]["estimate"], .035)
+        self.assertEqual(forecast["range"]["method"], "empirical_walk_forward_residual_p25_p75")
+        self.assertTrue(forecast["analyst_approval_required"])
+
+    def test_model_specifications_use_only_governed_features_and_reference_status_is_explicit(self):
+        self.assertTrue(MODEL_SPECIFICATIONS)
+        for specification in MODEL_SPECIFICATIONS.values():
+            self.assertTrue(set(specification.features) <= set(FEATURE_REGISTRY))
+        panel = prepare_panel(synthetic_panel(), target="rent_growth",
+                              features=("employment_growth", "supply_growth"),
+                              required_property_type="multifamily")
+        native = fit_ols(panel, covariance="hc1")
+        reference = cross_check_statsmodels(panel, native)
+        self.assertIn(reference["status"], {"passed", "not_available"})
+        self.assertIn("tolerances", reference)
+
+    def test_artifact_promotion_rejects_synthetic_and_incomplete_real_evidence(self):
+        with self.assertRaisesRegex(ValueError, "fictional synthetic"):
+            validate_promotion_evidence({"data_status": "fictional_synthetic", "validation_state": "validated"})
+        with self.assertRaisesRegex(ValueError, "promotion evidence"):
+            validate_promotion_evidence({"data_status": "real", "validation_state": "validated", "model_metrics": {}})
+
+    def test_model_result_hash_is_deterministic(self):
+        panel = prepare_panel(synthetic_panel(periods=14), target="rent_growth",
+                              features=("employment_growth", "supply_growth"),
+                              required_property_type="multifamily")
+        first = train_panel_candidate(panel, time_fixed_effects=False, minimum_training_periods=5,
+                                      data_status="fictional_synthetic", code_commit="fixture")
+        second = train_panel_candidate(panel, time_fixed_effects=False, minimum_training_periods=5,
+                                       data_status="fictional_synthetic", code_commit="fixture")
+        self.assertEqual(first["model_result_hash"], second["model_result_hash"])
 
 
 if __name__ == "__main__":

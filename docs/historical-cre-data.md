@@ -22,9 +22,13 @@ Use local files that you are authorized to analyze. Numeric observations and cit
 test3-data verify-cre --input market-history.csv --forecast-origin 2020-12-31
 test3-data import-cre --input market-history.csv --dataset raleigh-mf-history --version 2026-08-09-v1 --analyst-reviewed
 test3-data cre-status
+test3-research target-readiness --data-root data
+test3-research build-target-panel --data-root data --property-type multifamily --target rent_growth_yoy --frequency quarterly
 ```
 
 `verify-cre` does not publish. `import-cre` creates a new immutable version and refuses to overwrite an existing one. Missing observations remain missing. Rejected and duplicate observations are not published; unverified but structurally valid evidence may be retained, but is not model-eligible.
+
+Target-panel publication additionally excludes unresolved source conflicts, methodology conflicts and multiple source candidates for the same market-period. An analyst must resolve the controlling source explicitly; Test3 never averages or silently chooses those records.
 
 ## Current data limitations
 

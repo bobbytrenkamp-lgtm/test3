@@ -4,7 +4,7 @@ from collections import defaultdict
 from math import sqrt
 from statistics import mean, median
 
-from .datasets import PanelDataset, prepare_panel
+from .datasets import PanelDataset, availability_date, period_bounds, prepare_panel
 from .linear import fit_ols
 
 
@@ -25,9 +25,16 @@ def walk_forward_validate(panel: PanelDataset, *, minimum_training_periods: int 
     periods = panel.periods
     if len(periods) <= minimum_training_periods:
         raise ValueError("insufficient periods for walk-forward validation")
-    predictions = {name: [] for name in ("model", "last_observation", "entity_mean", "historical_median")}
+    predictions = {name: [] for name in ("model", "last_observation", "entity_mean", "historical_median",
+                                         "recent_3_year_mean", "peer_market_median", "simple_autoregressive")}
+    excluded_unreleased_targets = 0
     for test_period in periods[minimum_training_periods:]:
-        training_rows = [row for row in panel.rows if row[panel.time_column] < test_period]
+        forecast_origin = period_bounds(test_period)[0]
+        historical_rows = [row for row in panel.rows if row[panel.time_column] < test_period]
+        availability_column = panel.target + "__available_at"
+        training_rows = [row for row in historical_rows if row.get(availability_column) is None or
+                         availability_date(row[availability_column]) < forecast_origin]
+        excluded_unreleased_targets += len(historical_rows) - len(training_rows)
         test_rows = [row for row in panel.rows if row[panel.time_column] == test_period]
         training = prepare_panel(training_rows, target=panel.target, features=panel.features,
                                  entity_column=panel.entity_column, time_column=panel.time_column,
@@ -38,6 +45,16 @@ def walk_forward_validate(panel: PanelDataset, *, minimum_training_periods: int 
         for row in training.rows:
             entity_history[row[panel.entity_column]].append(row[panel.target])
         all_training = [row[panel.target] for row in training.rows]
+        latest_by_peer = {entity: values[-1] for entity, values in entity_history.items() if values}
+        recent_window = 12 if "-Q" in test_period else 3
+        ar_pairs = [(values[index - 1], values[index]) for values in entity_history.values() for index in range(1, len(values))]
+        if len(ar_pairs) >= 3:
+            x_mean = mean(left for left, _ in ar_pairs); y_mean = mean(right for _, right in ar_pairs)
+            denominator = sum((left - x_mean) ** 2 for left, _ in ar_pairs)
+            ar_beta = sum((left - x_mean) * (right - y_mean) for left, right in ar_pairs) / denominator if denominator else 0.0
+            ar_intercept = y_mean - ar_beta * x_mean
+        else:
+            ar_beta, ar_intercept = 1.0, 0.0
         model_values = model.predict(test_rows)
         for row, model_value in zip(test_rows, model_values, strict=True):
             history = entity_history.get(row[panel.entity_column])
@@ -45,8 +62,12 @@ def walk_forward_validate(panel: PanelDataset, *, minimum_training_periods: int 
                 continue
             common = {"actual": row[panel.target], "entity": row[panel.entity_column], "period": test_period,
                       "prior_actual": history[-1]}
+            peer_values = [value for entity, value in latest_by_peer.items() if entity != row[panel.entity_column]]
             for name, value in (("model", model_value), ("last_observation", history[-1]),
-                                ("entity_mean", mean(history)), ("historical_median", median(all_training))):
+                                ("entity_mean", mean(history)), ("historical_median", median(all_training)),
+                                ("recent_3_year_mean", mean(history[-recent_window:])),
+                                ("peer_market_median", median(peer_values) if peer_values else median(all_training)),
+                                ("simple_autoregressive", ar_intercept + ar_beta * history[-1])):
                 predictions[name].append({**common, "prediction": value})
     metrics = {name: prediction_metrics(rows) for name, rows in predictions.items()}
     baseline_mae = min(value["mae"] for name, value in metrics.items() if name != "model" and value["mae"] is not None)
@@ -56,6 +77,8 @@ def walk_forward_validate(panel: PanelDataset, *, minimum_training_periods: int 
             "model_beats_best_baseline": model_mae is not None and model_mae < baseline_mae,
             "mae_improvement": None if model_mae is None else baseline_mae - model_mae,
             "predictions": predictions["model"], "look_ahead": False,
+            "excluded_unreleased_targets": excluded_unreleased_targets,
+            "target_availability_enforced": True,
             "warning": "Predictive validation only; it does not establish causality or guarantee future performance."}
 
 

@@ -19,6 +19,8 @@ class ResearchLabTests(unittest.TestCase):
             self.assertFalse(report["readiness"]["has_verified_cre_targets"])
             self.assertFalse(report["readiness"]["has_validated_real_model"])
             self.assertEqual(report["model_summary"]["validated_real"], 0)
+            self.assertTrue(report["target_readiness"])
+            self.assertTrue(all(item["status"] == "not_ready" for item in report["target_readiness"]))
             self.assertLessEqual(len(report["coverage"]), 500)
             self.assertEqual({item["table"] for item in report["feature_tables"]},
                              {"county_year", "county_quarter", "cbsa_year", "cbsa_quarter"})

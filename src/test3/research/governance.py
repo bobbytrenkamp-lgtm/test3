@@ -16,7 +16,9 @@ class ValidationPolicy:
 
 def assess_model(panel: PanelDataset, walk_forward: dict, market_holdout: dict | None,
                  *, source_manifest_hashes: tuple[str, ...] = (), data_status: str = "research",
-                 policy: ValidationPolicy = ValidationPolicy()) -> dict:
+                 policy: ValidationPolicy = ValidationPolicy(), python_reference: dict | None = None,
+                 r_reference: dict | None = None, stability: dict | None = None,
+                 target_dataset_hashes: tuple[str, ...] = (), feature_table_hash: str | None = None) -> dict:
     if data_status not in {"research", "fictional_synthetic", "real"}:
         raise ValueError("unsupported model data status")
     failures = []
@@ -36,9 +38,21 @@ def assess_model(panel: PanelDataset, walk_forward: dict, market_holdout: dict |
         failures.append("market-holdout validation is missing")
     if data_status == "real" and not source_manifest_hashes:
         failures.append("real-data model has no source manifest hashes")
+    if data_status == "real" and not target_dataset_hashes:
+        failures.append("real-data model has no target dataset hashes")
+    if data_status == "real" and not feature_table_hash:
+        failures.append("real-data model has no immutable feature-table hash")
+    if data_status == "real" and (not python_reference or python_reference.get("status") != "passed"):
+        failures.append("independent Python reference validation did not pass")
+    if r_reference and r_reference.get("status") not in {"passed", "not_available"}:
+        failures.append("R cross-check failed")
+    if stability and stability.get("severe_instability"):
+        failures.append("severe coefficient instability was detected")
     status = "validated" if not failures and data_status == "real" else ("candidate" if not failures else "rejected")
     return {
         "status": status, "eligible_for_controlling_forecast": status == "validated", "failures": failures,
         "policy": policy.__dict__, "data_status": data_status,
+        "python_reference_status": (python_reference or {}).get("status", "not_run"),
+        "r_cross_check_status": (r_reference or {}).get("status", "not_run"),
         "note": "Synthetic models can test machinery but can never become controlling forecasts.",
     }

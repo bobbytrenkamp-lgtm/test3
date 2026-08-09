@@ -18,6 +18,9 @@ from .sources.bls import BLSLAUS
 from .storage import WarehousePaths
 from test3.features.builder import build_feature_table
 from test3.features.panel import FeaturePanel
+from test3.cre_data.importer import cre_status, import_cre_csv
+from test3.cre_data.schema import parse_cre_csv
+from test3.cre_data.verification import available_as_of, verify_observations
 
 
 PUBLIC_SOURCES = ("census", "bls", "bea", "fred", "building_permits", "crosswalk", "hud")
@@ -50,6 +53,14 @@ def _parser():
     refresh.add_argument("--vintage", default="2023", help="governed geography vintage")
     lineage = commands.add_parser("lineage", help="trace one observation to raw evidence and manifest")
     lineage.add_argument("observation_id")
+    import_cre = commands.add_parser("import-cre", help="validate and publish a versioned local historical CRE target CSV")
+    import_cre.add_argument("--input", required=True); import_cre.add_argument("--dataset", required=True)
+    import_cre.add_argument("--version", required=True); import_cre.add_argument("--evaluated-at")
+    import_cre.add_argument("--analyst-reviewed", action="store_true", help="explicitly accept file-declared analyst_verified rows")
+    verify_cre = commands.add_parser("verify-cre", help="verify a local CRE target CSV without publishing it")
+    verify_cre.add_argument("--input", required=True); verify_cre.add_argument("--evaluated-at"); verify_cre.add_argument("--forecast-origin")
+    verify_cre.add_argument("--analyst-reviewed", action="store_true", help="explicitly accept file-declared analyst_verified rows")
+    commands.add_parser("cre-status", help="report verified CRE target coverage and data-quality findings")
     return parser
 
 
@@ -62,6 +73,16 @@ def main(argv=None):
     elif args.command == "summary": output = WarehouseEngine(paths).summary()
     elif args.command == "coverage": output = coverage_report(paths)
     elif args.command == "lineage": output = observation_lineage(paths, args.observation_id)
+    elif args.command == "import-cre":
+        output = asdict(import_cre_csv(paths, Path(args.input).read_bytes(), dataset_id=args.dataset,
+                                       source_version=args.version, evaluated_at=args.evaluated_at,
+                                       analyst_review_confirmed=args.analyst_reviewed))
+    elif args.command == "verify-cre":
+        records, errors, metadata = parse_cre_csv(Path(args.input).read_bytes())
+        checked = verify_observations(records, evaluated_at=args.evaluated_at, analyst_review_confirmed=args.analyst_reviewed)
+        output = {"file": metadata, "invalid_rows": errors, "verification": checked,
+                  "as_of_filter": available_as_of(checked["observations"], args.forecast_origin) if args.forecast_origin else None}
+    elif args.command == "cre-status": output = cre_status(paths)
     elif args.command == "build-features": output = asdict(build_feature_table(paths, geography=args.geography, frequency=args.frequency))
     elif args.command == "feature-status":
         tables = (args.table,) if args.table else ("county_year", "county_quarter", "cbsa_year", "cbsa_quarter")

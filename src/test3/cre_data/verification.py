@@ -10,7 +10,8 @@ from .metrics import get_cre_metric
 
 SOURCE_RELIABILITY = {
     "federal_public": .98, "state_local_public": .92, "academic_open": .88,
-    "brokerage_public_report": .78, "analyst_owned": .72, "unknown": .40,
+    "brokerage_public_report": .78, "public_brokerage_report": .78, "analyst_owned": .72,
+    "user_owned": .72, "licensed_local": .75, "manual_research": .60, "unknown": .40,
 }
 
 
@@ -43,10 +44,11 @@ def _difference(left: Decimal, right: Decimal, measure_type: str) -> Decimal:
 
 
 def verify_observations(rows: list[dict], *, evaluated_at: str | date | None = None,
-                        analyst_review_confirmed: bool = False) -> dict:
+                        analyst_review_confirmed: bool = False,
+                        governed_market_ids: frozenset[str] | None = None) -> dict:
     evaluation_date = date.fromisoformat(str(evaluated_at)[:10]) if evaluated_at else date.today()
     findings, by_observation = [], defaultdict(list)
-    exact, natural, revision, series, cadence = defaultdict(list), defaultdict(list), defaultdict(list), defaultdict(list), defaultdict(list)
+    exact, natural, revision, series, cadence, method_series = (defaultdict(list) for _ in range(6))
     for row in rows:
         exact[(_natural(row), row["source_name"], row["source_identifier"], row["vintage"], row["methodology"])].append(row)
         natural[_natural(row)].append(row)
@@ -54,6 +56,8 @@ def verify_observations(rows: list[dict], *, evaluated_at: str | date | None = N
         series[_series(row, include_source=True)].append(row)
         cadence[(row["geography_type"], row["geography_id"], row["property_type"], row.get("property_subtype"),
                  row["metric"], row["methodology"], row["source_name"], row["source_identifier"])].append(row)
+        method_series[(row["geography_type"], row["geography_id"], row["property_type"], row.get("property_subtype"),
+                       row["metric"], row["source_name"], row["source_identifier"])].append(row)
     def add(code, severity, message, affected):
         item = {"code": code, "severity": severity, "message": message,
                 "observation_ids": sorted({row["observation_id"] for row in affected})}
@@ -80,6 +84,16 @@ def verify_observations(rows: list[dict], *, evaluated_at: str | date | None = N
     for grouped in cadence.values():
         if len({row["frequency"] for row in grouped}) > 1:
             add("frequency_mismatch", "warning", "One source series changes frequency; series must remain separate until explicitly transformed.", grouped)
+    for grouped in method_series.values():
+        if len({row["methodology"] for row in grouped}) > 1:
+            add("methodology_change", "warning", "Source methodology changes within the longitudinal series; affected periods require explicit reconciliation.", grouped)
+    if governed_market_ids is not None:
+        for row in rows:
+            if row["geography_type"] in {"market", "submarket"} and row["geography_id"] not in governed_market_ids:
+                add("market_geography_mismatch", "error", "CRE market has no effective governed geographic definition.", (row,))
+    for row in rows:
+        if row.get("target_classification") != "institutional_target":
+            add("proxy_not_institutional_target", "info", "Proxy/context evidence is retained but cannot become a CRE model target.", (row,))
     for grouped in series.values():
         ordered = sorted(grouped, key=lambda row: _period_index(row["period"], row["frequency"]))
         for left, right in zip(ordered, ordered[1:]):
@@ -117,7 +131,9 @@ def verify_observations(rows: list[dict], *, evaluated_at: str | date | None = N
         confidence = sum(components[name] * weight for name, weight in
                          (("source_reliability", .25), ("methodology_clarity", .15), ("independent_agreement", .15),
                           ("recency", .10), ("completeness", .10), ("analyst_verification", .15), ("series_consistency", .10)))
-        blocking = row["verification_status"] == "rejected" or "duplicate_observation" in by_observation[row["observation_id"]]
+        blocking_codes = {"duplicate_observation", "methodology_change", "market_geography_mismatch",
+                          "proxy_not_institutional_target"}
+        blocking = row["verification_status"] == "rejected" or bool(blocking_codes & set(by_observation[row["observation_id"]]))
         scored.append({**row, "confidence": round(confidence, 6), "confidence_components": components,
                        "verification_findings": sorted(by_observation[row["observation_id"]]),
                        "model_eligible": effective_verified and not blocking})

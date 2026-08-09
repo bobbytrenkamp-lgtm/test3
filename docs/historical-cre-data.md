@@ -8,7 +8,7 @@ Metric definitions are property-type aware. Multifamily rent may use `USD_per_un
 
 ## Import contract
 
-Required CSV fields are:
+Canonical CSV, XLSX, and Parquet files are supported. Required canonical fields are:
 
 `market, geography_type, geography_id, period, frequency, property_type, metric, value, unit, source_name, source_identifier, source_period, retrieved_at, methodology, vintage, licensing_notes, verification_status`
 
@@ -21,14 +21,21 @@ Use local files that you are authorized to analyze. Numeric observations and cit
 ```powershell
 test3-data verify-cre --input market-history.csv --forecast-origin 2020-12-31
 test3-data import-cre --input market-history.csv --dataset raleigh-mf-history --version 2026-08-09-v1 --analyst-reviewed
+test3-data import-cre --input quarterly-export.xlsx --mapping data/warehouse/manifests/cre_import_mappings/vendor-a/1.0-<hash>.json --dataset vendor-a-mf --version 2026q2 --analyst-reviewed
 test3-data cre-status
+test3-data cre-source-catalog
 test3-research target-readiness --data-root data
+test3-research target-readiness --data-root data --model-specification mf_rent_growth_combined
 test3-research build-target-panel --data-root data --property-type multifamily --target rent_growth_yoy --frequency quarterly
 ```
 
 `verify-cre` does not publish. `import-cre` creates a new immutable version and refuses to overwrite an existing one. Missing observations remain missing. Rejected and duplicate observations are not published; unverified but structurally valid evidence may be retained, but is not model-eligible.
 
 Target-panel publication additionally excludes unresolved source conflicts, methodology conflicts and multiple source candidates for the same market-period. An analyst must resolve the controlling source explicitly; Test3 never averages or silently chooses those records.
+
+Saved import mappings require an exact input-column match before reuse. They are content-hashed and stored locally under `data/warehouse/manifests/cre_import_mappings/`. Market definitions are also content-hashed and versioned locally; weighted constituent counties must total one. If market definitions exist, an imported market that lacks a governed definition is not model-eligible.
+
+Reviewed document candidates retain document SHA-256, page, table, row, column, original label, and original value. Candidate packages cannot approve themselves. An analyst must select observations and record a rationale before the canonical import/verification path can consider them.
 
 ## Current data limitations
 

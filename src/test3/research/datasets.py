@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from calendar import monthrange
 from datetime import date
 import hashlib
 import json
@@ -28,6 +29,32 @@ def _period(value: object) -> str:
     except ValueError as exc:
         raise ValueError(f"unsupported panel period: {text}") from exc
     return text[:10]
+
+
+def period_bounds(value: object) -> tuple[date, date]:
+    """Return inclusive bounds for a governed panel period."""
+    label = _period(value)
+    if len(label) == 4:
+        year = int(label)
+        return date(year, 1, 1), date(year, 12, 31)
+    if len(label) == 7 and label[4:6] == "-Q":
+        year, quarter = int(label[:4]), int(label[-1])
+        start_month, end_month = (quarter - 1) * 3 + 1, quarter * 3
+        return date(year, start_month, 1), date(year, end_month, monthrange(year, end_month)[1])
+    if len(label) == 7:
+        year, month = int(label[:4]), int(label[5:7])
+        return date(year, month, 1), date(year, month, monthrange(year, month)[1])
+    parsed = date.fromisoformat(label[:10])
+    return parsed, parsed
+
+
+def availability_date(value: object) -> date:
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError("availability date is required")
+    if len(text) in {4, 7}:
+        return period_bounds(text)[1]
+    return date.fromisoformat(text[:10])
 
 
 def _number(value: object, field: str) -> float:
@@ -95,13 +122,17 @@ def prepare_panel(
         row.update({name: _number(source[name], name) for name in feature_names})
         if property_type_column:
             row[property_type_column] = property_type or None
+        _, period_end = period_bounds(period)
         for name in feature_names:
             available = source.get(name + availability_suffix)
             if available not in (None, ""):
-                available_period = _period(available)
-                if available_period > period:
+                available_on = availability_date(available)
+                if available_on > period_end:
                     raise ValueError(f"future leakage: {name} was unavailable at {entity}/{period}")
-                row[name + availability_suffix] = available_period
+                row[name + availability_suffix] = available_on.isoformat()
+        target_available = source.get(target + availability_suffix)
+        if target_available not in (None, ""):
+            row[target + availability_suffix] = availability_date(target_available).isoformat()
         rows.append(row)
     if required_property_type is None and len(observed_property_types) > 1:
         raise ValueError("mixed property types require an explicit property-type filter")

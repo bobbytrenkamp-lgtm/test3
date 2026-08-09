@@ -1,0 +1,277 @@
+from __future__ import annotations
+
+from collections import Counter, defaultdict
+from dataclasses import asdict, dataclass
+from datetime import date, datetime, timezone
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import uuid
+
+import duckdb
+
+from test3.features.manifests import verify_feature_manifest
+from test3.features.panel import FeaturePanel
+from test3.cre_data.metrics import CRE_METRICS
+from test3.warehouse.manifests import canonical_json, file_sha256
+from test3.warehouse.storage import WarehousePaths
+
+
+TARGET_PANEL_VERSION = "1.0.0"
+BLOCKING_FINDINGS = frozenset({"duplicate_observation", "source_conflict", "methodology_mismatch"})
+SUPPORTED_FREQUENCIES = frozenset({"annual", "quarterly"})
+
+
+@dataclass(frozen=True)
+class ReadinessPolicy:
+    minimum_markets: int = 5
+    minimum_periods: int = 20
+    minimum_observations: int = 100
+
+
+@dataclass(frozen=True)
+class TargetPanelResult:
+    property_type: str
+    target: str
+    frequency: str
+    status: str
+    rows: int
+    markets: int
+    periods: int
+    panel_path: Path
+    manifest_path: Path
+    manifest_hash: str
+    target_dataset_hashes: tuple[str, ...]
+    source_manifest_hashes: tuple[str, ...]
+    feature_table_hashes: tuple[str, ...]
+    exclusions: dict
+
+
+def _verification_reports(paths: WarehousePaths) -> list[dict]:
+    root = paths.contained(Path("verification") / "cre")
+    reports = []
+    for path in sorted(root.glob("dataset=*/version=*/verification.json")) if root.exists() else ():
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"unreadable CRE verification report: {path}") from exc
+        if payload.get("schema_version") != "test3-cre-verification/1.0.0":
+            raise ValueError(f"unsupported CRE verification report: {path}")
+        reports.append(payload)
+    return reports
+
+
+def _eligible_rows_from_reports(reports: list[dict], property_type: str | None = None,
+                                target: str | None = None) -> tuple[list[dict], Counter]:
+    candidates, exclusions = [], Counter()
+    for report in reports:
+        dataset_hash = report.get("raw_snapshot", {}).get("sha256")
+        manifest_hash = report.get("warehouse_manifest_hash")
+        for row in report.get("observations", []):
+            if property_type and row.get("property_type") != property_type:
+                continue
+            if target and row.get("metric") != target:
+                continue
+            if not row.get("model_eligible") or row.get("verification_status") != "analyst_verified":
+                exclusions["not_model_eligible"] += 1
+                continue
+            if set(row.get("verification_findings", [])) & BLOCKING_FINDINGS:
+                exclusions["unresolved_quality_finding"] += 1
+                continue
+            if row.get("frequency") not in SUPPORTED_FREQUENCIES:
+                exclusions["unsupported_frequency"] += 1
+                continue
+            available_at = row.get("release_date") or str(row.get("retrieved_at") or "")[:10]
+            if not available_at:
+                exclusions["missing_availability"] += 1
+                continue
+            candidates.append({**row, "target_dataset_hash": dataset_hash,
+                               "target_source_manifest_hash": manifest_hash,
+                               "target_available_at": available_at})
+    grouped = defaultdict(list)
+    for row in candidates:
+        grouped[(row["geography_id"], row["period"], row["frequency"], row["property_type"], row["metric"])].append(row)
+    eligible = []
+    for rows in grouped.values():
+        if len(rows) != 1:
+            exclusions["unresolved_multiple_sources"] += len(rows)
+        else:
+            eligible.append(rows[0])
+    return eligible, exclusions
+
+
+def _eligible_rows(paths: WarehousePaths, property_type: str | None = None, target: str | None = None) -> tuple[list[dict], Counter]:
+    return _eligible_rows_from_reports(_verification_reports(paths), property_type, target)
+
+
+def target_readiness(paths: WarehousePaths, *, policy: ReadinessPolicy = ReadinessPolicy()) -> list[dict]:
+    reports = _verification_reports(paths)
+    pairs = sorted({(property_type, metric.metric) for metric in CRE_METRICS.values()
+                    for property_type in metric.property_types} |
+                   {(row.get("property_type"), row.get("metric"))
+                    for report in reports for row in report.get("observations", [])
+                    if row.get("property_type") and row.get("metric")})
+    output = []
+    for property_type, target in pairs:
+        all_rows = [row for report in reports for row in report.get("observations", [])
+                    if row.get("property_type") == property_type and row.get("metric") == target]
+        eligible, exclusions = _eligible_rows_from_reports(reports, property_type, target)
+        markets = {row["geography_id"] for row in eligible}
+        periods = {row["period"] for row in eligible}
+        possible = len(markets) * len(periods)
+        ready = len(markets) >= policy.minimum_markets and len(periods) >= policy.minimum_periods and len(eligible) >= policy.minimum_observations
+        reasons = []
+        if len(markets) < policy.minimum_markets:
+            reasons.append(f"markets {len(markets)} below minimum {policy.minimum_markets}")
+        if len(periods) < policy.minimum_periods:
+            reasons.append(f"periods {len(periods)} below minimum {policy.minimum_periods}")
+        if len(eligible) < policy.minimum_observations:
+            reasons.append(f"eligible observations {len(eligible)} below minimum {policy.minimum_observations}")
+        output.append({
+            "property_type": property_type, "target": target, "observations": len(all_rows),
+            "verified_observations": sum(row.get("verification_status") == "analyst_verified" for row in all_rows),
+            "model_eligible_observations": len(eligible), "markets": len(markets), "periods": len(periods),
+            "earliest": min(periods, default=None), "latest": max(periods, default=None),
+            "missingness": (1.0 - len(eligible) / possible) if possible else None,
+            "status": "ready" if ready else "not_ready", "reasons": reasons,
+            "exclusions": dict(sorted(exclusions.items())), "policy": asdict(policy),
+        })
+    return output
+
+
+def _panel_period(value: object, frequency: str) -> str:
+    parsed = date.fromisoformat(str(value)[:10])
+    return str(parsed.year) if frequency == "annual" else f"{parsed.year}-Q{(parsed.month - 1) // 3 + 1}"
+
+
+def _feature_source(paths: WarehousePaths, frequency: str, geography: str) -> tuple[dict, Path]:
+    table = f"{geography}_{'year' if frequency == 'annual' else 'quarter'}"
+    manifest = FeaturePanel(paths, table).latest()
+    if manifest is None:
+        raise ValueError(f"required feature table is not built: {table}")
+    panel_path = paths.contained(Path("features") / table / f"version={manifest['feature_table_version']}" / "panel.parquet")
+    verify_feature_manifest(panel_path.parent / "feature_manifest.json")
+    return manifest, panel_path
+
+
+def _manifest_hash(payload: dict) -> str:
+    return hashlib.sha256(canonical_json({key: value for key, value in payload.items() if key != "manifest_hash"}).encode()).hexdigest()
+
+
+def build_target_panel(paths: WarehousePaths, *, property_type: str, target: str,
+                       frequency: str = "quarterly") -> TargetPanelResult:
+    if frequency not in SUPPORTED_FREQUENCIES:
+        raise ValueError("target panels currently support annual or quarterly frequency")
+    if not re.fullmatch(r"[a-z][a-z0-9_]*", property_type or "") or not re.fullmatch(r"[a-z][a-z0-9_]*", target or ""):
+        raise ValueError("property type and target must use governed identifiers")
+    eligible, exclusions = _eligible_rows(paths, property_type, target)
+    eligible = [row for row in eligible if row["frequency"] == frequency]
+    if not eligible:
+        raise ValueError("no model-eligible target observations match the requested panel")
+
+    required = set()
+    for row in eligible:
+        if row.get("cbsa"):
+            required.add("cbsa")
+        elif row.get("county_fips") or row.get("geography_type") == "county":
+            required.add("county")
+        else:
+            exclusions["no_feature_geography"] += 1
+    sources = {geography: _feature_source(paths, frequency, geography) for geography in required}
+    feature_rows, feature_names, feature_hashes, source_hashes = {}, set(), set(), set()
+    for geography, (manifest, panel_path) in sources.items():
+        feature_names.update(manifest["features"])
+        feature_hashes.add(manifest["manifest_hash"])
+        source_hashes.update(manifest.get("input_manifest_hashes", []))
+        with duckdb.connect(":memory:") as connection:
+            result = connection.execute("SELECT * FROM read_parquet(?)", [str(panel_path)])
+            names = [item[0] for item in result.description]
+            for raw in result.fetchall():
+                item = dict(zip(names, raw, strict=True))
+                feature_rows[(geography, item["geography_id"], _panel_period(item["period_start"], frequency))] = item
+
+    joined = []
+    for target_row in eligible:
+        if target_row.get("cbsa"):
+            geography, feature_id = "cbsa", target_row["cbsa"]
+        elif target_row.get("county_fips") or target_row.get("geography_type") == "county":
+            geography, feature_id = "county", target_row.get("county_fips") or target_row["geography_id"]
+        else:
+            continue
+        features = feature_rows.get((geography, feature_id, target_row["period"]))
+        if features is None:
+            exclusions["missing_feature_period"] += 1
+            continue
+        row = {
+            "market_id": target_row["geography_id"], "feature_geography_type": geography,
+            "feature_geography_id": feature_id, "period": target_row["period"],
+            "property_type": property_type, target: float(target_row["value"]),
+            f"{target}__available_at": target_row["target_available_at"],
+            "target_observation_id": target_row["observation_id"],
+            "target_dataset_hash": target_row["target_dataset_hash"],
+            "target_source_manifest_hash": target_row["target_source_manifest_hash"],
+        }
+        for name in sorted(feature_names):
+            row[name] = features.get(name)
+            available = features.get(name + "__available_at")
+            row[name + "__available_at"] = available.isoformat() if isinstance(available, (date, datetime)) else available
+        joined.append(row)
+    if not joined:
+        raise ValueError("no model-eligible target rows matched an immutable feature period")
+    joined.sort(key=lambda row: (row["period"], row["market_id"]))
+
+    target_hashes = tuple(sorted({row["target_dataset_hash"] for row in joined if row.get("target_dataset_hash")}))
+    source_hashes.update(row["target_source_manifest_hash"] for row in joined if row.get("target_source_manifest_hash"))
+    identity = {
+        "schema_version": TARGET_PANEL_VERSION, "property_type": property_type, "target": target,
+        "frequency": frequency, "target_dataset_hashes": list(target_hashes),
+        "source_manifest_hashes": sorted(source_hashes), "feature_table_hashes": sorted(feature_hashes),
+        "rows_hash": hashlib.sha256(canonical_json(joined).encode()).hexdigest(),
+    }
+    version = hashlib.sha256(canonical_json(identity).encode()).hexdigest()[:24]
+    final_dir = paths.contained(Path("research") / "target_panels" / property_type / target / f"version={version}")
+    manifest_path, panel_path = final_dir / "target_panel_manifest.json", final_dir / "panel.parquet"
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest.get("manifest_hash") != _manifest_hash(manifest):
+            raise ValueError("target-panel manifest integrity failure")
+        if not panel_path.is_file() or file_sha256(panel_path) != manifest["panel_sha256"]:
+            raise ValueError("target-panel Parquet integrity failure")
+        return TargetPanelResult(property_type, target, frequency, "unchanged", manifest["rows"], manifest["markets"],
+                                 manifest["periods"], panel_path, manifest_path, manifest["manifest_hash"], target_hashes,
+                                 tuple(sorted(source_hashes)), tuple(sorted(feature_hashes)), manifest["exclusions"])
+    staging = final_dir.parent / f".staging-{uuid.uuid4().hex}"
+    staging.mkdir(parents=True, exist_ok=False)
+    try:
+        columns = list(joined[0])
+        definitions = []
+        for name in columns:
+            sample = next((row[name] for row in joined if row.get(name) is not None), None)
+            definitions.append(f'"{name}" ' + ("DOUBLE" if isinstance(sample, float) else "VARCHAR"))
+        with duckdb.connect(":memory:") as connection:
+            connection.execute(f"CREATE TABLE target_panel({','.join(definitions)})")
+            connection.executemany(f"INSERT INTO target_panel VALUES ({','.join('?' for _ in columns)})",
+                                   [[row.get(name) for name in columns] for row in joined])
+            connection.execute("COPY target_panel TO ? (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 100000)", [str(staging / "panel.parquet")])
+        payload = {**identity, "created_at": datetime.now(timezone.utc).isoformat(), "version": version,
+                   "rows": len(joined), "markets": len({row["market_id"] for row in joined}),
+                   "periods": len({row["period"] for row in joined}), "features": sorted(feature_names),
+                   "exclusions": dict(sorted(exclusions.items())), "panel_sha256": file_sha256(staging / "panel.parquet"),
+                   "limitations": ["Only analyst-approved, model-eligible targets are included.",
+                                   "Multiple unresolved sources for one market-period are excluded, never averaged.",
+                                   "Unknown release dates use the conservative retrieval-date fallback recorded at import."]}
+        payload["manifest_hash"] = _manifest_hash(payload)
+        (staging / "target_panel_manifest.json").write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        os.replace(staging, final_dir)
+    except Exception:
+        if staging.exists():
+            shutil.rmtree(staging)
+        raise
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    return TargetPanelResult(property_type, target, frequency, "succeeded", len(joined),
+                             len({row["market_id"] for row in joined}), len({row["period"] for row in joined}),
+                             panel_path, manifest_path, manifest["manifest_hash"], target_hashes,
+                             tuple(sorted(source_hashes)), tuple(sorted(feature_hashes)), dict(sorted(exclusions.items())))

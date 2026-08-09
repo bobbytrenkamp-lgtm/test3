@@ -8,6 +8,7 @@ import duckdb
 
 from test3.cre_data.importer import cre_status
 from test3.features.panel import FeaturePanel
+from test3.research.target_panel import target_readiness
 from test3.warehouse.duckdb_engine import WarehouseEngine, sql_literal
 from test3.warehouse.manifests import active_manifests
 from test3.warehouse.reporting import coverage_report
@@ -89,6 +90,7 @@ def research_lab_report(data_dir: str | Path, database, organization_id: str) ->
     targets = checked("cre_targets", lambda: _target_coverage(paths), [])
     features = checked("feature_tables", lambda: _feature_tables(paths), [])
     imports = checked("cre_verification", lambda: cre_status(paths), [])
+    readiness_by_target = checked("target_readiness", lambda: target_readiness(paths), [])
     models = checked("models", lambda: _models(database, organization_id), [])
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -98,6 +100,7 @@ def research_lab_report(data_dir: str | Path, database, organization_id: str) ->
         "coverage_truncated": len(coverage) > 500,
         "cre_targets": targets[:500],
         "cre_imports": imports[:100],
+        "target_readiness": readiness_by_target[:500],
         "feature_tables": features,
         "models": models,
         "model_summary": {

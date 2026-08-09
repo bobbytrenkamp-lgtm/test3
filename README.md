@@ -4,6 +4,8 @@ Populate the local analytical warehouse with `test3-data refresh --source census
 
 Run governed local panel research with `test3-research train --input panel.parquet --target rent_growth --features employment_growth,population_growth --property-type multifamily`. The research engine supports fixed effects, robust/market-clustered standard errors, exact-period lag research, leakage-safe walk-forward tests, market holdouts, diagnostics, and baseline competition. See `docs/panel-modeling.md` and `docs/model-validation.md`.
 
+Measure institutional target readiness with `test3-research target-readiness --data-root data`, then create an immutable target/feature join with `test3-research build-target-panel --data-root data --property-type multifamily --target rent_growth_yoy --frequency quarterly`. See `docs/cre-target-panels.md` and `docs/model-cross-validation.md`.
+
 Import legitimate, authorized historical CRE targets with `test3-data verify-cre --input market-history.csv` followed by `test3-data import-cre --input market-history.csv --dataset DATASET --version VERSION --analyst-reviewed`. The property-type-aware verification layer preserves source conflicts and revisions, enforces release-date availability, and never averages sources automatically. See `docs/historical-cre-data.md` and `docs/source-provenance.md`.
 
 After signing in locally, open **Research lab** in the left navigation to inspect actual warehouse coverage, feature panels, verified CRE targets, model artifacts, validation status and readiness limitations. The view never creates model results or fills missing data. See `docs/research-lab.md`.

@@ -12,5 +12,6 @@ data/uploads/
 data/exports/
 data/market-data/
 data/warehouse/
+data/cre_reports/
 !data/.gitkeep
 

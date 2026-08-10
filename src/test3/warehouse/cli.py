@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict
+import hashlib
 import json
 from pathlib import Path
 from datetime import datetime
@@ -23,6 +24,10 @@ from test3.cre_data.mappings import ImportMappingTemplate, load_mapping, save_ma
 from test3.cre_data.geography import MarketDefinition, save_market_definition
 from test3.cre_data.schema import parse_cre_file
 from test3.cre_data.sources import source_catalog
+from test3.cre_data.sources import discovery_catalog
+from test3.cre_data.audit import coverage_matrix, target_data_audit, target_readiness_funnel
+from test3.cre_data.report_inbox import save_report_discovery
+from test3.cre_data.report_tables import ReportMappingProfile, save_report_profile
 from test3.cre_data.verification import available_as_of, verify_observations
 
 
@@ -67,10 +72,24 @@ def _parser():
     verify_cre.add_argument("--analyst-reviewed", action="store_true", help="explicitly accept file-declared analyst_verified rows")
     commands.add_parser("cre-status", help="report verified CRE target coverage and data-quality findings")
     commands.add_parser("cre-source-catalog", help="report governed institutional-target/proxy/context source classifications")
+    commands.add_parser("cre-source-discovery", help="rank serious lawful CRE outcome source candidates")
+    commands.add_parser("cre-target-audit", help="machine-readable audit of installed institutional targets and proxies")
+    funnel = commands.add_parser("cre-target-funnel", help="show conservative target-readiness exclusion stages")
+    funnel.add_argument("--property-type"); funnel.add_argument("--metric")
+    matrix = commands.add_parser("cre-coverage-matrix", help="show actual market-by-period target coverage")
+    matrix.add_argument("--property-type", required=True); matrix.add_argument("--metric", required=True)
+    discover = commands.add_parser("discover-cre-reports", help="fingerprint and group local, lawfully obtained CRE reports")
+    discover.add_argument("--inbox", help="defaults to <data-root>/cre_reports/inbox")
+    bulk = commands.add_parser("import-cre-bulk", help="import multiple authorized CRE history files independently")
+    bulk.add_argument("--input-folder", required=True); bulk.add_argument("--dataset-prefix", required=True)
+    bulk.add_argument("--version-prefix", required=True); bulk.add_argument("--mapping")
+    bulk.add_argument("--evaluated-at"); bulk.add_argument("--analyst-reviewed", action="store_true")
     save_cre_mapping = commands.add_parser("save-cre-mapping", help="validate and save a reusable local CRE import mapping")
     save_cre_mapping.add_argument("--definition", required=True, help="JSON mapping definition")
     save_market = commands.add_parser("save-market-definition", help="validate and save a versioned CRE market geography")
     save_market.add_argument("--definition", required=True, help="JSON market definition")
+    save_profile = commands.add_parser("save-cre-report-profile", help="save an exact-schema recurring report mapping profile")
+    save_profile.add_argument("--definition", required=True, help="JSON report profile definition")
     return parser
 
 
@@ -98,6 +117,31 @@ def main(argv=None):
                   "as_of_filter": available_as_of(checked["observations"], args.forecast_origin) if args.forecast_origin else None}
     elif args.command == "cre-status": output = cre_status(paths)
     elif args.command == "cre-source-catalog": output = source_catalog()
+    elif args.command == "cre-source-discovery": output = discovery_catalog()
+    elif args.command == "cre-target-audit": output = target_data_audit(paths)
+    elif args.command == "cre-target-funnel": output = target_readiness_funnel(paths, property_type=args.property_type, metric=args.metric)
+    elif args.command == "cre-coverage-matrix": output = coverage_matrix(paths, property_type=args.property_type, metric=args.metric)
+    elif args.command == "discover-cre-reports":
+        output = save_report_discovery(args.inbox or (Path(args.data_root) / "cre_reports" / "inbox"))
+    elif args.command == "import-cre-bulk":
+        folder = Path(args.input_folder).resolve()
+        if not folder.is_dir(): raise ValueError("bulk import folder does not exist")
+        mapping = load_mapping(args.mapping) if args.mapping else None
+        output = []
+        for source in sorted(folder.iterdir()):
+            if not source.is_file() or source.is_symlink() or source.suffix.lower() not in {".csv", ".xlsx", ".parquet"}:
+                continue
+            safe_stem = "".join(character.lower() if character.isalnum() else "-" for character in source.stem).strip("-")
+            try:
+                content = source.read_bytes()
+                content_hash = hashlib.sha256(content).hexdigest()
+                result = import_cre_file(paths, content, suffix=source.suffix, mapping=mapping,
+                                         dataset_id=f"{args.dataset_prefix}-{safe_stem}",
+                                         source_version=f"{args.version_prefix}-{content_hash[:12]}",
+                                         evaluated_at=args.evaluated_at, analyst_review_confirmed=args.analyst_reviewed)
+                output.append({"file": source.name, "status": "published", **asdict(result)})
+            except (OSError, ValueError, FileExistsError) as exc:
+                output.append({"file": source.name, "status": "failed", "error": str(exc)})
     elif args.command == "save-cre-mapping":
         payload = json.loads(Path(args.definition).read_text(encoding="utf-8"))
         payload["expected_columns"] = tuple(payload["expected_columns"])
@@ -106,6 +150,11 @@ def main(argv=None):
         payload = json.loads(Path(args.definition).read_text(encoding="utf-8"))
         payload["counties"] = tuple(payload["counties"])
         output = {"path": str(save_market_definition(paths, MarketDefinition(**payload))), "status": "saved"}
+    elif args.command == "save-cre-report-profile":
+        payload = json.loads(Path(args.definition).read_text(encoding="utf-8"))
+        payload["expected_labels"] = tuple(payload["expected_labels"])
+        payload["mappings"] = {key: tuple(value) for key, value in payload["mappings"].items()}
+        output = {"path": str(save_report_profile(paths, ReportMappingProfile(**payload))), "status": "saved"}
     elif args.command == "build-features": output = asdict(build_feature_table(paths, geography=args.geography, frequency=args.frequency))
     elif args.command == "feature-status":
         tables = (args.table,) if args.table else ("county_year", "county_quarter", "cbsa_year", "cbsa_quarter")
@@ -146,7 +195,9 @@ def main(argv=None):
                     except Exception as exc:
                         failures += 1
                         output.append({"source": source, "status": "failed", "request": request.serializable(), "error": str(exc)})
-    print(json.dumps(output, indent=2, default=str, sort_keys=True)); return 1 if args.command == "refresh" and failures else 0
+    failed = ((args.command == "refresh" and failures) or
+              (args.command == "import-cre-bulk" and any(item["status"] == "failed" for item in output)))
+    print(json.dumps(output, indent=2, default=str, sort_keys=True)); return 1 if failed else 0
 
 
 if __name__ == "__main__": raise SystemExit(main())

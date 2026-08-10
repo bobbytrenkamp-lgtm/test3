@@ -29,6 +29,8 @@ test3-data cre-target-audit
 test3-data cre-target-funnel --property-type multifamily --metric rent_growth_yoy
 test3-data cre-coverage-matrix --property-type multifamily --metric rent_growth_yoy
 test3-data discover-cre-reports
+test3-data parse-maa-sec-snapshots --input-folder data/cre_reports/sec/maa/browser_snapshots --output data/cre_reports/maa_sec_review.csv
+test3-data publish-maa-sec-candidates --input data/cre_reports/maa_sec_review.csv --version <immutable-version>
 test3-data import-cre-bulk --input-folder data/authorized_market_history --dataset-prefix authorized-history --version-prefix 2026q2 --mapping <mapping.json> --analyst-reviewed
 test3-research target-readiness --data-root data
 test3-research target-readiness --data-root data --model-specification mf_rent_growth_combined
@@ -49,4 +51,8 @@ Recurring extracted tables support exact versioned label profiles. Schema drift 
 
 ## Current data limitations
 
-The repository contains no copyrighted brokerage history and no claimed validated CRE target dataset. Only fictional test fixtures exercise the pipeline. No forecasting model may be described as validated until legitimate historical targets are imported, verified, and tested out of sample.
+The repository contains no copyrighted brokerage history and no production target bytes. The ignored local warehouse can contain public SEC-filed numeric observations and authorized analyst files.
+
+The first installed local series is MAA's quarterly SEC supplemental schedule. The source-specific deterministic parser reads browser-visible same-store market rows, retains exact exhibit URLs and filing dates, and extracts source-reported effective rent and YoY growth. Physical occupancy is extracted where the schedule exposes the governed table, and vacancy is derived exactly as `1 - occupancy`. A 2026-Q2 heading change is supported as explicit schema drift. Source markets remain MAA-defined portfolios rather than inferred CBSAs.
+
+Parsing and publication never approve rows. `publish-maa-sec-candidates` intentionally publishes unverified evidence with `source_id=sec_maa`; an analyst must review the local CSV and source snapshots before a separate immutable approved version can become model-eligible. No forecasting model may be described as validated until legitimate historical targets are approved, feature-compatible, and tested out of sample.

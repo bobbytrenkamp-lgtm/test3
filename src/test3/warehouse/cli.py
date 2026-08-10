@@ -29,6 +29,7 @@ from test3.cre_data.audit import coverage_matrix, target_data_audit, target_read
 from test3.cre_data.report_inbox import save_report_discovery
 from test3.cre_data.report_tables import ReportMappingProfile, save_report_profile
 from test3.cre_data.verification import available_as_of, verify_observations
+from test3.cre_data.sources.sec_maa import write_review_csv
 
 
 PUBLIC_SOURCES = ("census", "bls", "bea", "fred", "building_permits", "crosswalk", "hud", "hvs")
@@ -80,6 +81,10 @@ def _parser():
     matrix.add_argument("--property-type", required=True); matrix.add_argument("--metric", required=True)
     discover = commands.add_parser("discover-cre-reports", help="fingerprint and group local, lawfully obtained CRE reports")
     discover.add_argument("--inbox", help="defaults to <data-root>/cre_reports/inbox")
+    maa = commands.add_parser("parse-maa-sec-snapshots", help="parse official SEC MAA browser snapshots into an analyst-review CSV")
+    maa.add_argument("--input-folder", required=True); maa.add_argument("--output", required=True)
+    publish_maa = commands.add_parser("publish-maa-sec-candidates", help="publish unverified MAA SEC observations for analyst review")
+    publish_maa.add_argument("--input", required=True); publish_maa.add_argument("--version", required=True)
     bulk = commands.add_parser("import-cre-bulk", help="import multiple authorized CRE history files independently")
     bulk.add_argument("--input-folder", required=True); bulk.add_argument("--dataset-prefix", required=True)
     bulk.add_argument("--version-prefix", required=True); bulk.add_argument("--mapping")
@@ -123,6 +128,14 @@ def main(argv=None):
     elif args.command == "cre-coverage-matrix": output = coverage_matrix(paths, property_type=args.property_type, metric=args.metric)
     elif args.command == "discover-cre-reports":
         output = save_report_discovery(args.inbox or (Path(args.data_root) / "cre_reports" / "inbox"))
+    elif args.command == "parse-maa-sec-snapshots":
+        output = write_review_csv(args.input_folder, args.output)
+    elif args.command == "publish-maa-sec-candidates":
+        source = Path(args.input)
+        output = asdict(import_cre_file(paths, source.read_bytes(), suffix=source.suffix,
+                                        dataset_id="sec-maa-same-store-market-quarter",
+                                        source_version=args.version, source_id="sec_maa",
+                                        analyst_review_confirmed=False))
     elif args.command == "import-cre-bulk":
         folder = Path(args.input_folder).resolve()
         if not folder.is_dir(): raise ValueError("bulk import folder does not exist")

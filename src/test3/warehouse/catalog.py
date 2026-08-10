@@ -50,6 +50,14 @@ SOURCE_CATALOG = {
         SourceSpec("test1_local", "Test1", "Normalized local exports", ("geography", "zoning", "policy", "facilities"), ("state", "county", "place", "property"), ("irregular",), None, "user controlled", "User-owned local output; Test3 does not redistribute Test1 data.", "local_file", False, False, False, False, False, "Contract-validated local adapter; do not duplicate Test1 pipelines."),
         SourceSpec("test3_derived", "Test3", "Deterministic derived metrics", ("growth",), ("national", "state", "county", "cbsa", "place"), ("annual",), None, "after source refresh", "MIT-licensed Test3 transformation; inputs retain their own source terms.", "local_processing", False, False, False, False, True, "Versioned deterministic transformations with input observation IDs."),
         SourceSpec("user_import", "User-provided", "CRE market imports", ("rent", "rent_growth", "vacancy", "supply", "transactions", "expenses"), ("market", "submarket", "property"), ("monthly", "quarterly", "annual"), None, "user controlled", "Rights and redistribution status must be supplied for every import.", "local_file", False, False, False, False, None, "Saved mapping template plus row-level lineage; analyst approval required.", ("Quality depends on user-provided source and methodology.",)),
+        SourceSpec("sec_maa", "Mid-America Apartment Communities via SEC EDGAR",
+                   "Quarterly supplemental data schedules", ("effective_rent", "rent_growth_yoy", "occupancy_rate", "vacancy_rate"),
+                   ("market",), ("quarterly",), "2019-Q1", "quarterly",
+                   "Public SEC-filed numeric facts used for local analysis; filing text is not redistributed.",
+                   "sec_fair_access_or_browser_visible_local_snapshot", False, False, False, False, False,
+                   "Deterministic source-specific table parser; analyst approval required before model eligibility.",
+                   ("Source-defined MAA portfolio markets are not CBSAs.",
+                    "Same-store composition and market definitions require longitudinal compatibility review.")),
     )
 }
 

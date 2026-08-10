@@ -11,7 +11,8 @@ from .metrics import get_cre_metric
 SOURCE_RELIABILITY = {
     "federal_public": .98, "state_local_public": .92, "academic_open": .88,
     "brokerage_public_report": .78, "public_brokerage_report": .78, "analyst_owned": .72,
-    "user_owned": .72, "licensed_local": .75, "manual_research": .60, "unknown": .40,
+    "public_company_filing": .90, "user_owned": .72, "licensed_local": .75,
+    "manual_research": .60, "unknown": .40,
 }
 
 

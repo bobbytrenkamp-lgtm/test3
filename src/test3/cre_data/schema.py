@@ -26,7 +26,8 @@ REQUIRED = {"market", "geography_type", "geography_id", "period", "frequency", "
             "licensing_notes", "verification_status"}
 VERIFICATION_STATUSES = {"unverified", "analyst_verified", "rejected"}
 SOURCE_CLASSES = {"federal_public", "state_local_public", "academic_open", "brokerage_public_report",
-                  "public_brokerage_report", "analyst_owned", "user_owned", "licensed_local", "manual_research", "unknown"}
+                  "public_brokerage_report", "public_company_filing", "analyst_owned", "user_owned",
+                  "licensed_local", "manual_research", "unknown"}
 TARGET_CLASSIFICATIONS = {"institutional_target", "market_proxy", "residential_proxy", "context_feature"}
 
 

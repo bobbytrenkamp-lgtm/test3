@@ -8,4 +8,6 @@ CPS/HVS vacancy and asking-rent observations are residential context, not instit
 
 User-provided CRE data defaults to unknown redistribution rights and must retain its own licensing notes. No public-source adapter requests a key, credential, payment method, or billable service.
 
+`sec_maa` is a governed institutional-target source for numeric facts in MAA quarterly supplemental schedules hosted by SEC EDGAR. It requires no login, key, payment method, or paid account. Automated access is allowed only under SEC fair-access guidance and a declared operator identity; a rejected request is not retried or bypassed. Filing text and local snapshots remain ignored and are not redistributed. The source-defined same-store market is not assumed to equal a CBSA, and extracted rows remain analyst-review candidates.
+
 An immutable manifest records the exact source-catalog fingerprint used when it was built. A reviewed source-definition revision may add the prior fingerprint to `LEGACY_SOURCE_FINGERPRINTS`; unrecognized drift still fails integrity verification. This preserves historical versions without silently accepting arbitrary catalog changes.

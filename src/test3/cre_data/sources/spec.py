@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 
 TARGET_CLASSIFICATIONS = frozenset({"institutional_target", "market_proxy", "residential_proxy", "context_feature"})
-ACCESS_METHODS = frozenset({"official_download", "manual_download", "local_file", "reviewed_document"})
+ACCESS_METHODS = frozenset({"official_download", "manual_download", "local_file", "reviewed_document", "sec_fair_access"})
 
 
 @dataclass(frozen=True)

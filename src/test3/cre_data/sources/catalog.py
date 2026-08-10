@@ -6,6 +6,16 @@ from .spec import CRETargetSourceSpec
 
 
 CRE_TARGET_SOURCES = {
+    "sec_maa_same_store": CRETargetSourceSpec(
+        "sec_maa_same_store", "MAA SEC quarterly supplemental schedules", "public_company_filing",
+        "institutional_target", ("multifamily",),
+        ("effective_rent", "rent_growth_yoy", "occupancy_rate", "vacancy_rate"),
+        ("market",), ("quarterly",), "Quarterly exhibits; useful history identified from 2019 onward",
+        "sec_fair_access", "https://www.sec.gov/edgar/sec-api-documentation", False, False, True, "no",
+        "Cite issuer, accession, exhibit 99.2, filing date, table, market row, and retrieval date.",
+        "Public SEC-filed numeric facts are retained locally. Test3 does not redistribute filing text or assume "
+        "source markets equal CBSAs. Analyst review and same-store methodology checks remain mandatory.",
+        "high", "approved"),
     "user_owned_cre_history": CRETargetSourceSpec(
         "user_owned_cre_history", "User-owned CRE market history", "user_owned", "institutional_target",
         ("multifamily", "industrial", "office", "retail"),

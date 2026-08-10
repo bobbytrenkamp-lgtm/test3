@@ -1,0 +1,21 @@
+- table:
+  - row "MULTIFAMILY SAME STORE PORTFOLIO NOI CONTRIBUTION PERCENTAGE":
+      - cell "MULTIFAMILY SAME STORE PORTFOLIO NOI CONTRIBUTION PERCENTAGE"
+- table:
+  - row "Fictionville, NC 1,200 60.0 % 95.5 % 95.0 %":
+      - cell "Fictionville, NC"
+  - row "Other 100 5.0 % 90.0 % 89.0 %":
+      - cell "Other"
+- table:
+  - row "MULTIFAMILY SAME STORE PORTFOLIO QUARTER OVER QUARTER COMPARISONS":
+      - cell "MULTIFAMILY SAME STORE PORTFOLIO QUARTER OVER QUARTER COMPARISONS"
+- table:
+  - row "Units Q2 2025 Q2 2024 % Chg Q2 2025 Q2 2024 % Chg Q2 2025 Q2 2024 % Chg Q2 2025 Q2 2024 % Chg":
+      - cell "Units"
+  - row "Fictionville, NC 1,200 $ 10,000 $ 9,500 5.3 % $ 4,000 $ 3,800 5.3 % $ 6,000 $ 5,700 5.3 % $ 1,500 $ 1,450 3.4 %":
+      - cell "Fictionville, NC"
+  - row "Total Same Store 1,200 $ 10,000 $ 9,500 5.3 % $ 4,000 $ 3,800 5.3 % $ 6,000 $ 5,700 5.3 % $ 1,500 $ 1,450 3.4 %":
+      - cell "Total Same Store"
+- table:
+  - row "MULTIFAMILY SAME STORE PORTFOLIO SEQUENTIAL QUARTER COMPARISONS":
+      - cell "MULTIFAMILY SAME STORE PORTFOLIO SEQUENTIAL QUARTER COMPARISONS"

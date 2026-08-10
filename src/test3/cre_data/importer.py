@@ -37,14 +37,14 @@ class CREImportResult:
     verification_path: Path
 
 
-def _canonical(row: dict, dataset_id: str, source_version: str) -> dict:
+def _canonical(row: dict, dataset_id: str, source_version: str, source_id: str = "user_import") -> dict:
     quality = "high" if row["confidence"] >= .85 else "moderate" if row["confidence"] >= .65 else "low"
     methodology = json.dumps({"methodology": row["methodology"], "vintage": row["vintage"],
                               "release_date": row["release_date"], "verification_status": row["verification_status"],
                               "confidence": row["confidence"], "target_classification": row["target_classification"],
                               "notes": row["notes"]}, sort_keys=True, separators=(",", ":"))
     return {
-        "observation_id": row["observation_id"], "source_id": "user_import", "source_dataset": dataset_id,
+        "observation_id": row["observation_id"], "source_id": source_id, "source_dataset": dataset_id,
         "source_series": f"{row['property_type']}:{row['metric']}:{row['methodology']}", "source_version": source_version,
         "retrieved_at": row["retrieved_at"], "as_of_date": row["release_date"] or row["retrieved_at"][:10],
         "geography_type": row["geography_type"], "geography_id": row["geography_id"], "state_fips": row["state_fips"],
@@ -58,7 +58,8 @@ def _canonical(row: dict, dataset_id: str, source_version: str) -> dict:
 
 
 def import_cre_csv(paths: WarehousePaths, content: bytes, *, dataset_id: str, source_version: str,
-                   evaluated_at: str | None = None, analyst_review_confirmed: bool = False) -> CREImportResult:
+                   evaluated_at: str | None = None, analyst_review_confirmed: bool = False,
+                   source_id: str = "user_import") -> CREImportResult:
     rows, errors, file_metadata = parse_cre_csv(content)
     if not rows:
         raise ValueError("CRE target file contains no structurally valid observations")
@@ -72,7 +73,8 @@ def import_cre_csv(paths: WarehousePaths, content: bytes, *, dataset_id: str, so
     if not publishable:
         raise ValueError("CRE target file contains no publishable observations")
     paths.initialize(); dataset_slug, version_slug = _slug(dataset_id), _slug(source_version)
-    raw_dir = paths.contained(Path("raw") / "user_imports" / f"dataset={dataset_slug}" / f"version={version_slug}")
+    raw_root = "user_imports" if source_id == "user_import" else source_id
+    raw_dir = paths.contained(Path("raw") / raw_root / f"dataset={dataset_slug}" / f"version={version_slug}")
     verification_dir = paths.contained(Path("verification") / "cre" / f"dataset={dataset_slug}" / f"version={version_slug}")
     raw_path = raw_dir / f"{file_metadata['sha256']}.csv"
     verification_path = verification_dir / "verification.json"
@@ -81,9 +83,9 @@ def import_cre_csv(paths: WarehousePaths, content: bytes, *, dataset_id: str, so
     raw_dir.mkdir(parents=True, exist_ok=True); verification_dir.mkdir(parents=True, exist_ok=True)
     temporary_raw = raw_path.with_suffix(".csv.tmp")
     temporary_raw.write_bytes(content); os.replace(temporary_raw, raw_path)
-    canonical = [_canonical(row, dataset_id, source_version) for row in publishable]
+    canonical = [_canonical(row, dataset_id, source_version, source_id) for row in publishable]
     try:
-        ingested = ingest_observations(paths, source_id="user_import", dataset_id=dataset_id,
+        ingested = ingest_observations(paths, source_id=source_id, dataset_id=dataset_id,
                                        source_version=source_version, domain="cre_market", rows=canonical)
         report = {"schema_version": "test3-cre-verification/1.0.0", "created_at": datetime.now(timezone.utc).isoformat(),
                   "dataset_id": dataset_id, "source_version": source_version, "raw_snapshot": {"path": str(raw_path.relative_to(paths.root)).replace("\\", "/"), **file_metadata},
@@ -102,7 +104,7 @@ def import_cre_csv(paths: WarehousePaths, content: bytes, *, dataset_id: str, so
 
 def import_cre_file(paths: WarehousePaths, content: bytes, *, suffix: str, dataset_id: str, source_version: str,
                     mapping: ImportMappingTemplate | None = None, evaluated_at: str | None = None,
-                    analyst_review_confirmed: bool = False) -> CREImportResult:
+                    analyst_review_confirmed: bool = False, source_id: str = "user_import") -> CREImportResult:
     rows, errors, file_metadata = parse_cre_file(content, suffix=suffix, mapping=mapping)
     if not rows:
         raise ValueError("CRE target file contains no structurally valid observations")
@@ -116,7 +118,8 @@ def import_cre_file(paths: WarehousePaths, content: bytes, *, suffix: str, datas
     if not publishable:
         raise ValueError("CRE target file contains no publishable observations")
     paths.initialize(); dataset_slug, version_slug = _slug(dataset_id), _slug(source_version)
-    raw_dir = paths.contained(Path("raw") / "user_imports" / f"dataset={dataset_slug}" / f"version={version_slug}")
+    raw_root = "user_imports" if source_id == "user_import" else source_id
+    raw_dir = paths.contained(Path("raw") / raw_root / f"dataset={dataset_slug}" / f"version={version_slug}")
     verification_dir = paths.contained(Path("verification") / "cre" / f"dataset={dataset_slug}" / f"version={version_slug}")
     raw_path = raw_dir / f"{file_metadata['sha256']}{suffix.lower()}"
     verification_path = verification_dir / "verification.json"
@@ -125,8 +128,8 @@ def import_cre_file(paths: WarehousePaths, content: bytes, *, suffix: str, datas
     raw_dir.mkdir(parents=True, exist_ok=True); verification_dir.mkdir(parents=True, exist_ok=True)
     temporary_raw = raw_path.with_suffix(raw_path.suffix + ".tmp")
     temporary_raw.write_bytes(content); os.replace(temporary_raw, raw_path)
-    canonical = [_canonical(row, dataset_id, source_version) for row in publishable]
-    ingested = ingest_observations(paths, source_id="user_import", dataset_id=dataset_id,
+    canonical = [_canonical(row, dataset_id, source_version, source_id) for row in publishable]
+    ingested = ingest_observations(paths, source_id=source_id, dataset_id=dataset_id,
                                    source_version=source_version, domain="cre_market", rows=canonical)
     report = {"schema_version": "test3-cre-verification/1.0.0", "created_at": datetime.now(timezone.utc).isoformat(),
               "dataset_id": dataset_id, "source_version": source_version,

@@ -36,6 +36,7 @@ After signing in locally, open **Research lab** in the left navigation to inspec
 - No required account, credentials, hosted API, telemetry or document transmission
 - Immutable county/CBSA annual and quarterly feature panels with governed frequency conversions, exact-period growth/lags, separate lineage Parquet and source-backed CBSA aggregation
 - Local Research Lab dashboard backed by verified Parquet manifests and immutable SQLite model artifacts
+- Machine-readable CRE target audit, readiness funnel, market-period coverage, lawful source ranking, ignored local report inbox and bulk authorized-history import
 - Census HVS quarterly U.S. residential rental-vacancy and vacant-unit asking-rent histories, plus governed Federal Reserve CRE credit-series definitions
 
 This is an institutionally controlled **local first-usable release**, not a network-production deployment. Its documented deterministic workflow, governance, recovery, bounded load and accessibility scope are tested; advanced extraction/mapping breadth and external production certification remain explicit limitations. Scanned files use optional locally installed Tesseract; without it they remain visibly queued for manual review. Lease outputs are diligence support, not legal conclusions.

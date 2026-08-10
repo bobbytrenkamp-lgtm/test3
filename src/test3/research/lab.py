@@ -12,6 +12,8 @@ from test3.research.target_panel import target_readiness
 from test3.research.specifications import MODEL_SPECIFICATIONS
 from test3.research.target_panel import target_readiness_for_specification
 from test3.cre_data.sources import source_catalog
+from test3.cre_data.sources import discovery_catalog
+from test3.cre_data.audit import target_data_audit, target_readiness_funnel
 from test3.cre_data.geography import market_definitions
 from test3.warehouse.duckdb_engine import WarehouseEngine, sql_literal
 from test3.warehouse.manifests import active_manifests
@@ -127,6 +129,9 @@ def research_lab_report(data_dir: str | Path, database, organization_id: str) ->
     specification_readiness = checked("model_specific_readiness", lambda: [
         target_readiness_for_specification(paths, MODEL_SPECIFICATIONS[name]) for name in sorted(MODEL_SPECIFICATIONS)], [])
     target_workbench = checked("target_workbench", lambda: _target_workbench(paths), {})
+    target_audit = checked("target_audit", lambda: target_data_audit(paths), [])
+    readiness_funnel = checked("target_funnel", lambda: target_readiness_funnel(
+        paths, property_type="multifamily", metric="rent_growth_yoy"), {})
     sources = checked("cre_source_catalog", source_catalog, [])
     definitions = checked("market_definitions", lambda: market_definitions(paths), [])
     models = checked("models", lambda: _models(database, organization_id), [])
@@ -141,7 +146,10 @@ def research_lab_report(data_dir: str | Path, database, organization_id: str) ->
         "target_readiness": readiness_by_target[:500],
         "model_specific_readiness": specification_readiness,
         "target_workbench": target_workbench,
+        "target_audit": target_audit,
+        "target_readiness_funnel": readiness_funnel,
         "target_sources": sources,
+        "target_source_discovery": discovery_catalog(),
         "market_definitions": definitions,
         "feature_tables": features,
         "models": models,

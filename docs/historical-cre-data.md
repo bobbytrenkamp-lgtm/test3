@@ -24,6 +24,12 @@ test3-data import-cre --input market-history.csv --dataset raleigh-mf-history --
 test3-data import-cre --input quarterly-export.xlsx --mapping data/warehouse/manifests/cre_import_mappings/vendor-a/1.0-<hash>.json --dataset vendor-a-mf --version 2026q2 --analyst-reviewed
 test3-data cre-status
 test3-data cre-source-catalog
+test3-data cre-source-discovery
+test3-data cre-target-audit
+test3-data cre-target-funnel --property-type multifamily --metric rent_growth_yoy
+test3-data cre-coverage-matrix --property-type multifamily --metric rent_growth_yoy
+test3-data discover-cre-reports
+test3-data import-cre-bulk --input-folder data/authorized_market_history --dataset-prefix authorized-history --version-prefix 2026q2 --mapping <mapping.json> --analyst-reviewed
 test3-research target-readiness --data-root data
 test3-research target-readiness --data-root data --model-specification mf_rent_growth_combined
 test3-research build-target-panel --data-root data --property-type multifamily --target rent_growth_yoy --frequency quarterly
@@ -36,6 +42,10 @@ Target-panel publication additionally excludes unresolved source conflicts, meth
 Saved import mappings require an exact input-column match before reuse. They are content-hashed and stored locally under `data/warehouse/manifests/cre_import_mappings/`. Market definitions are also content-hashed and versioned locally; weighted constituent counties must total one. If market definitions exist, an imported market that lacks a governed definition is not model-eligible.
 
 Reviewed document candidates retain document SHA-256, page, table, row, column, original label, and original value. Candidate packages cannot approve themselves. An analyst must select observations and record a rationale before the canonical import/verification path can consider them.
+
+The ignored `data/cre_reports/inbox/` is a local intake directory for lawfully obtained PDF/CSV/XLSX/Parquet reports. Discovery fingerprints files, counts PDF pages, infers candidate source/market/quarter/property type from filenames, groups likely quarterly series, and reports missing quarters. It does not parse rights, approve observations, or make them model eligible. Each discovery result is content-hashed under the ignored `data/cre_reports/manifests/` directory.
+
+Recurring extracted tables support exact versioned label profiles. Schema drift returns `review_required` and zero candidates. Wide and label/value table candidates retain the original cell evidence. Exact YoY rent growth may be derived only from a same-source, same-geography, same-unit, same-methodology quarterly rent pair four quarters apart. Vacancy may be derived as `1 - occupancy` only for explicitly physical/economic occupancy—not availability. Derived rows remain unverified pending analyst review.
 
 ## Current data limitations
 

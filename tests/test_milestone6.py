@@ -1,8 +1,14 @@
 from pathlib import Path
+import hashlib
+import json
+import tempfile
 import unittest
 
 from test3.cre_data.sources.catalog import CRE_TARGET_SOURCES
 from test3.cre_data.sources.sec_maa import parse_maa_accessibility_snapshot
+from test3.cre_data.sources.sec_maa import SNAPSHOT_SCHEMA, write_review_csv
+from test3.cre_data.review import ATTESTATION_SCHEMA, approve_cre_review
+from test3.cre_data.schema import parse_cre_file
 from test3.cre_data.verification import verify_observations
 
 
@@ -54,3 +60,51 @@ class Milestone6Tests(unittest.TestCase):
                 filing_url="https://www.sec.gov/Archives/edgar/data/912595/fictional/maa-ex99_2.htm",
                 filing_date="2025-07-30",
             )
+
+    def test_analyst_approval_is_hash_bound_scoped_and_immutable(self):
+        with tempfile.TemporaryDirectory() as root:
+            folder = Path(root)
+            snapshot = FIXTURE.read_bytes(); snapshot_path = folder / "filing.snapshot.txt"
+            snapshot_path.write_bytes(snapshot)
+            (folder / "filing.json").write_text(json.dumps({
+                "schema_version": SNAPSHOT_SCHEMA,
+                "snapshot_file": snapshot_path.name,
+                "sha256": hashlib.sha256(snapshot).hexdigest(),
+                "filing_url": "https://www.sec.gov/Archives/edgar/data/912595/fictional/maa-ex99_2.htm",
+                "filing_date": "2025-07-30",
+                "retrieved_at": "2026-08-09T12:00:00+00:00",
+            }), encoding="utf-8")
+            review = folder / "review.csv"; write_review_csv(folder, review)
+            attestation = folder / "attestation.json"
+            attestation.write_text(json.dumps({
+                "schema_version": ATTESTATION_SCHEMA,
+                "analyst_identity": "Fictional Analyst",
+                "signed_at": "2026-08-12T12:00:00-04:00",
+                "rationale": "Reviewed the fictional source row and methodology for testing.",
+                "input_sha256": hashlib.sha256(review.read_bytes()).hexdigest(),
+                "approved_markets": ["maa-fictionville-nc"],
+                "approved_metrics": ["rent_growth_yoy"],
+                "period_from": "2025-Q2", "period_to": "2025-Q2",
+                "acknowledgements": {name: True for name in (
+                    "source_evidence_reviewed", "methodology_compatible",
+                    "market_definitions_reviewed", "rights_confirmed")},
+            }), encoding="utf-8")
+            output = folder / "approved.csv"
+            approved = approve_cre_review(review, attestation, output)
+            self.assertEqual((approved["observations"], approved["markets"], approved["periods"]), (1, 1, 1))
+            rows, errors, _ = parse_cre_file(output.read_bytes(), suffix=".csv")
+            self.assertFalse(errors); self.assertEqual(rows[0]["verification_status"], "analyst_verified")
+            with self.assertRaises(FileExistsError):
+                approve_cre_review(review, attestation, output)
+            bad = json.loads(attestation.read_text(encoding="utf-8")); bad["input_sha256"] = "0" * 64
+            bad_path = folder / "bad.json"; bad_path.write_text(json.dumps(bad), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "different review file"):
+                approve_cre_review(review, bad_path, folder / "bad-output.csv")
+            unknown = json.loads(attestation.read_text(encoding="utf-8")); unknown["approved_metrics"] = ["rent_growth_yoy", "transaction_cap_rate"]
+            unknown_path = folder / "unknown.json"; unknown_path.write_text(json.dumps(unknown), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "unknown or empty metrics"):
+                approve_cre_review(review, unknown_path, folder / "unknown-output.csv")
+            naive = json.loads(attestation.read_text(encoding="utf-8")); naive["signed_at"] = "2026-08-12T12:00:00"
+            naive_path = folder / "naive.json"; naive_path.write_text(json.dumps(naive), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "timezone"):
+                approve_cre_review(review, naive_path, folder / "naive-output.csv")

@@ -5,7 +5,8 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from test3.cre_data.audit import coverage_matrix, target_data_audit, target_readiness_funnel
+from test3.cre_data.audit import (coverage_matrix, series_quality_scorecard,
+                                  target_data_audit, target_readiness_funnel)
 from test3.cre_data.derivations import derive_rent_growth_yoy, derive_vacancy_from_occupancy
 from test3.cre_data.report_inbox import save_report_discovery
 from test3.cre_data.report_tables import (ReportMappingProfile, extract_table_candidates,
@@ -101,6 +102,46 @@ class Milestone5FTests(unittest.TestCase):
             self.assertEqual(funnel["stages"][-1]["count"], 1)
             matrix = coverage_matrix(paths, property_type="multifamily", metric="rent_growth_yoy")
             self.assertEqual(matrix["cells"][0]["eligible"], 1)
+
+    def test_active_vintage_prevents_revision_double_counting(self):
+        older = normalize_cre_record(_raw(period="2024-Q1", metric="rent_growth_yoy", value=".02",
+                                          unit="decimal_fraction", methodology="market_yoy"), row_number=2)
+        newer = normalize_cre_record(_raw(period="2024-Q1", metric="rent_growth_yoy", value=".03",
+                                          unit="decimal_fraction", methodology="market_yoy"), row_number=2)
+        for row in (older, newer):
+            row.update({"model_eligible": False, "verification_findings": [], "confidence": .7})
+        with tempfile.TemporaryDirectory() as root:
+            paths = WarehousePaths.from_data_root(root)
+            for version, created_at, row in (("v1", "2026-01-01T00:00:00+00:00", older),
+                                              ("v2", "2026-02-01T00:00:00+00:00", newer)):
+                destination = paths.contained(Path(f"verification/cre/dataset=fixture/version={version}/verification.json"))
+                destination.parent.mkdir(parents=True)
+                destination.write_text(json.dumps({"schema_version": "test3-cre-verification/1.0.0",
+                    "dataset_id": "fixture", "source_version": version, "created_at": created_at,
+                    "invalid_rows": [], "observations": [row], "findings": [], "summary": {}}), encoding="utf-8")
+            installed = next(item for item in target_data_audit(paths)
+                             if item["metric"] == "rent_growth_yoy" and item["source"] == "Test Source")
+            self.assertEqual(installed["observations"], 1)
+            matrix = coverage_matrix(paths, property_type="multifamily", metric="rent_growth_yoy")
+            self.assertEqual(matrix["cells"][0]["observations"], 1)
+
+    def test_series_quality_components_are_explicit(self):
+        rows = [normalize_cre_record(_raw(period=period, metric="rent_growth_yoy", value=".03",
+                                          unit="decimal_fraction", methodology="market_yoy"), row_number=index)
+                for index, period in enumerate(("2024-Q1", "2024-Q3"), start=2)]
+        for row in rows:
+            row.update({"model_eligible": False, "verification_findings": ["missing_periods"], "confidence": .7})
+        with tempfile.TemporaryDirectory() as root:
+            paths = WarehousePaths.from_data_root(root)
+            destination = paths.contained(Path("verification/cre/dataset=fixture/version=1/verification.json"))
+            destination.parent.mkdir(parents=True)
+            destination.write_text(json.dumps({"dataset_id": "fixture", "source_version": "1", "invalid_rows": [],
+                                               "observations": rows, "findings": [], "summary": {}}), encoding="utf-8")
+            score = series_quality_scorecard(paths, property_type="multifamily", metric="rent_growth_yoy")[0]
+            self.assertEqual(score["expected_periods"], 3)
+            self.assertEqual(score["missing_periods"], 1)
+            self.assertEqual(score["coverage_ratio"], 0.666667)
+            self.assertTrue(score["unit_consistent"])
 
 
 if __name__ == "__main__":

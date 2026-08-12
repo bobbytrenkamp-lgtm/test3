@@ -34,7 +34,10 @@ def _natural(row: dict) -> tuple:
 def _series(row: dict, include_source: bool = False) -> tuple:
     key = (row["geography_type"], row["geography_id"], row["frequency"], row["property_type"],
            row.get("property_subtype"), row["metric"], row["methodology"])
-    return key + ((row["source_name"], row["source_identifier"]) if include_source else ())
+    # source_identifier points to row-level evidence (often a different report every
+    # quarter). Longitudinal identity is the governed source + methodology, not one
+    # document URL; otherwise gaps, jumps, and revisions become invisible.
+    return key + ((row["source_name"],) if include_source else ())
 
 
 def _difference(left: Decimal, right: Decimal, measure_type: str) -> Decimal:
@@ -53,12 +56,12 @@ def verify_observations(rows: list[dict], *, evaluated_at: str | date | None = N
     for row in rows:
         exact[(_natural(row), row["source_name"], row["source_identifier"], row["vintage"], row["methodology"])].append(row)
         natural[_natural(row)].append(row)
-        revision[(_natural(row), row["source_name"], row["source_identifier"], row["methodology"])].append(row)
+        revision[(_natural(row), row["source_name"], row["methodology"])].append(row)
         series[_series(row, include_source=True)].append(row)
         cadence[(row["geography_type"], row["geography_id"], row["property_type"], row.get("property_subtype"),
-                 row["metric"], row["methodology"], row["source_name"], row["source_identifier"])].append(row)
+                 row["metric"], row["methodology"], row["source_name"])].append(row)
         method_series[(row["geography_type"], row["geography_id"], row["property_type"], row.get("property_subtype"),
-                       row["metric"], row["source_name"], row["source_identifier"])].append(row)
+                       row["metric"], row["source_name"])].append(row)
     def add(code, severity, message, affected):
         item = {"code": code, "severity": severity, "message": message,
                 "observation_ids": sorted({row["observation_id"] for row in affected})}
@@ -74,7 +77,7 @@ def verify_observations(rows: list[dict], *, evaluated_at: str | date | None = N
             add("methodology_mismatch", "warning", "Sources use materially different governed methodologies; do not combine automatically.", grouped)
         values = [Decimal(row["value"]) for row in grouped]
         spec = get_cre_metric(grouped[0]["metric"], grouped[0]["property_type"])
-        distinct_sources = {(row["source_name"], row["source_identifier"]) for row in grouped}
+        distinct_sources = {row["source_name"] for row in grouped}
         if len(distinct_sources) > 1 and max(_difference(left, right, spec.measure_type) for left in values for right in values) > Decimal("0.05"):
             add("source_conflict", "warning", "Independent sources disagree beyond the governed five-point/five-percent review tolerance.", grouped)
     for grouped in revision.values():
@@ -110,7 +113,7 @@ def verify_observations(rows: list[dict], *, evaluated_at: str | date | None = N
     for row in rows:
         group = natural[_natural(row)]
         spec = get_cre_metric(row["metric"], row["property_type"])
-        peers = [item for item in group if (item["source_name"], item["source_identifier"]) != (row["source_name"], row["source_identifier"])]
+        peers = [item for item in group if item["source_name"] != row["source_name"]]
         if peers:
             agreement = max(0.0, 1.0 - float(median(_difference(Decimal(row["value"]), Decimal(item["value"]), spec.measure_type) for item in peers)) / .10)
         else:

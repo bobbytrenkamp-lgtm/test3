@@ -15,6 +15,7 @@ from test3.cre_data.sources import source_catalog
 from test3.cre_data.sources import discovery_catalog
 from test3.cre_data.audit import target_data_audit, target_readiness_funnel
 from test3.cre_data.geography import market_definitions
+from test3.cre_data.versions import verification_reports
 from test3.warehouse.duckdb_engine import WarehouseEngine, sql_literal
 from test3.warehouse.manifests import active_manifests
 from test3.warehouse.reporting import coverage_report
@@ -78,10 +79,7 @@ def _models(database, organization_id: str) -> list[dict]:
 
 
 def _target_workbench(paths: WarehousePaths) -> dict:
-    root = paths.contained(Path("verification") / "cre")
-    reports = []
-    for path in sorted(root.glob("dataset=*/version=*/verification.json")) if root.exists() else ():
-        reports.append(json.loads(path.read_text(encoding="utf-8")))
+    reports = verification_reports(paths)
     cells, methodologies, findings = {}, {}, []
     for report in reports:
         findings.extend({**item, "dataset_id": report["dataset_id"], "source_version": report["source_version"]}

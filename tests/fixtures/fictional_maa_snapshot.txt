@@ -2,6 +2,8 @@
   - row "MULTIFAMILY SAME STORE PORTFOLIO NOI CONTRIBUTION PERCENTAGE":
       - cell "MULTIFAMILY SAME STORE PORTFOLIO NOI CONTRIBUTION PERCENTAGE"
 - table:
+  - row "Apartment Units Same Store NOI June 30 2025 95.0 % 94.0 %":
+      - cell "Apartment Units Same Store NOI June 30 2025 95.0 % 94.0 %"
   - row "Fictionville, NC 1,200 60.0 % 95.5 % 95.0 %":
       - cell "Fictionville, NC"
   - row "Other 100 5.0 % 90.0 % 89.0 %":

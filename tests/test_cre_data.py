@@ -62,6 +62,27 @@ class CREDataTests(unittest.TestCase):
         self.assertEqual(len(checked["observations"]), 4, "conflicting and revised evidence must be preserved")
         self.assertTrue(all(0 <= item["confidence"] <= 1 for item in checked["observations"]))
 
+    def test_longitudinal_checks_span_distinct_quarterly_evidence_documents(self):
+        rows = [
+            row(source_identifier="fixture://report/2024q1"),
+            row(period="2024-Q3", source_period="2024-Q3", release_date="2024-10-15",
+                source_identifier="fixture://report/2024q3", value=".20"),
+        ]
+        parsed, errors, _ = parse_cre_csv(cre_csv(rows)); self.assertFalse(errors)
+        checked = verify_observations(parsed, evaluated_at="2026-08-09", analyst_review_confirmed=True)
+        codes = {item["code"] for item in checked["findings"]}
+        self.assertIn("missing_periods", codes)
+        self.assertIn("sudden_jump", codes)
+
+    def test_revision_identity_does_not_depend_on_evidence_document_url(self):
+        parsed, errors, _ = parse_cre_csv(cre_csv([
+            row(source_identifier="fixture://original", vintage="original"),
+            row(source_identifier="fixture://revision", vintage="revision-1", value=".06"),
+        ])); self.assertFalse(errors)
+        checked = verify_observations(parsed, evaluated_at="2026-08-09", analyst_review_confirmed=True)
+        self.assertIn("revised_observation", {item["code"] for item in checked["findings"]})
+        self.assertNotIn("source_conflict", {item["code"] for item in checked["findings"]})
+
     def test_duplicates_and_future_information_fail_closed(self):
         parsed, _, _ = parse_cre_csv(cre_csv([row(), row()]))
         checked = verify_observations(parsed, evaluated_at="2026-08-09")

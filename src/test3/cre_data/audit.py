@@ -1,19 +1,69 @@
 from __future__ import annotations
 
 from collections import defaultdict
-import json
-from pathlib import Path
-
 from test3.warehouse.storage import WarehousePaths
 from .metrics import CRE_METRICS
+from .versions import verification_reports
 
 
-def verification_reports(paths: WarehousePaths) -> list[dict]:
-    root = paths.contained(Path("verification") / "cre")
-    if not root.exists():
-        return []
-    return [json.loads(path.read_text(encoding="utf-8"))
-            for path in sorted(root.glob("dataset=*/version=*/verification.json"))]
+def _period_index(period: str, frequency: str) -> int:
+    if frequency == "annual":
+        return int(period[:4])
+    if frequency == "quarterly":
+        return int(period[:4]) * 4 + int(period[-1]) - 1
+    if frequency == "monthly":
+        return int(period[:4]) * 12 + int(period[5:7]) - 1
+    raise ValueError(f"unsupported CRE series frequency: {frequency}")
+
+
+def series_quality_scorecard(paths: WarehousePaths, *, property_type: str | None = None,
+                             metric: str | None = None) -> list[dict]:
+    """Expose auditable quality components for each active source-market series."""
+    groups: dict[tuple, list[dict]] = defaultdict(list)
+    for report in verification_reports(paths):
+        for row in report.get("observations", []):
+            if property_type and row.get("property_type") != property_type:
+                continue
+            if metric and row.get("metric") != metric:
+                continue
+            key = (row["source_name"], row["property_type"], row["metric"],
+                   row["geography_type"], row["geography_id"])
+            groups[key].append(row)
+    output = []
+    for key, rows in sorted(groups.items()):
+        frequencies = {row["frequency"] for row in rows}
+        periods = {row["period"] for row in rows}
+        duplicate_periods = len(rows) - len(periods)
+        expected_periods = None
+        missing_periods = None
+        coverage_ratio = None
+        if len(frequencies) == 1 and periods:
+            frequency = next(iter(frequencies))
+            indexes = [_period_index(period, frequency) for period in periods]
+            expected_periods = max(indexes) - min(indexes) + 1
+            missing_periods = expected_periods - len(periods)
+            coverage_ratio = round(len(periods) / expected_periods, 6)
+        methodologies = {row["methodology"] for row in rows}
+        findings = defaultdict(int)
+        for row in rows:
+            for finding in row.get("verification_findings", []):
+                findings[finding] += 1
+        output.append({
+            "source": key[0], "property_type": key[1], "metric": key[2],
+            "geography_type": key[3], "market": key[4], "observations": len(rows),
+            "earliest_period": min(periods, default=None), "latest_period": max(periods, default=None),
+            "frequency": next(iter(frequencies)) if len(frequencies) == 1 else "mixed",
+            "expected_periods": expected_periods, "missing_periods": missing_periods,
+            "coverage_ratio": coverage_ratio, "duplicate_periods": duplicate_periods,
+            "methodology_versions": len(methodologies),
+            "methodology_consistent": len(methodologies) == 1,
+            "unit_consistent": len({row["unit"] for row in rows}) == 1,
+            "release_date_coverage": round(sum(bool(row.get("release_date")) for row in rows) / len(rows), 6),
+            "verification_rate": round(sum(row.get("verification_status") == "analyst_verified" for row in rows) / len(rows), 6),
+            "model_eligible_rate": round(sum(bool(row.get("model_eligible")) for row in rows) / len(rows), 6),
+            "findings": dict(sorted(findings.items())),
+        })
+    return output
 
 
 def target_data_audit(paths: WarehousePaths) -> list[dict]:

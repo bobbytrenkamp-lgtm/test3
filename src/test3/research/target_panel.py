@@ -16,6 +16,7 @@ import duckdb
 from test3.features.manifests import verify_feature_manifest
 from test3.features.panel import FeaturePanel
 from test3.cre_data.metrics import CRE_METRICS
+from test3.cre_data.versions import verification_reports
 from test3.warehouse.manifests import canonical_json, file_sha256
 from test3.warehouse.storage import WarehousePaths
 from test3.research.specifications import ModelSpecification
@@ -52,20 +53,6 @@ class TargetPanelResult:
     exclusions: dict
 
 
-def _verification_reports(paths: WarehousePaths) -> list[dict]:
-    root = paths.contained(Path("verification") / "cre")
-    reports = []
-    for path in sorted(root.glob("dataset=*/version=*/verification.json")) if root.exists() else ():
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise ValueError(f"unreadable CRE verification report: {path}") from exc
-        if payload.get("schema_version") != "test3-cre-verification/1.0.0":
-            raise ValueError(f"unsupported CRE verification report: {path}")
-        reports.append(payload)
-    return reports
-
-
 def _eligible_rows_from_reports(reports: list[dict], property_type: str | None = None,
                                 target: str | None = None) -> tuple[list[dict], Counter]:
     candidates, exclusions = [], Counter()
@@ -98,8 +85,10 @@ def _eligible_rows_from_reports(reports: list[dict], property_type: str | None =
         grouped[(row["geography_id"], row["period"], row["frequency"], row["property_type"], row["metric"])].append(row)
     longitudinal = defaultdict(list)
     for row in candidates:
+        # A source_identifier is row-level evidence and normally changes every
+        # quarter. It must not fragment longitudinal methodology validation.
         longitudinal[(row["geography_id"], row["frequency"], row["property_type"], row["metric"],
-                      row["source_name"], row["source_identifier"])].append(row)
+                      row["source_name"])].append(row)
     incompatible = {
         row["observation_id"] for rows in longitudinal.values()
         if len({row["methodology"] for row in rows}) > 1 for row in rows
@@ -116,11 +105,11 @@ def _eligible_rows_from_reports(reports: list[dict], property_type: str | None =
 
 
 def _eligible_rows(paths: WarehousePaths, property_type: str | None = None, target: str | None = None) -> tuple[list[dict], Counter]:
-    return _eligible_rows_from_reports(_verification_reports(paths), property_type, target)
+    return _eligible_rows_from_reports(verification_reports(paths), property_type, target)
 
 
 def target_readiness(paths: WarehousePaths, *, policy: ReadinessPolicy = ReadinessPolicy()) -> list[dict]:
-    reports = _verification_reports(paths)
+    reports = verification_reports(paths)
     pairs = sorted({(property_type, metric.metric) for metric in CRE_METRICS.values()
                     for property_type in metric.property_types} |
                    {(row.get("property_type"), row.get("metric"))

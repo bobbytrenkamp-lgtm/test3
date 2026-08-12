@@ -28,9 +28,11 @@ test3-data cre-source-discovery
 test3-data cre-target-audit
 test3-data cre-target-funnel --property-type multifamily --metric rent_growth_yoy
 test3-data cre-coverage-matrix --property-type multifamily --metric rent_growth_yoy
+test3-data cre-series-quality --property-type multifamily --metric rent_growth_yoy
 test3-data discover-cre-reports
 test3-data parse-maa-sec-snapshots --input-folder data/cre_reports/sec/maa/browser_snapshots --output data/cre_reports/maa_sec_review.csv
 test3-data publish-maa-sec-candidates --input data/cre_reports/maa_sec_review.csv --version <immutable-version>
+test3-data approve-cre-review --input data/cre_reports/maa_sec_review.csv --attestation data/cre_reports/maa_attestation.json --output data/cre_reports/maa_sec_approved.csv
 test3-data import-cre-bulk --input-folder data/authorized_market_history --dataset-prefix authorized-history --version-prefix 2026q2 --mapping <mapping.json> --analyst-reviewed
 test3-research target-readiness --data-root data
 test3-research target-readiness --data-root data --model-specification mf_rent_growth_combined
@@ -50,6 +52,10 @@ The ignored `data/cre_reports/inbox/` is a local intake directory for lawfully o
 Recurring extracted tables support exact versioned label profiles. Schema drift returns `review_required` and zero candidates. Wide and label/value table candidates retain the original cell evidence. Exact YoY rent growth may be derived only from a same-source, same-geography, same-unit, same-methodology quarterly rent pair four quarters apart. Vacancy may be derived as `1 - occupancy` only for explicitly physical/economic occupancy—not availability. Derived rows remain unverified pending analyst review.
 
 ## Current data limitations
+
+Analyst approval is a separate, hash-bound operation. The attestation names the analyst, exact input SHA-256, approved markets/metrics/periods, rationale, and four required acknowledgements covering source evidence, methodology, market definitions, and rights. Approval creates a new file and attestation sidecar; neither may overwrite an existing artifact. This prevents a changed review file from inheriting an earlier approval.
+
+Immutable dataset vintages remain available for revision analysis, but readiness, coverage, the Research Lab, and target-panel construction use only the newest verification report for each dataset. Older and corrected vintages are never summed together. `cre-series-quality` exposes coverage, missing/duplicate periods, methodology and unit consistency, release-date coverage, analyst-verification rate, model-eligibility rate, and underlying findings for every active source-market series.
 
 The repository contains no copyrighted brokerage history and no production target bytes. The ignored local warehouse can contain public SEC-filed numeric observations and authorized analyst files.
 

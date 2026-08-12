@@ -166,7 +166,7 @@ def parse_maa_accessibility_snapshot(snapshot: str, *, filing_url: str, filing_d
         if not match:
             continue
         market, units_text, rest = match.groups()
-        if market.startswith(("Total ", "Other", "Units ")):
+        if market.startswith(("Total ", "Other", "Units ", "Apartment Units ")):
             continue
         values = [Decimal(units_text.replace(",", "")), *_numbers(rest)]
         if len(values) < 4:

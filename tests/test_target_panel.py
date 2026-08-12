@@ -10,7 +10,8 @@ import duckdb
 
 from test3.cre_data.importer import import_cre_csv
 from test3.features.manifests import FEATURE_MANIFEST_VERSION, feature_file_entry, write_feature_manifest
-from test3.research.target_panel import ReadinessPolicy, build_target_panel, target_readiness
+from test3.research.target_panel import (_eligible_rows_from_reports, ReadinessPolicy,
+                                         build_target_panel, target_readiness)
 from test3.warehouse.storage import WarehousePaths
 
 
@@ -88,6 +89,22 @@ class TargetPanelTests(unittest.TestCase):
             self.assertEqual(report["status"], "not_ready")
             self.assertEqual(report["model_eligible_observations"], 0)
             self.assertEqual(report["exclusions"]["unresolved_multiple_sources"], 2)
+
+    def test_methodology_change_spans_distinct_quarterly_documents(self):
+        first = _row("Market A", "11111", "2024-Q1", ".03")
+        second = {**_row("Market A", "11111", "2024-Q2", ".04"),
+                  "source_identifier": "fixture://different-quarterly-report",
+                  "methodology": "changed_market_yoy"}
+        rows = []
+        for item in (first, second):
+            item = {**item, "observation_id": item["source_identifier"] + item["period"],
+                    "model_eligible": True, "verification_findings": []}
+            rows.append(item)
+        eligible, exclusions = _eligible_rows_from_reports([
+            {"raw_snapshot": {"sha256": "a" * 64}, "warehouse_manifest_hash": "b" * 64,
+             "observations": rows}], "multifamily", "rent_growth_yoy")
+        self.assertEqual(eligible, [])
+        self.assertEqual(exclusions["longitudinal_methodology_change"], 2)
 
 
 if __name__ == "__main__":

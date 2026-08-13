@@ -25,11 +25,16 @@ _SEQUENTIAL_HEADINGS = (
     "MULTIFAMILY SAME STORE PORTFOLIO SEQUENTIAL QUARTER COMPARISONS",
     "MULTIFAMILY SAME STORE PORTFOLIO SEQUENTIAL QUARTERLY COMPARISONS",
 )
-_OCCUPANCY_HEADING = "MULTIFAMILY SAME STORE PORTFOLIO NOI CONTRIBUTION PERCENTAGE"
+_OCCUPANCY_HEADINGS = (
+    "MULTIFAMILY SAME STORE PORTFOLIO NOI CONTRIBUTION PERCENTAGE",
+    "NOI CONTRIBUTION PERCENTAGE BY MARKET",
+)
 _ROW = re.compile(r'^\s*- row "(.*)":\s*$', re.MULTILINE)
 _MARKET = re.compile(r"^(.+?)\s+(\d[\d,]*)\s+(.*)$")
 _PERIOD = re.compile(r"\bQ([1-4])\s+(20\d{2})\b")
 _NUMBER = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
+_STATE_MARKET = re.compile(r"^.+,\s+(?:[A-Z]{2}|D\.C\.)(?:[/-][A-Z]{2})?$")
+_UNSUFFIXED_MARKETS = frozenset({"Northern Virginia"})
 
 
 @dataclass(frozen=True)
@@ -47,6 +52,11 @@ class MAAParseResult:
 def _market_id(name: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
     return f"maa-{slug}"
+
+
+def _is_market_name(name: str) -> bool:
+    """Reject date/header rows before numeric shape can make them observations."""
+    return bool(_STATE_MARKET.fullmatch(name) or name in _UNSUFFIXED_MARKETS)
 
 
 def _section(snapshot: str, start: str, end: str | None) -> str:
@@ -140,7 +150,7 @@ def parse_maa_accessibility_snapshot(snapshot: str, *, filing_url: str, filing_d
         if not match:
             continue
         market, units_text, rest = match.groups()
-        if market.startswith(("Total ", "Other", "Units ")):
+        if market.startswith(("Total ", "Other", "Units ")) or not _is_market_name(market):
             continue
         values = [Decimal(units_text.replace(",", "")), *_numbers(rest)]
         if len(values) < 13:
@@ -159,20 +169,26 @@ def parse_maa_accessibility_snapshot(snapshot: str, *, filing_url: str, filing_d
                             verification_status=verification_status)
             rows.append(normalize_cre_record(raw, row_number=len(rows) + 1))
 
-    occupancy = _section(snapshot, _OCCUPANCY_HEADING, qoq_heading)
+    occupancy_heading = _first_heading(snapshot, _OCCUPANCY_HEADINGS)
+    occupancy = _section(snapshot, occupancy_heading, qoq_heading)
     occupancy_rows: list[dict] = []
     for row_text in _ROW.findall(occupancy):
         match = _MARKET.match(row_text)
         if not match:
             continue
         market, units_text, rest = match.groups()
-        if market.startswith(("Total ", "Other", "Units ", "Apartment Units ")):
+        if market.startswith(("Total ", "Other", "Units ", "Apartment Units ")) or not _is_market_name(market):
             continue
         values = [Decimal(units_text.replace(",", "")), *_numbers(rest)]
         if len(values) < 4:
             continue
+        # After apartment units and NOI contribution, the first percentage is
+        # current-quarter physical occupancy. Later columns may be prior-year,
+        # YTD-current and YTD-prior occupancy; selecting from the end silently
+        # substituted YTD for Q2-Q4 filings.
+        current_quarter_occupancy = values[2]
         raw = _base_row(market=market, period=period, filing_url=filing_url, filing_date=filing_date,
-                        retrieved_at=retrieved_at, metric="occupancy_rate", value=values[-2] / Decimal("100"),
+                        retrieved_at=retrieved_at, metric="occupancy_rate", value=current_quarter_occupancy / Decimal("100"),
                         unit="decimal_fraction", methodology="physical_occupancy", sample_count=int(values[0]),
                         evidence=f"same-store-occupancy:{_market_id(market)}",
                         verification_status=verification_status)

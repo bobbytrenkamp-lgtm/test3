@@ -32,6 +32,7 @@ test3-data cre-series-quality --property-type multifamily --metric rent_growth_y
 test3-data discover-cre-reports
 test3-data parse-maa-sec-snapshots --input-folder data/cre_reports/sec/maa/browser_snapshots --output data/cre_reports/maa_sec_review.csv
 test3-data publish-maa-sec-candidates --input data/cre_reports/maa_sec_review.csv --version <immutable-version>
+test3-data prepare-cre-review --input data/cre_reports/maa_sec_review.csv --output data/cre_reports/maa_sec_review_packet.json
 test3-data approve-cre-review --input data/cre_reports/maa_sec_review.csv --attestation data/cre_reports/maa_attestation.json --output data/cre_reports/maa_sec_approved.csv
 test3-data import-cre-bulk --input-folder data/authorized_market_history --dataset-prefix authorized-history --version-prefix 2026q2 --mapping <mapping.json> --analyst-reviewed
 test3-research target-readiness --data-root data
@@ -43,7 +44,7 @@ test3-research build-target-panel --data-root data --property-type multifamily -
 
 Target-panel publication additionally excludes unresolved source conflicts, methodology conflicts and multiple source candidates for the same market-period. An analyst must resolve the controlling source explicitly; Test3 never averages or silently chooses those records.
 
-Saved import mappings require an exact input-column match before reuse. They are content-hashed and stored locally under `data/warehouse/manifests/cre_import_mappings/`. Market definitions are also content-hashed and versioned locally; weighted constituent counties must total one. If market definitions exist, an imported market that lacks a governed definition is not model-eligible.
+Saved import mappings require an exact input-column match before reuse. They are content-hashed and stored locally under `data/warehouse/manifests/cre_import_mappings/`. Market definitions are also content-hashed and versioned locally; weighted constituent counties must total one. If market definitions exist, an imported market that lacks a governed definition is not model-eligible. Target-panel construction selects the one property-type-specific definition effective at the target period end and aggregates the latest immutable county feature panel with those exact weights. A missing constituent county makes the feature period unavailable; Test3 never reweights the surviving counties or fills the gap with zero. The selected definition hash is embedded in every joined row and the target-panel identity.
 
 Reviewed document candidates retain document SHA-256, page, table, row, column, original label, and original value. Candidate packages cannot approve themselves. An analyst must select observations and record a rationale before the canonical import/verification path can consider them.
 
@@ -53,12 +54,12 @@ Recurring extracted tables support exact versioned label profiles. Schema drift 
 
 ## Current data limitations
 
-Analyst approval is a separate, hash-bound operation. The attestation names the analyst, exact input SHA-256, approved markets/metrics/periods, rationale, and four required acknowledgements covering source evidence, methodology, market definitions, and rights. Approval creates a new file and attestation sidecar; neither may overwrite an existing artifact. This prevents a changed review file from inheriting an earlier approval.
+Analyst approval is a separate, hash-bound operation. `prepare-cre-review` creates an immutable, explicitly non-authoritative inventory plus a blank attestation template; it never approves a row. The analyst must complete the template with their identity, approved scope, rationale, timezone-aware signature time, and four acknowledgements covering source evidence, methodology, market definitions, and rights. `approve-cre-review` creates a new file and attestation sidecar; neither may overwrite an existing artifact. This prevents a changed review file from inheriting an earlier approval.
 
 Immutable dataset vintages remain available for revision analysis, but readiness, coverage, the Research Lab, and target-panel construction use only the newest verification report for each dataset. Older and corrected vintages are never summed together. `cre-series-quality` exposes coverage, missing/duplicate periods, methodology and unit consistency, release-date coverage, analyst-verification rate, model-eligibility rate, and underlying findings for every active source-market series.
 
 The repository contains no copyrighted brokerage history and no production target bytes. The ignored local warehouse can contain public SEC-filed numeric observations and authorized analyst files.
 
-The first installed local series is MAA's quarterly SEC supplemental schedule. The source-specific deterministic parser reads browser-visible same-store market rows, retains exact exhibit URLs and filing dates, and extracts source-reported effective rent and YoY growth. Physical occupancy is extracted where the schedule exposes the governed table, and vacancy is derived exactly as `1 - occupancy`. A 2026-Q2 heading change is supported as explicit schema drift. Source markets remain MAA-defined portfolios rather than inferred CBSAs.
+The first installed local series is MAA's quarterly SEC supplemental schedule. The source-specific deterministic parser reads browser-visible same-store market rows, retains exact exhibit URLs and filing dates, and extracts source-reported effective rent and YoY growth. Physical occupancy is extracted across both the 2019–2021 `NOI CONTRIBUTION PERCENTAGE BY MARKET` layout and the later portfolio heading, and vacancy is derived exactly as `1 - occupancy`. For multi-period Q2–Q4 tables, the parser selects the disclosed current-quarter occupancy—not the separate YTD column. A 2026-Q2 rent-table heading change is supported as explicit schema drift. Source markets remain MAA-defined portfolios rather than inferred CBSAs.
 
 Parsing and publication never approve rows. `publish-maa-sec-candidates` intentionally publishes unverified evidence with `source_id=sec_maa`; an analyst must review the local CSV and source snapshots before a separate immutable approved version can become model-eligible. No forecasting model may be described as validated until legitimate historical targets are approved, feature-compatible, and tested out of sample.

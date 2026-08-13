@@ -9,6 +9,7 @@ from pathlib import Path
 import duckdb
 
 from test3.cre_data.importer import import_cre_csv
+from test3.cre_data.geography import MarketDefinition, save_market_definition
 from test3.features.manifests import FEATURE_MANIFEST_VERSION, feature_file_entry, write_feature_manifest
 from test3.research.target_panel import (_eligible_rows_from_reports, ReadinessPolicy,
                                          build_target_panel, target_readiness)
@@ -39,15 +40,16 @@ def _row(market, cbsa, period, value):
             "notes": "Fictional synthetic test; never production eligible."}
 
 
-def _feature_panel(paths, rows):
-    directory = paths.contained(Path("features/cbsa_quarter/version=fixture-v1")); directory.mkdir(parents=True)
+def _feature_panel(paths, rows, geography="cbsa"):
+    table = f"{geography}_quarter"
+    directory = paths.contained(Path(f"features/{table}/version=fixture-v1")); directory.mkdir(parents=True)
     panel = directory / "panel.parquet"
     with duckdb.connect(":memory:") as connection:
         connection.execute("CREATE TABLE feature(geography_type VARCHAR,geography_id VARCHAR,state_fips VARCHAR,county_fips VARCHAR,cbsa VARCHAR,period_start DATE,year INTEGER,quarter INTEGER,population_growth_yoy DOUBLE,population_growth_yoy__available_at DATE)")
         connection.executemany("INSERT INTO feature VALUES(?,?,?,?,?,?,?,?,?,?)", rows)
         connection.execute("COPY feature TO ? (FORMAT PARQUET)", [str(panel)])
     write_feature_manifest(directory / "feature_manifest.json", {
-        "manifest_version": FEATURE_MANIFEST_VERSION, "feature_table_version": "fixture-v1", "table_name": "cbsa_quarter",
+        "manifest_version": FEATURE_MANIFEST_VERSION, "feature_table_version": "fixture-v1", "table_name": table,
         "created_at": "2026-08-09T00:00:00+00:00", "features": ["population_growth_yoy"],
         "availability_columns": ["population_growth_yoy__available_at"], "input_manifest_hashes": ["source-manifest-1"],
         "files": [feature_file_entry(panel)], "quality": {"panel_rows": len(rows), "feature_values": len(rows)},
@@ -105,6 +107,52 @@ class TargetPanelTests(unittest.TestCase):
              "observations": rows}], "multifamily", "rent_growth_yoy")
         self.assertEqual(eligible, [])
         self.assertEqual(exclusions["longitudinal_methodology_change"], 2)
+
+    def test_analyst_market_definition_aggregates_complete_county_features(self):
+        with tempfile.TemporaryDirectory() as root:
+            paths = WarehousePaths.from_data_root(root)
+            save_market_definition(paths, MarketDefinition(
+                "market-a", "Market A", "multifamily", "Analyst-reviewed fictional boundary",
+                "2020-01-01", None,
+                ({"county_fips": "37001", "weight": ".25"},
+                 {"county_fips": "37003", "weight": ".75"}),
+            ))
+            target = {**_row("Market A", "", "2024-Q1", ".03"), "geography_id": "market-a"}
+            import_cre_csv(paths, _csv([target]), dataset_id="fictional_targets", source_version="v1",
+                           evaluated_at="2026-08-09", analyst_review_confirmed=True)
+            _feature_panel(paths, [
+                ("county", "37001", "37", "37001", None, "2024-01-01", 2024, 1, .01, "2024-03-15"),
+                ("county", "37003", "37", "37003", None, "2024-01-01", 2024, 1, .03, "2024-03-20"),
+            ], geography="county")
+            result = build_target_panel(paths, property_type="multifamily", target="rent_growth_yoy")
+            with duckdb.connect(":memory:") as connection:
+                row = connection.execute(
+                    "SELECT feature_geography_type, population_growth_yoy, "
+                    "population_growth_yoy__available_at, market_definition_hash FROM read_parquet(?)",
+                    [str(result.panel_path)],
+                ).fetchone()
+            self.assertEqual(row[0], "market_weighted_counties")
+            self.assertAlmostEqual(row[1], .025)
+            self.assertEqual(str(row[2]), "2024-03-20")
+            self.assertRegex(row[3], r"^[0-9a-f]{64}$")
+
+    def test_market_aggregation_never_reweights_around_missing_counties(self):
+        with tempfile.TemporaryDirectory() as root:
+            paths = WarehousePaths.from_data_root(root)
+            save_market_definition(paths, MarketDefinition(
+                "market-a", "Market A", "multifamily", "Analyst-reviewed fictional boundary",
+                "2020-01-01", None,
+                ({"county_fips": "37001", "weight": ".5"},
+                 {"county_fips": "37003", "weight": ".5"}),
+            ))
+            target = {**_row("Market A", "", "2024-Q1", ".03"), "geography_id": "market-a"}
+            import_cre_csv(paths, _csv([target]), dataset_id="fictional_targets", source_version="v1",
+                           evaluated_at="2026-08-09", analyst_review_confirmed=True)
+            _feature_panel(paths, [
+                ("county", "37001", "37", "37001", None, "2024-01-01", 2024, 1, .01, "2024-03-15"),
+            ], geography="county")
+            with self.assertRaisesRegex(ValueError, "no model-eligible target rows matched"):
+                build_target_panel(paths, property_type="multifamily", target="rent_growth_yoy")
 
 
 if __name__ == "__main__":

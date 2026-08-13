@@ -35,6 +35,10 @@ class Milestone5FTests(unittest.TestCase):
         classes = {row["source_id"]: row["classification"] for row in catalog}
         self.assertEqual(classes["freddie_aimi"], "market_proxy")
         self.assertEqual(classes["zillow_zori"], "market_proxy")
+        avb = next(row for row in catalog if row["source_id"] == "sec_avb_same_store")
+        self.assertEqual(avb["classification"], "institutional_target")
+        self.assertTrue(avb["automation_permitted"])
+        self.assertIn("distinct", avb["license_notes"])
         self.assertTrue(all("paid" not in row["access"].lower() for row in catalog))
 
     def test_report_inbox_hashes_groups_and_finds_missing_quarter(self):

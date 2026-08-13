@@ -28,6 +28,8 @@ def _slug(value: str) -> str:
     result = re.sub(r"[^a-z0-9._-]+", "-", value.lower()).strip("-.")
     if not result:
         raise ValueError("dataset and version identifiers must contain safe characters")
+    if len(result) > 64:
+        raise ValueError("dataset and version identifiers must not exceed 64 normalized characters")
     return result
 
 

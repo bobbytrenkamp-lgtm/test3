@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 from io import StringIO
 import json
+from pathlib import Path
 import tempfile
 import unittest
 
@@ -38,6 +39,14 @@ def row(**changes):
 
 
 class CREDataTests(unittest.TestCase):
+    def test_path_identifiers_are_bounded_before_version_publication(self):
+        with tempfile.TemporaryDirectory() as root:
+            paths = WarehousePaths.from_data_root(root)
+            with self.assertRaisesRegex(ValueError, "64 normalized characters"):
+                import_cre_csv(paths, cre_csv([row()]), dataset_id="fictional_cre_history",
+                               source_version="v" * 65)
+            self.assertFalse(paths.contained(Path("verification/cre/dataset=fictional_cre_history")).exists())
+
     def test_property_specific_metrics_units_and_impossible_values_fail(self):
         valid, errors, metadata = parse_cre_csv(cre_csv([row()]))
         self.assertEqual((len(valid), len(errors), metadata["valid_rows"]), (1, 0, 1))

@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from decimal import Decimal
 
 from .schema import parse_cre_file
 
@@ -17,6 +18,88 @@ REQUIRED_ACKNOWLEDGEMENTS = (
     "market_definitions_reviewed",
     "rights_confirmed",
 )
+
+
+def prepare_cre_review(input_path: str | Path, output_path: str | Path) -> dict:
+    """Create an immutable, non-authoritative review inventory and blank attestation."""
+    source, output = Path(input_path), Path(output_path)
+    if output.exists():
+        raise FileExistsError("CRE review packets are immutable")
+    if source.suffix.lower() != ".csv" or not source.is_file():
+        raise ValueError("CRE review packet preparation requires an existing CSV")
+    parsed, errors, _ = parse_cre_file(source.read_bytes(), suffix=".csv")
+    if errors or not parsed:
+        raise ValueError("CRE review input must contain only structurally valid observations")
+    by_observation_id = {row["observation_id"]: row for row in parsed}
+
+    def evidence_documents(row: dict) -> set[str]:
+        reference = row["source_identifier"]
+        visited = set()
+        while reference.startswith("derived:"):
+            parent_id = reference.removeprefix("derived:")
+            if parent_id in visited:
+                break
+            if parent_id not in by_observation_id:
+                # Imported derived identifiers may refer to the pre-serialization
+                # candidate ID. Recover evidence conservatively from same-source,
+                # same-market, same-period base observations instead of counting
+                # an internal derivation as a document.
+                peers = {peer["source_identifier"].split("#", 1)[0] for peer in parsed
+                         if not peer["source_identifier"].startswith("derived:")
+                         and peer["source_name"] == row["source_name"]
+                         and peer["geography_id"] == row["geography_id"]
+                         and peer["period"] == row["period"]}
+                return peers or {reference}
+            visited.add(parent_id)
+            reference = by_observation_id[parent_id]["source_identifier"]
+        return {reference.split("#", 1)[0]}
+
+    groups: dict[tuple[str, str], list[dict]] = {}
+    for row in parsed:
+        groups.setdefault((row["geography_id"], row["metric"]), []).append(row)
+    series = []
+    for (market, metric), rows in sorted(groups.items()):
+        values = [Decimal(row["value"]) for row in rows]
+        periods = {row["period"] for row in rows}
+        series.append({
+            "market": market, "metric": metric, "observations": len(rows),
+            "periods": len(periods), "earliest_period": min(periods), "latest_period": max(periods),
+            "minimum_value": format(min(values), "f"), "maximum_value": format(max(values), "f"),
+            "units": sorted({row["unit"] for row in rows}),
+            "methodologies": sorted({row["methodology"] for row in rows}),
+            "evidence_documents": len(set().union(*(evidence_documents(row) for row in rows))),
+        })
+    input_hash = _sha256(source)
+    payload = {
+        "schema_version": "test3-cre-review-packet/1.0.0",
+        "authoritative": False,
+        "input_file": source.name,
+        "input_sha256": input_hash,
+        "observations": len(parsed),
+        "markets": len({row["geography_id"] for row in parsed}),
+        "metrics": sorted({row["metric"] for row in parsed}),
+        "periods": sorted({row["period"] for row in parsed}),
+        "source_names": sorted({row["source_name"] for row in parsed}),
+        "evidence_documents": len(set().union(*(evidence_documents(row) for row in parsed))),
+        "series": series,
+        "attestation_template": {
+            "schema_version": ATTESTATION_SCHEMA,
+            "analyst_identity": "", "signed_at": "", "rationale": "",
+            "input_sha256": input_hash,
+            "approved_markets": [], "approved_metrics": [],
+            "period_from": min(row["period"] for row in parsed),
+            "period_to": max(row["period"] for row in parsed),
+            "acknowledgements": {name: False for name in REQUIRED_ACKNOWLEDGEMENTS},
+        },
+    }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_suffix(output.suffix + ".tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(temporary, output)
+    return {"review_packet": str(output), "input_sha256": input_hash,
+            "observations": len(parsed), "markets": payload["markets"],
+            "metrics": payload["metrics"], "evidence_documents": payload["evidence_documents"],
+            "authoritative": False}
 
 
 def _sha256(path: Path) -> str:

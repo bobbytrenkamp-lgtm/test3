@@ -7,7 +7,7 @@ import unittest
 from test3.cre_data.sources.catalog import CRE_TARGET_SOURCES
 from test3.cre_data.sources.sec_maa import parse_maa_accessibility_snapshot
 from test3.cre_data.sources.sec_maa import SNAPSHOT_SCHEMA, write_review_csv
-from test3.cre_data.review import ATTESTATION_SCHEMA, approve_cre_review
+from test3.cre_data.review import ATTESTATION_SCHEMA, approve_cre_review, prepare_cre_review
 from test3.cre_data.schema import parse_cre_file
 from test3.cre_data.verification import verify_observations
 
@@ -52,6 +52,20 @@ class Milestone6Tests(unittest.TestCase):
         )
         self.assertEqual(result.rent_growth_rows, 1)
 
+    def test_maa_parser_accepts_legacy_occupancy_heading_and_uses_current_quarter(self):
+        snapshot = FIXTURE.read_text(encoding="utf-8").replace(
+            "MULTIFAMILY SAME STORE PORTFOLIO NOI CONTRIBUTION PERCENTAGE",
+            "NOI CONTRIBUTION PERCENTAGE BY MARKET",
+        )
+        result = parse_maa_accessibility_snapshot(
+            snapshot,
+            filing_url="https://www.sec.gov/Archives/edgar/data/912595/fictional/maa-ex99_2.htm",
+            filing_date="2025-07-30",
+        )
+        values = {row["metric"]: row["value"] for row in result.observations}
+        self.assertEqual(values["occupancy_rate"], "0.955")
+        self.assertEqual(values["vacancy_rate"], "0.045")
+
     def test_maa_parser_fails_when_reported_growth_disagrees_with_rent_levels(self):
         snapshot = FIXTURE.read_text(encoding="utf-8").replace("1,450 3.4 %", "1,450 9.9 %")
         with self.assertRaisesRegex(ValueError, "rent-growth cross-check failed"):
@@ -75,6 +89,16 @@ class Milestone6Tests(unittest.TestCase):
                 "retrieved_at": "2026-08-09T12:00:00+00:00",
             }), encoding="utf-8")
             review = folder / "review.csv"; write_review_csv(folder, review)
+            packet_path = folder / "review-packet.json"
+            packet = prepare_cre_review(review, packet_path)
+            self.assertFalse(packet["authoritative"])
+            self.assertEqual((packet["observations"], packet["markets"]), (4, 1))
+            self.assertEqual(packet["evidence_documents"], 1)
+            packet_payload = json.loads(packet_path.read_text(encoding="utf-8"))
+            self.assertEqual(packet_payload["attestation_template"]["approved_markets"], [])
+            self.assertTrue(all(value is False for value in packet_payload["attestation_template"]["acknowledgements"].values()))
+            with self.assertRaises(FileExistsError):
+                prepare_cre_review(review, packet_path)
             attestation = folder / "attestation.json"
             attestation.write_text(json.dumps({
                 "schema_version": ATTESTATION_SCHEMA,

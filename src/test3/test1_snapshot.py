@@ -23,6 +23,7 @@ DATASETS = {
 
 
 class Test1SnapshotError(ValueError):
+    __test__ = False
     pass
 
 

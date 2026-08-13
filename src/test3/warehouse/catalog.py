@@ -58,6 +58,17 @@ SOURCE_CATALOG = {
                    "Deterministic source-specific table parser; analyst approval required before model eligibility.",
                    ("Source-defined MAA portfolio markets are not CBSAs.",
                     "Same-store composition and market definitions require longitudinal compatibility review.")),
+        SourceSpec("sec_avb", "AvalonBay Communities via SEC EDGAR",
+                   "Quarterly supplemental data schedules",
+                   ("average_monthly_revenue_per_occupied_home", "average_monthly_revenue_growth_yoy",
+                    "economic_occupancy_rate", "revenue_growth_yoy", "inventory"),
+                   ("market",), ("quarterly",), None, "quarterly",
+                   "Public SEC-filed numeric facts used for local analysis; filing text is not redistributed.",
+                   "sec_fair_access_or_browser_visible_local_exhibit", False, False, False, False, False,
+                   "Deterministic source-specific Attachment 4 parser; analyst approval required before model eligibility.",
+                   ("Source-defined AVB portfolio markets are not CBSAs.",
+                    "Revenue per occupied home is not silently relabeled MAA effective rent.",
+                    "Economic occupancy is not physical occupancy.")),
     )
 }
 

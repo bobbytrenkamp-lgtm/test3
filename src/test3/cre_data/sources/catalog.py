@@ -6,6 +6,17 @@ from .spec import CRETargetSourceSpec
 
 
 CRE_TARGET_SOURCES = {
+    "sec_avb_same_store": CRETargetSourceSpec(
+        "sec_avb_same_store", "AvalonBay SEC quarterly supplemental schedules", "public_company_filing",
+        "institutional_target", ("multifamily",),
+        ("average_monthly_revenue_per_occupied_home", "average_monthly_revenue_growth_yoy",
+         "occupancy_rate", "economic_vacancy_rate", "revenue_growth_yoy", "inventory"),
+        ("market",), ("quarterly",), "Quarterly exhibits; filing-specific history",
+        "sec_fair_access", "https://www.sec.gov/edgar/sec-api-documentation", False, False, True, "no",
+        "Cite issuer, accession, exhibit 99.2, filing date, attachment, market row, and retrieval date.",
+        "Public SEC-filed numeric facts retained locally. AVB revenue-per-occupied-home and economic occupancy "
+        "remain distinct from MAA effective rent and physical occupancy. Human review is mandatory.",
+        "high", "approved"),
     "sec_maa_same_store": CRETargetSourceSpec(
         "sec_maa_same_store", "MAA SEC quarterly supplemental schedules", "public_company_filing",
         "institutional_target", ("multifamily",),

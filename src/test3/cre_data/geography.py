@@ -32,7 +32,7 @@ class MarketDefinition:
             raise ValueError("market definition effective_to precedes effective_from")
         if not self.source_definition.strip() or not self.counties:
             raise ValueError("market definition requires source evidence and counties")
-        if self.review_status not in {"draft", "analyst_approved", "rejected"}:
+        if self.review_status not in {"draft", "candidate_review_required", "analyst_approved", "rejected"}:
             raise ValueError("invalid market definition review status")
         if self.review_status == "analyst_approved" and not all((
             (self.source_market_name or "").strip(), self.definition_version.strip(),

@@ -30,7 +30,9 @@ from test3.cre_data.report_inbox import save_report_discovery
 from test3.cre_data.report_tables import ReportMappingProfile, save_report_profile
 from test3.cre_data.verification import available_as_of, verify_observations
 from test3.cre_data.sources.sec_maa import write_review_csv
+from test3.cre_data.sources.sec_avb import write_avb_review_csv
 from test3.cre_data.review import approve_cre_review, prepare_cre_review
+from test3.cre_data.maa_governance import prepare_maa_rent_growth_review, approve_maa_rent_growth_review
 
 
 PUBLIC_SOURCES = ("census", "bls", "bea", "fred", "building_permits", "crosswalk", "hud", "hvs")
@@ -88,11 +90,26 @@ def _parser():
     maa.add_argument("--input-folder", required=True); maa.add_argument("--output", required=True)
     publish_maa = commands.add_parser("publish-maa-sec-candidates", help="publish unverified MAA SEC observations for analyst review")
     publish_maa.add_argument("--input", required=True); publish_maa.add_argument("--version", required=True)
+    avb = commands.add_parser("parse-avb-sec-exhibit", help="parse a lawfully obtained official AVB SEC Attachment 4 into review candidates")
+    avb.add_argument("--input", required=True); avb.add_argument("--output", required=True)
+    avb.add_argument("--filing-url", required=True); avb.add_argument("--filing-date", required=True)
+    publish_avb = commands.add_parser("publish-avb-sec-candidates", help="publish unverified AVB SEC observations for analyst review")
+    publish_avb.add_argument("--input", required=True); publish_avb.add_argument("--version", required=True)
     approve_review = commands.add_parser("approve-cre-review", help="create a hash-bound analyst-approved CRE review file")
     approve_review.add_argument("--input", required=True); approve_review.add_argument("--attestation", required=True)
     approve_review.add_argument("--output", required=True)
     prepare_review = commands.add_parser("prepare-cre-review", help="inventory a CRE review file and create an unsigned attestation template")
     prepare_review.add_argument("--input", required=True); prepare_review.add_argument("--output", required=True)
+    prepare_maa_review = commands.add_parser("prepare-maa-rent-growth-review", help="create an exception-first MAA review packet")
+    prepare_maa_review.add_argument("--input", required=True); prepare_maa_review.add_argument("--output", required=True)
+    approve_maa_review = commands.add_parser("approve-maa-rent-growth-review", help="apply a completed human MAA attestation")
+    approve_maa_review.add_argument("--input", required=True); approve_maa_review.add_argument("--packet", required=True)
+    approve_maa_review.add_argument("--attestation", required=True); approve_maa_review.add_argument("--output", required=True)
+    prepare_avb_review = commands.add_parser("prepare-avb-review", help="create an exception-first AVB review packet")
+    prepare_avb_review.add_argument("--input", required=True); prepare_avb_review.add_argument("--output", required=True)
+    approve_avb_review = commands.add_parser("approve-avb-review", help="apply a completed human AVB attestation")
+    approve_avb_review.add_argument("--input", required=True); approve_avb_review.add_argument("--packet", required=True)
+    approve_avb_review.add_argument("--attestation", required=True); approve_avb_review.add_argument("--output", required=True)
     bulk = commands.add_parser("import-cre-bulk", help="import multiple authorized CRE history files independently")
     bulk.add_argument("--input-folder", required=True); bulk.add_argument("--dataset-prefix", required=True)
     bulk.add_argument("--version-prefix", required=True); bulk.add_argument("--mapping")
@@ -145,10 +162,43 @@ def main(argv=None):
                                         dataset_id="sec-maa-same-store-market-quarter",
                                         source_version=args.version, source_id="sec_maa",
                                         analyst_review_confirmed=False))
+    elif args.command == "parse-avb-sec-exhibit":
+        output = write_avb_review_csv(args.input, args.output, filing_url=args.filing_url,
+                                      filing_date=args.filing_date)
+    elif args.command == "publish-avb-sec-candidates":
+        source = Path(args.input)
+        output = asdict(import_cre_file(paths, source.read_bytes(), suffix=source.suffix,
+                                        dataset_id="sec-avb-same-store-market-quarter",
+                                        source_version=args.version, source_id="sec_avb",
+                                        analyst_review_confirmed=False))
     elif args.command == "approve-cre-review":
         output = approve_cre_review(args.input, args.attestation, args.output)
     elif args.command == "prepare-cre-review":
         output = prepare_cre_review(args.input, args.output)
+    elif args.command == "prepare-maa-rent-growth-review":
+        output = prepare_maa_rent_growth_review(args.input, args.output)
+    elif args.command == "approve-maa-rent-growth-review":
+        approval = approve_maa_rent_growth_review(args.input, args.packet, args.attestation, args.output)
+        approved_file = Path(args.output)
+        published = import_cre_file(
+            paths, approved_file.read_bytes(), suffix=".csv", dataset_id="sec-maa-approved-rent-growth",
+            source_version=f"approved-{approval['output_sha256'][:16]}", source_id="sec_maa",
+            analyst_review_confirmed=True,
+        )
+        output = {**approval, "warehouse_version": asdict(published)}
+    elif args.command == "prepare-avb-review":
+        output = prepare_maa_rent_growth_review(
+            args.input, args.output, approved_metric="average_monthly_revenue_growth_yoy",
+            approved_source="AVB SEC supplemental")
+    elif args.command == "approve-avb-review":
+        approval = approve_maa_rent_growth_review(args.input, args.packet, args.attestation, args.output)
+        approved_file = Path(args.output)
+        published = import_cre_file(
+            paths, approved_file.read_bytes(), suffix=".csv", dataset_id="sec-avb-approved-revenue-growth",
+            source_version=f"approved-{approval['output_sha256'][:16]}", source_id="sec_avb",
+            analyst_review_confirmed=True,
+        )
+        output = {**approval, "warehouse_version": asdict(published)}
     elif args.command == "import-cre-bulk":
         folder = Path(args.input_folder).resolve()
         if not folder.is_dir(): raise ValueError("bulk import folder does not exist")

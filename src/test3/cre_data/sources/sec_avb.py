@@ -17,6 +17,26 @@ SOURCE_NAME = "AvalonBay Communities SEC quarterly supplemental"
 SOURCE_DATASET = "sec_avb_same_store_market_quarter"
 SOURCE_CLASS = "public_company_filing"
 SCHEMA_VERSION = "avb-attachment-4/2026.2"
+# These issuer-reported regions overlap displayed child markets and therefore
+# cannot enter a cross-market panel alongside their components.
+OVERLAPPING_ROLLUPS = {
+    "Metro NY/NJ": ("New York City", "New York City, NY", "New York - Suburban", "New York Suburban", "New Jersey"),
+    "Northern California": ("East Bay", "Oakland - East Bay, CA", "Oakland-East Bay, CA",
+                            "Oakland-East Bay", "Oakland/East Bay", "San Francisco", "San Francisco, CA",
+                            "San Jose", "San Jose, CA"),
+    "Southern California": ("Los Angeles", "Los Angeles, CA", "Orange County", "Orange County, CA",
+                            "San Diego", "San Diego, CA"),
+    "Mid-Atlantic": ("Washington Metro", "Northern Virginia", "Suburban Maryland", "Washington DC",
+                     "Washington, DC", "Baltimore", "Baltimore, MD"),
+}
+SOURCE_MARKET_ALIASES = {
+    "Oakland - East Bay, CA": "East Bay", "Oakland-East Bay, CA": "East Bay",
+    "Oakland-East Bay": "East Bay", "Oakland/East Bay": "East Bay",
+    "Los Angeles, CA": "Los Angeles", "Orange County, CA": "Orange County", "San Diego, CA": "San Diego",
+    "San Francisco, CA": "San Francisco", "San Jose, CA": "San Jose",
+    "New York City, NY": "New York City", "New York Suburban": "New York - Suburban",
+    "Baltimore": "Baltimore, MD", "Washington, DC": "Washington DC",
+}
 COMPATIBILITY = {
     "average_monthly_revenue_per_occupied_home": {
         "maa_metric": "effective_rent", "classification": "comparable_with_limitation",
@@ -125,7 +145,10 @@ def write_avb_series_review_csv(filings: list[dict], destination: str | Path) ->
         evidence.append({"path": source.name, "filing_url": result.filing_url,
                          "filing_date": result.filing_date, "period": result.period,
                          "source_sha256": hashlib.sha256(content).hexdigest(),
-                         "schema_version": result.schema_version})
+                         "schema_version": result.schema_version,
+                         "source_accession": result.observations[0].get("source_accession"),
+                         "release_date_evidence_status": result.observations[0].get(
+                             "release_date_evidence_status")})
     identities = [row["observation_id"] for row in observations]
     if len(identities) != len(set(identities)):
         raise ValueError("duplicate AVB observations across supplied filings")
@@ -194,6 +217,10 @@ def series_continuity_artifact(observations: list[dict], evidence: list[dict]) -
             "period_gaps": period_gaps, "markets_by_period": markets_by_period,
             "market_transitions": market_transitions, "schema_transitions": schema_transitions,
             "metric_periods": metric_periods,
+            "release_date_evidence": [{"period": row["period"],
+                                         "source_accession": row.get("source_accession"),
+                                         "status": row.get("release_date_evidence_status")}
+                                        for row in ordered_evidence],
             "homogeneous_methodology": not schema_transitions,
             "automatic_harmonization_permitted": False if schema_transitions else True}
     body["artifact_hash"] = hashlib.sha256(
@@ -223,11 +250,13 @@ def _number(value: str, *, reported_change: bool = False) -> Decimal:
 
 
 def _market_id(name: str) -> str:
-    return "avb-" + re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    canonical = SOURCE_MARKET_ALIASES.get(name, name)
+    return "avb-" + re.sub(r"[^a-z0-9]+", "-", canonical.lower()).strip("-")
 
 
 def _base(*, market, period, filing_url, filing_date, retrieved_at, metric, value, unit,
-          methodology, homes, evidence, schema_version):
+          methodology, homes, evidence, schema_version, geography_role, parent_market,
+          source_accession, release_date_evidence_status):
     return normalize_cre_record({
         "market": market, "geography_type": "market", "geography_id": _market_id(market),
         "period": period, "frequency": "quarterly", "property_type": "multifamily",
@@ -238,6 +267,10 @@ def _base(*, market, period, filing_url, filing_date, retrieved_at, metric, valu
         "licensing_notes": "Public SEC-filed numeric facts used for local research; filing text is not redistributed.",
         "redistribution_permitted": "no", "verification_status": "unverified", "source_class": SOURCE_CLASS,
         "sample_count": homes, "target_classification": "institutional_target",
+        "source_market_name": market, "canonical_source_market": SOURCE_MARKET_ALIASES.get(market, market),
+        "source_geography_role": geography_role, "source_parent_market": parent_market,
+        "source_accession": source_accession,
+        "release_date_evidence_status": release_date_evidence_status,
         "notes": ("Source-defined AVB same-store portfolio market, not a CBSA; analyst approval and governed "
                   f"geography required. Source schema: {schema_version}."),
     }, row_number=1)
@@ -248,6 +281,24 @@ def parse_avb_html(content: str, *, filing_url: str, filing_date: str,
     """Fail-closed parser for AVB Attachment 4 current-quarter versus prior-year rows."""
     if not filing_url.startswith("https://www.sec.gov/Archives/edgar/data/915912/"):
         raise ValueError("AVB evidence must be an official allowlisted SEC Archives filing")
+    accession_match = re.search(r"/Archives/edgar/data/915912/(\d{18})/", filing_url)
+    if not accession_match:
+        raise ValueError("AVB SEC filing URL must contain an issuer accession identifier")
+    source_accession = accession_match.group(1)
+    embedded_dates = re.findall(
+        r"(?:For Immediate (?:News )?Release\s*)?((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+20\d{2})",
+        content, flags=re.IGNORECASE,
+    )
+    parsed_embedded_dates = []
+    for value in embedded_dates:
+        try:
+            parsed_embedded_dates.append(datetime.strptime(value, "%B %d, %Y").date().isoformat())
+        except ValueError:
+            continue
+    if parsed_embedded_dates and filing_date not in parsed_embedded_dates:
+        raise ValueError("supplied AVB release date does not match embedded SEC evidence date")
+    release_date_evidence_status = ("embedded_release_date_verified" if parsed_embedded_dates
+                                    else "manifest_asserted_review_required")
     parser = _Tables(); parser.feed(content)
     candidates = []
     for table in parser.tables:
@@ -277,6 +328,7 @@ def parse_avb_html(content: str, *, filing_url: str, filing_date: str,
                       "avb-attachment-4/rental-revenue-cash-basis-v1" if rental_revenue_per_home else
                       "avb-attachment-4/rent-relief-adjusted-v1" if has_rent_relief_adjustment else
                       "avb-attachment-4/core-v1")
+    source_parent_by_child = {child: parent for parent, children in OVERLAPPING_ROLLUPS.items() for child in children}
     for raw_cells in table:
         cells = [cell for cell in raw_cells if cell not in {"", "$", "%"}]
         expected_cells = 12 if (has_rent_relief_adjustment or has_cash_basis_adjustment) else 11
@@ -320,11 +372,20 @@ def parse_avb_html(content: str, *, filing_url: str, filing_date: str,
             values.append(("revenue_growth_yoy_cash_basis", cash_basis_revenue_growth,
                            "decimal_fraction", "same_store_revenue_yoy_cash_basis"))
         for metric, value, unit, method in values:
+            geography_role = "overlapping_region_rollup" if market in OVERLAPPING_ROLLUPS else "leaf_or_standalone"
             output.append(_base(market=market, period=period, filing_url=filing_url, filing_date=filing_date,
                                 retrieved_at=retrieved_at, metric=metric, value=value, unit=unit,
                                 methodology=method, homes=homes, evidence=f"attachment-4:{_market_id(market)}:{metric}",
-                                schema_version=schema_version))
+                                schema_version=schema_version, geography_role=geography_role,
+                                parent_market=source_parent_by_child.get(market), source_accession=source_accession,
+                                release_date_evidence_status=release_date_evidence_status))
     if not output:
         raise AVBSchemaDriftError("REVIEW_REQUIRED_SCHEMA_DRIFT: no unambiguous AVB market rows")
+    inventory = {row["source_market_name"]: int(row["value"]) for row in output if row["metric"] == "inventory"}
+    for rollup, children in OVERLAPPING_ROLLUPS.items():
+        present = [name for name in children if name in inventory]
+        if rollup in inventory and present and sum(inventory[name] for name in present) != inventory[rollup]:
+            raise AVBSchemaDriftError(
+                f"REVIEW_REQUIRED_SCHEMA_DRIFT: {rollup} inventory does not reconcile to displayed components")
     return AVBParseResult(filing_url, filing_date, period,
                           len({row["geography_id"] for row in output}), tuple(output), schema_version)

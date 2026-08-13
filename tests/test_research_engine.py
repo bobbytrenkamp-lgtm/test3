@@ -92,8 +92,10 @@ class ResearchEngineTests(unittest.TestCase):
             prepare_panel(rows, target="rent_growth", features=("rent_growth",))
         future = [dict(row) for row in rows]
         future[0]["employment_growth__available_at"] = "2030"
-        with self.assertRaisesRegex(ValueError, "future leakage"):
-            prepare_panel(future, target="rent_growth", features=("employment_growth",))
+        delayed = prepare_panel(future, target="rent_growth", features=("employment_growth",))
+        result = walk_forward_validate(delayed, minimum_training_periods=5,
+                                       enforce_feature_availability=True)
+        self.assertGreater(result["excluded_unavailable_training_features"], 0)
         with self.assertRaisesRegex(ValueError, "duplicate"):
             prepare_panel([rows[0], rows[0]], target="rent_growth", features=("employment_growth",),
                           required_property_type="multifamily")
@@ -120,6 +122,23 @@ class ResearchEngineTests(unittest.TestCase):
         result = walk_forward_validate(panel, minimum_training_periods=5)
         self.assertTrue(result["target_availability_enforced"])
         self.assertGreater(result["excluded_unreleased_targets"], 0)
+
+    def test_forecast_origin_excludes_test_period_features_released_later(self):
+        rows = synthetic_panel(periods=12)
+        for row in rows:
+            year = int(row["period"])
+            row["employment_growth__available_at"] = f"{year}-06-30"
+            row["supply_growth__available_at"] = f"{year}-06-30"
+            row["rent_growth__available_at"] = f"{year + 1}-01-01"
+        panel = prepare_panel(rows, target="rent_growth", features=("employment_growth", "supply_growth"),
+                              required_property_type="multifamily")
+        result = walk_forward_validate(panel, minimum_training_periods=5,
+                                       enforce_feature_availability=True)
+        self.assertTrue(result["feature_availability_enforced"])
+        self.assertEqual(result["metrics"]["model"]["sample_size"], 0)
+        self.assertGreater(result["excluded_unavailable_prediction_features"], 0)
+        self.assertTrue(all(item["code"] == "feature_not_available_at_forecast_origin"
+                            for item in result["prediction_exclusions"]))
 
     def test_formal_forecast_rejects_unvalidated_model_and_uses_empirical_errors(self):
         candidate = {"governance": {"status": "candidate", "eligible_for_controlling_forecast": False}}

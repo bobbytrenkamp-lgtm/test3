@@ -21,21 +21,49 @@ def prediction_metrics(rows: list[dict]) -> dict:
 
 def walk_forward_validate(panel: PanelDataset, *, minimum_training_periods: int = 4,
                           entity_fixed_effects: bool = True, time_fixed_effects: bool = False,
-                          covariance: str = "cluster_entity") -> dict:
+                          covariance: str = "cluster_entity",
+                          enforce_feature_availability: bool = False) -> dict:
     periods = panel.periods
     if len(periods) <= minimum_training_periods:
         raise ValueError("insufficient periods for walk-forward validation")
     predictions = {name: [] for name in ("model", "last_observation", "entity_mean", "historical_median",
                                          "recent_3_year_mean", "peer_market_median", "simple_autoregressive")}
     excluded_unreleased_targets = 0
+    excluded_unavailable_training_features = 0
+    excluded_unavailable_prediction_features = 0
+    prediction_exclusions = []
     for test_period in periods[minimum_training_periods:]:
         forecast_origin = period_bounds(test_period)[0]
         historical_rows = [row for row in panel.rows if row[panel.time_column] < test_period]
         availability_column = panel.target + "__available_at"
         training_rows = [row for row in historical_rows if row.get(availability_column) is None or
-                         availability_date(row[availability_column]) < forecast_origin]
+                         availability_date(row[availability_column]) <= forecast_origin]
         excluded_unreleased_targets += len(historical_rows) - len(training_rows)
+        if enforce_feature_availability:
+            available_training = [row for row in training_rows if all(
+                row.get(feature + "__available_at") is not None and
+                availability_date(row[feature + "__available_at"]) <= forecast_origin
+                for feature in panel.features)]
+            excluded_unavailable_training_features += len(training_rows) - len(available_training)
+            training_rows = available_training
         test_rows = [row for row in panel.rows if row[panel.time_column] == test_period]
+        if enforce_feature_availability:
+            eligible_test_rows = []
+            for row in test_rows:
+                unavailable = [feature for feature in panel.features
+                               if row.get(feature + "__available_at") is None or
+                               availability_date(row[feature + "__available_at"]) > forecast_origin]
+                if unavailable:
+                    excluded_unavailable_prediction_features += 1
+                    prediction_exclusions.append({"entity": row[panel.entity_column], "period": test_period,
+                                                  "forecast_origin": forecast_origin.isoformat(),
+                                                  "code": "feature_not_available_at_forecast_origin",
+                                                  "features": unavailable})
+                else:
+                    eligible_test_rows.append(row)
+            test_rows = eligible_test_rows
+        if not training_rows or not test_rows:
+            continue
         training = prepare_panel(training_rows, target=panel.target, features=panel.features,
                                  entity_column=panel.entity_column, time_column=panel.time_column,
                                  property_type_column=None)
@@ -70,25 +98,41 @@ def walk_forward_validate(panel: PanelDataset, *, minimum_training_periods: int 
                                 ("simple_autoregressive", ar_intercept + ar_beta * history[-1])):
                 predictions[name].append({**common, "prediction": value})
     metrics = {name: prediction_metrics(rows) for name, rows in predictions.items()}
-    baseline_mae = min(value["mae"] for name, value in metrics.items() if name != "model" and value["mae"] is not None)
+    baseline_values = [value["mae"] for name, value in metrics.items()
+                       if name != "model" and value["mae"] is not None]
+    baseline_mae = min(baseline_values) if baseline_values else None
     model_mae = metrics["model"]["mae"]
     return {"method": "expanding_window", "minimum_training_periods": minimum_training_periods,
             "test_start": periods[minimum_training_periods], "test_end": periods[-1], "metrics": metrics,
-            "model_beats_best_baseline": model_mae is not None and model_mae < baseline_mae,
-            "mae_improvement": None if model_mae is None else baseline_mae - model_mae,
+            "model_beats_best_baseline": (model_mae is not None and baseline_mae is not None and
+                                           model_mae < baseline_mae),
+            "mae_improvement": (None if model_mae is None or baseline_mae is None else
+                                baseline_mae - model_mae),
             "predictions": predictions["model"], "look_ahead": False,
             "excluded_unreleased_targets": excluded_unreleased_targets,
             "target_availability_enforced": True,
+            "feature_availability_enforced": enforce_feature_availability,
+            "excluded_unavailable_training_features": excluded_unavailable_training_features,
+            "excluded_unavailable_prediction_features": excluded_unavailable_prediction_features,
+            "prediction_exclusions": prediction_exclusions,
             "warning": "Predictive validation only; it does not establish causality or guarantee future performance."}
 
 
-def market_holdout_validate(panel: PanelDataset, *, covariance: str = "hc1") -> dict:
+def market_holdout_validate(panel: PanelDataset, *, covariance: str = "hc1",
+                            enforce_feature_availability: bool = False) -> dict:
     if len(panel.entities) < 3:
         raise ValueError("market holdout validation requires at least three entities")
     predictions = []
     for entity in panel.entities:
         training_rows = [row for row in panel.rows if row[panel.entity_column] != entity]
         held_out = [row for row in panel.rows if row[panel.entity_column] == entity]
+        if enforce_feature_availability:
+            held_out = [row for row in held_out if all(
+                row.get(feature + "__available_at") is not None and
+                availability_date(row[feature + "__available_at"]) <= period_bounds(row[panel.time_column])[0]
+                for feature in panel.features)]
+        if not held_out:
+            continue
         training = prepare_panel(training_rows, target=panel.target, features=panel.features,
                                  entity_column=panel.entity_column, time_column=panel.time_column,
                                  property_type_column=None)
@@ -101,4 +145,5 @@ def market_holdout_validate(panel: PanelDataset, *, covariance: str = "hc1") -> 
             prior = row[panel.target]
     return {"method": "leave_one_market_out", "metrics": prediction_metrics(predictions), "markets": list(panel.entities),
             "predictions": predictions, "entity_fixed_effects": False, "time_fixed_effects": False,
+            "feature_availability_enforced": enforce_feature_availability,
             "warning": "Geographic generalization test; coefficients remain associational."}

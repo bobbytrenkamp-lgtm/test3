@@ -127,13 +127,10 @@ def prepare_panel(
         row.update({name: _number(source[name], name) for name in feature_names})
         if property_type_column:
             row[property_type_column] = property_type or None
-        _, period_end = period_bounds(period)
         for name in feature_names:
             available = source.get(name + availability_suffix)
             if available not in (None, ""):
                 available_on = availability_date(available)
-                if available_on > period_end:
-                    raise ValueError(f"future leakage: {name} was unavailable at {entity}/{period}")
                 row[name + availability_suffix] = available_on.isoformat()
         target_available = source.get(target + availability_suffix)
         if target_available not in (None, ""):

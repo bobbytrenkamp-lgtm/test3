@@ -15,6 +15,7 @@ import duckdb
 
 from test3.features.manifests import verify_feature_manifest
 from test3.features.panel import FeaturePanel
+from test3.features.registry import FEATURE_REGISTRY, registry_fingerprint
 from test3.cre_data.geography import market_definitions
 from test3.cre_data.metrics import CRE_METRICS
 from test3.cre_data.versions import verification_reports
@@ -24,7 +25,7 @@ from test3.warehouse.storage import WarehousePaths
 from test3.research.specifications import ModelSpecification
 
 
-TARGET_PANEL_VERSION = "1.0.0"
+TARGET_PANEL_VERSION = "1.1.0"
 SUPPORTED_FREQUENCIES = frozenset({"annual", "quarterly"})
 
 
@@ -69,6 +70,9 @@ def _eligible_rows_from_reports(reports: list[dict], property_type: str | None =
                 continue
             if set(row.get("verification_findings", [])) & MODEL_BLOCKING_FINDING_CODES:
                 exclusions["unresolved_quality_finding"] += 1
+                continue
+            if row.get("source_geography_role") == "overlapping_region_rollup":
+                exclusions["overlapping_source_geography_rollup"] += 1
                 continue
             if row.get("frequency") not in SUPPORTED_FREQUENCIES:
                 exclusions["unsupported_frequency"] += 1
@@ -165,7 +169,7 @@ def target_readiness(paths: WarehousePaths, *, policy: ReadinessPolicy = Readine
 
 
 def target_readiness_for_specification(paths: WarehousePaths, specification: ModelSpecification) -> dict:
-    """Report target readiness against one model's authoritative promotion minimums."""
+    """Report exact complete-case readiness for one authoritative model specification."""
     policy = ReadinessPolicy(
         minimum_markets=specification.minimum_markets,
         minimum_periods=specification.minimum_periods,
@@ -175,8 +179,76 @@ def target_readiness_for_specification(paths: WarehousePaths, specification: Mod
                if item["property_type"] == specification.property_type and item["target"] == specification.target]
     if not matches:
         raise ValueError("model specification target is not registered")
-    return {**matches[0], "model_specification": specification.name,
-            "model_specification_version": specification.version}
+    target_status = matches[0]
+    panel_root = paths.contained(Path("research") / "target_panels" / specification.property_type /
+                                 specification.target)
+    candidates = sorted(panel_root.glob("version=*/target_panel_manifest.json")) if panel_root.exists() else []
+    panel_report = {"panel_available": False, "complete_case_observations": 0,
+                    "complete_case_markets": 0, "complete_case_periods": 0,
+                    "markets_meeting_period_minimum": 0,
+                    "feature_missingness": {name: None for name in specification.features},
+                    "availability_exclusions": 0, "panel_manifest_hash": None}
+    if candidates:
+        manifests = []
+        for manifest_path in candidates:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if manifest.get("manifest_hash") != _manifest_hash(manifest):
+                raise ValueError(f"target-panel manifest integrity failure: {manifest_path}")
+            if manifest.get("frequency") == specification.frequency:
+                manifests.append((manifest.get("created_at", ""), manifest_path, manifest))
+        if manifests:
+            _, manifest_path, manifest = max(manifests)
+            panel_path = manifest_path.parent / "panel.parquet"
+            if not panel_path.is_file() or file_sha256(panel_path) != manifest.get("panel_sha256"):
+                raise ValueError("target-panel Parquet integrity failure")
+            required_columns = [specification.target, f"{specification.target}__available_at", "market_id", "period"]
+            required_columns.extend(specification.features)
+            required_columns.extend(f"{name}__available_at" for name in specification.features)
+            with duckdb.connect(":memory:") as connection:
+                result = connection.execute("SELECT * FROM read_parquet(?)", [str(panel_path)])
+                names = [item[0] for item in result.description]
+                missing_columns = sorted(set(required_columns) - set(names))
+                rows = [dict(zip(names, raw, strict=True)) for raw in result.fetchall()]
+            feature_missingness = {}
+            for feature in specification.features:
+                feature_missingness[feature] = (sum(row.get(feature) is None for row in rows) / len(rows)
+                                                if rows else None)
+            complete, unavailable = [], 0
+            if not missing_columns:
+                for row in rows:
+                    origin = date(int(row["period"][:4]), 1, 1) if specification.frequency == "annual" else date(
+                        int(row["period"][:4]), (int(row["period"][-1]) - 1) * 3 + 1, 1)
+                    if row.get(specification.target) is None or any(row.get(name) is None for name in specification.features):
+                        continue
+                    # The target is the future realized outcome being forecast; only
+                    # predictor availability is tested at that row's forecast origin.
+                    available = [row.get(f"{name}__available_at") for name in specification.features]
+                    if any(not value or date.fromisoformat(str(value)[:10]) > origin for value in available):
+                        unavailable += 1
+                        continue
+                    complete.append(row)
+            depths = Counter(row["market_id"] for row in complete)
+            panel_report = {"panel_available": True, "complete_case_observations": len(complete),
+                            "complete_case_markets": len(depths),
+                            "complete_case_periods": len({row["period"] for row in complete}),
+                            "markets_meeting_period_minimum": sum(value >= specification.minimum_periods
+                                                                   for value in depths.values()),
+                            "feature_missingness": feature_missingness,
+                            "availability_exclusions": unavailable,
+                            "missing_required_columns": missing_columns,
+                            "panel_manifest_hash": manifest["manifest_hash"]}
+    spec_ready = (panel_report["complete_case_observations"] >= specification.minimum_sample
+                  and panel_report["complete_case_markets"] >= specification.minimum_markets
+                  and panel_report["complete_case_periods"] >= specification.minimum_periods
+                  and panel_report["markets_meeting_period_minimum"] >= specification.minimum_markets)
+    reasons = list(target_status["reasons"])
+    if not panel_report["panel_available"]:
+        reasons.append("immutable target-feature panel is not available")
+    elif not spec_ready:
+        reasons.append("complete, forecast-origin-available specification rows do not satisfy governed minimums")
+    return {**target_status, **panel_report, "target_status": target_status["status"],
+            "status": "ready" if spec_ready else "not_ready", "reasons": reasons,
+            "model_specification": specification.name, "model_specification_version": specification.version}
 
 
 def _panel_period(value: object, frequency: str) -> str:
@@ -238,8 +310,18 @@ def _weighted_county_features(definition: dict, period: str, feature_names: set[
         values = [(row.get(name), weight) for row, weight in component_rows]
         # Missing county inputs remain missing; they are never zero-filled or
         # reweighted over the counties that happen to have data.
-        output[name] = (sum(float(value) * weight for value, weight in values)
-                        if values and all(value is not None for value, _ in values) else None)
+        aggregation = FEATURE_REGISTRY[name].market_aggregation
+        if not values or not all(value is not None for value, _ in values) or aggregation == "unsupported":
+            output[name] = None
+        elif aggregation == "portfolio_weighted_mean":
+            output[name] = sum(float(value) * weight for value, weight in values)
+        elif aggregation == "broadcast":
+            numeric = [float(value) for value, _ in values]
+            if max(numeric) - min(numeric) > 1e-12:
+                raise ValueError(f"broadcast feature {name} differs across county components")
+            output[name] = numeric[0]
+        else:  # FeatureSpec validation makes this an internal integrity failure.
+            raise ValueError(f"unsupported governed market aggregation for {name}: {aggregation}")
         availability = [row.get(name + "__available_at") for row, _ in component_rows]
         output[name + "__available_at"] = (max(availability)
                                              if availability and all(value is not None for value in availability)
@@ -356,6 +438,7 @@ def build_target_panel(paths: WarehousePaths, *, property_type: str, target: str
         "source_manifest_hashes": sorted(source_hashes), "feature_table_hashes": sorted(feature_hashes),
         "market_definition_hashes": sorted({row["market_definition_hash"] for row in joined
                                              if row.get("market_definition_hash")}),
+        "feature_registry_hash": registry_fingerprint(),
         "rows_hash": hashlib.sha256(canonical_json(joined).encode()).hexdigest(),
     }
     version = hashlib.sha256(canonical_json(identity).encode()).hexdigest()[:24]

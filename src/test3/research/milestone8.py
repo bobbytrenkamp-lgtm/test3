@@ -46,11 +46,14 @@ def milestone8_status(paths: WarehousePaths, *, include_milestone7_detail: bool 
     for company in ("MAA", "AVB"):
         if not by_source[company]["approved_observations"]: blockers.append(f"AWAITING_{company}_ANALYST_ATTESTATION")
         if not by_source[company]["governed_market_definitions"]: blockers.append(f"AWAITING_{company}_MARKET_DEFINITION_APPROVAL")
+    comparison = methodology_comparison_artifact()
+    if not any(row["classification"] == "directly_comparable" for row in comparison["metrics"]):
+        blockers.append("AWAITING_CROSS_SOURCE_TARGET_HARMONIZATION_APPROVAL")
     m7_summary = {"overall_status": m7["overall_status"], "attestation": m7["attestation"],
                   "validated_forecast_available": m7["validated_forecast_available"],
                   "models_evaluated": sum(item["status"] != "NOT_EVALUATED_PREREQUISITE_GATE" for item in m7["models"]),
                   "promotion_decisions": {item["model_specification"]: item["promotion_status"] for item in m7["models"]}}
-    return {"milestone": 8, "sources": sources, "methodology_comparison": methodology_comparison_artifact(),
+    return {"milestone": 8, "sources": sources, "methodology_comparison": comparison,
             "milestone7": m7 if include_milestone7_detail else m7_summary, "blockers": blockers,
             "experiments": {name: "NOT_EVALUATED_PREREQUISITE_GATE" for name in
                             ("maa_only", "avb_only", "pooled", "maa_to_avb", "avb_to_maa",

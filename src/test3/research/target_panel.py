@@ -18,14 +18,13 @@ from test3.features.panel import FeaturePanel
 from test3.cre_data.geography import market_definitions
 from test3.cre_data.metrics import CRE_METRICS
 from test3.cre_data.versions import verification_reports
+from test3.cre_data.verification import MODEL_BLOCKING_FINDING_CODES
 from test3.warehouse.manifests import canonical_json, file_sha256
 from test3.warehouse.storage import WarehousePaths
 from test3.research.specifications import ModelSpecification
 
 
 TARGET_PANEL_VERSION = "1.0.0"
-BLOCKING_FINDINGS = frozenset({"duplicate_observation", "source_conflict", "methodology_mismatch",
-                               "methodology_change", "market_geography_mismatch", "occupancy_vacancy_mismatch"})
 SUPPORTED_FREQUENCIES = frozenset({"annual", "quarterly"})
 
 
@@ -68,7 +67,7 @@ def _eligible_rows_from_reports(reports: list[dict], property_type: str | None =
             if not row.get("model_eligible") or row.get("verification_status") != "analyst_verified":
                 exclusions["not_model_eligible"] += 1
                 continue
-            if set(row.get("verification_findings", [])) & BLOCKING_FINDINGS:
+            if set(row.get("verification_findings", [])) & MODEL_BLOCKING_FINDING_CODES:
                 exclusions["unresolved_quality_finding"] += 1
                 continue
             if row.get("frequency") not in SUPPORTED_FREQUENCIES:
@@ -185,14 +184,17 @@ def _panel_period(value: object, frequency: str) -> str:
     return str(parsed.year) if frequency == "annual" else f"{parsed.year}-Q{(parsed.month - 1) // 3 + 1}"
 
 
-def _feature_source(paths: WarehousePaths, frequency: str, geography: str) -> tuple[dict, Path]:
+def _feature_source(paths: WarehousePaths, frequency: str, geography: str) -> tuple[dict, Path, Path]:
     table = f"{geography}_{'year' if frequency == 'annual' else 'quarter'}"
     manifest = FeaturePanel(paths, table).latest()
     if manifest is None:
         raise ValueError(f"required feature table is not built: {table}")
     panel_path = paths.contained(Path("features") / table / f"version={manifest['feature_table_version']}" / "panel.parquet")
     verify_feature_manifest(panel_path.parent / "feature_manifest.json")
-    return manifest, panel_path
+    lineage_path = panel_path.parent / "lineage.parquet"
+    if not lineage_path.is_file():
+        raise ValueError(f"required feature lineage is not built: {table}")
+    return manifest, panel_path, lineage_path
 
 
 def _period_end(period: str, frequency: str) -> date:
@@ -213,6 +215,7 @@ def _active_market_definition(definitions: list[dict], row: dict) -> tuple[dict 
     matches = [item for item in definitions
                if item["market_id"] == row["geography_id"]
                and item["property_type"] == row["property_type"]
+               and item.get("review_status") == "analyst_approved"
                and date.fromisoformat(item["effective_from"]) <= period_end
                and (not item.get("effective_to") or period_end <= date.fromisoformat(item["effective_to"]))]
     if len(matches) > 1:
@@ -241,6 +244,10 @@ def _weighted_county_features(definition: dict, period: str, feature_names: set[
         output[name + "__available_at"] = (max(availability)
                                              if availability and all(value is not None for value in availability)
                                              else None)
+        output[name + "__lineage_ids"] = sorted({identifier for row, _ in component_rows
+                                                   for identifier in row.get(name + "__lineage_ids", [])})
+        output[name + "__input_observation_ids"] = sorted({identifier for row, _ in component_rows
+                                                            for identifier in row.get(name + "__input_observation_ids", [])})
     return output
 
 
@@ -276,16 +283,31 @@ def build_target_panel(paths: WarehousePaths, *, property_type: str, target: str
                 row_definitions[row["observation_id"]] = definition
     sources = {geography: _feature_source(paths, frequency, geography) for geography in required}
     feature_rows, feature_names, feature_hashes, source_hashes = {}, set(), set(), set()
-    for geography, (manifest, panel_path) in sources.items():
+    for geography, (manifest, panel_path, lineage_path) in sources.items():
         feature_names.update(manifest["features"])
         feature_hashes.add(manifest["manifest_hash"])
         source_hashes.update(manifest.get("input_manifest_hashes", []))
         with duckdb.connect(":memory:") as connection:
+            lineage_result = connection.execute("SELECT * FROM read_parquet(?)", [str(lineage_path)])
+            lineage_names = [item[0] for item in lineage_result.description]
+            lineage = {}
+            for raw in lineage_result.fetchall():
+                item = dict(zip(lineage_names, raw, strict=True))
+                key = (str(item["geography_id"]), _panel_period(item["period_start"], frequency), item["feature_name"])
+                lineage[key] = {
+                    "lineage_ids": [item["lineage_id"]],
+                    "input_observation_ids": json.loads(item.get("input_observation_ids_json") or "[]"),
+                }
             result = connection.execute("SELECT * FROM read_parquet(?)", [str(panel_path)])
             names = [item[0] for item in result.description]
             for raw in result.fetchall():
                 item = dict(zip(names, raw, strict=True))
-                feature_rows[(geography, item["geography_id"], _panel_period(item["period_start"], frequency))] = item
+                period = _panel_period(item["period_start"], frequency)
+                for feature_name in manifest["features"]:
+                    evidence = lineage.get((str(item["geography_id"]), period, feature_name), {})
+                    item[feature_name + "__lineage_ids"] = evidence.get("lineage_ids", [])
+                    item[feature_name + "__input_observation_ids"] = evidence.get("input_observation_ids", [])
+                feature_rows[(geography, item["geography_id"], period)] = item
 
     joined = []
     for target_row in eligible:
@@ -318,6 +340,9 @@ def build_target_panel(paths: WarehousePaths, *, property_type: str, target: str
             row[name] = features.get(name)
             available = features.get(name + "__available_at")
             row[name + "__available_at"] = available.isoformat() if isinstance(available, (date, datetime)) else available
+            row[name + "__lineage_ids"] = json.dumps(features.get(name + "__lineage_ids", []), separators=(",", ":"))
+            row[name + "__input_observation_ids"] = json.dumps(
+                features.get(name + "__input_observation_ids", []), separators=(",", ":"))
         joined.append(row)
     if not joined:
         raise ValueError("no model-eligible target rows matched an immutable feature period")

@@ -49,6 +49,9 @@ def assess_model(panel: PanelDataset, walk_forward: dict, market_holdout: dict |
         failures.append("governed model mode requires a registered model specification")
     if model_mode == "validated_production" and data_status != "real":
         failures.append("production validation requires real data")
+    if (model_mode == "validated_production" and model_specification is not None
+            and model_specification.purpose != "forecast"):
+        failures.append("inference-only specifications cannot become controlling forward forecasts")
     if len(panel.rows) < policy.minimum_sample_size:
         failures.append(f"sample size {len(panel.rows)} is below {policy.minimum_sample_size}")
     if len(panel.entities) < policy.minimum_markets:

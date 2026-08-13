@@ -45,15 +45,25 @@ def _feature_panel(paths, rows, geography="cbsa"):
     table = f"{geography}_quarter"
     directory = paths.contained(Path(f"features/{table}/version=fixture-v1")); directory.mkdir(parents=True)
     panel = directory / "panel.parquet"
+    lineage = directory / "lineage.parquet"
     with duckdb.connect(":memory:") as connection:
         connection.execute("CREATE TABLE feature(geography_type VARCHAR,geography_id VARCHAR,state_fips VARCHAR,county_fips VARCHAR,cbsa VARCHAR,period_start DATE,year INTEGER,quarter INTEGER,population_growth_yoy DOUBLE,population_growth_yoy__available_at DATE)")
         connection.executemany("INSERT INTO feature VALUES(?,?,?,?,?,?,?,?,?,?)", rows)
         connection.execute("COPY feature TO ? (FORMAT PARQUET)", [str(panel)])
+        connection.execute("""CREATE TABLE lineage AS SELECT
+            sha256(geography_id || CAST(period_start AS VARCHAR)) AS lineage_id,
+            'population_growth_yoy' AS feature_name, geography_type, geography_id, period_start,
+            'fixture' AS transformation, '1.0.0' AS transformation_version,
+            to_json(list_value('fixture-observation-' || geography_id))::VARCHAR AS input_observation_ids_json,
+            '[]' AS input_feature_lineage_ids_json, '[\"source-manifest-1\"]' AS input_manifest_hashes_json,
+            population_growth_yoy__available_at AS available_at, 'high' AS quality_level FROM feature""")
+        connection.execute("COPY lineage TO ? (FORMAT PARQUET)", [str(lineage)])
     write_feature_manifest(directory / "feature_manifest.json", {
         "manifest_version": FEATURE_MANIFEST_VERSION, "feature_table_version": "fixture-v1", "table_name": table,
         "created_at": "2026-08-09T00:00:00+00:00", "features": ["population_growth_yoy"],
         "availability_columns": ["population_growth_yoy__available_at"], "input_manifest_hashes": ["source-manifest-1"],
-        "files": [feature_file_entry(panel)], "quality": {"panel_rows": len(rows), "feature_values": len(rows)},
+        "files": [feature_file_entry(panel), feature_file_entry(lineage)],
+        "quality": {"panel_rows": len(rows), "feature_values": len(rows)},
     })
 
 
@@ -77,6 +87,12 @@ class TargetPanelTests(unittest.TestCase):
             result = build_target_panel(paths, property_type="multifamily", target="rent_growth_yoy")
             self.assertEqual((result.rows, result.markets, result.periods), (4, 2, 2))
             self.assertTrue(result.panel_path.is_file()); self.assertTrue(result.target_dataset_hashes)
+            with duckdb.connect(":memory:") as connection:
+                lineage = connection.execute(
+                    "SELECT population_growth_yoy__input_observation_ids FROM read_parquet(?) LIMIT 1",
+                    [str(result.panel_path)],
+                ).fetchone()[0]
+            self.assertIn("fixture-observation", lineage)
             repeated = build_target_panel(paths, property_type="multifamily", target="rent_growth_yoy")
             self.assertEqual((repeated.status, repeated.manifest_hash), ("unchanged", result.manifest_hash))
 
@@ -146,7 +162,9 @@ class TargetPanelTests(unittest.TestCase):
                 "market-a", "Market A", "multifamily", "Analyst-reviewed fictional boundary",
                 "2020-01-01", None,
                 ({"county_fips": "37001", "weight": ".25"},
-                 {"county_fips": "37003", "weight": ".75"}),
+                 {"county_fips": "37003", "weight": ".75"}), source_market_name="Market A",
+                weighting_methodology="Fictional analyst weights", analyst_rationale="Test boundary reviewed.",
+                source_evidence="fixture://market-definition", review_status="analyst_approved",
             ))
             target = {**_row("Market A", "", "2024-Q1", ".03"), "geography_id": "market-a"}
             import_cre_csv(paths, _csv([target]), dataset_id="fictional_targets", source_version="v1",
@@ -174,7 +192,9 @@ class TargetPanelTests(unittest.TestCase):
                 "market-a", "Market A", "multifamily", "Analyst-reviewed fictional boundary",
                 "2020-01-01", None,
                 ({"county_fips": "37001", "weight": ".5"},
-                 {"county_fips": "37003", "weight": ".5"}),
+                 {"county_fips": "37003", "weight": ".5"}), source_market_name="Market A",
+                weighting_methodology="Fictional analyst weights", analyst_rationale="Test boundary reviewed.",
+                source_evidence="fixture://market-definition", review_status="analyst_approved",
             ))
             target = {**_row("Market A", "", "2024-Q1", ".03"), "geography_id": "market-a"}
             import_cre_csv(paths, _csv([target]), dataset_id="fictional_targets", source_version="v1",

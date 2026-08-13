@@ -11,6 +11,7 @@ from test3.features.panel import FeaturePanel
 from test3.research.target_panel import target_readiness
 from test3.research.specifications import MODEL_SPECIFICATIONS
 from test3.research.target_panel import target_readiness_for_specification
+from test3.research.milestone7 import milestone7_status
 from test3.cre_data.sources import source_catalog
 from test3.cre_data.sources import discovery_catalog
 from test3.cre_data.audit import target_data_audit, target_readiness_funnel
@@ -133,6 +134,7 @@ def research_lab_report(data_dir: str | Path, database, organization_id: str) ->
     sources = checked("cre_source_catalog", source_catalog, [])
     definitions = checked("market_definitions", lambda: market_definitions(paths), [])
     models = checked("models", lambda: _models(database, organization_id), [])
+    milestone_7 = checked("milestone_7", lambda: milestone7_status(paths), {})
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "status": "degraded" if errors else "ready",
@@ -151,6 +153,7 @@ def research_lab_report(data_dir: str | Path, database, organization_id: str) ->
         "market_definitions": definitions,
         "feature_tables": features,
         "models": models,
+        "milestone_7": milestone_7,
         "model_summary": {
             "total": len(models),
             "validated_real": sum(item["validation_state"] == "validated" and item["data_status"] == "real" for item in models),
@@ -162,6 +165,9 @@ def research_lab_report(data_dir: str | Path, database, organization_id: str) ->
             "has_verified_cre_targets": any(item.get("high_quality", 0) > 0 for item in targets),
             "has_validated_real_model": any(item["validation_state"] == "validated" and item["data_status"] == "real" for item in models),
             "note": "A model cannot be promoted without verified real CRE targets and out-of-sample baseline improvement.",
+            "forecast_message": ("Validated forecast available." if any(
+                item["validation_state"] == "validated" and item["data_status"] == "real" for item in models)
+                else "No validated forecast is currently available."),
         },
         "errors": errors,
     }

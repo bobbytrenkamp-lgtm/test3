@@ -12,6 +12,15 @@ The parser emits unverified candidates only. `test3-data publish-avb-sec-candida
 
 AVB Average Monthly Revenue per Occupied Home includes concessions amortized over the lease term and uncollectible lease revenue. It is retained as `average_monthly_revenue_per_occupied_home`, not relabeled MAA `effective_rent`. AVB economic occupancy and its exact complement, economic vacancy, remain distinct from MAA physical occupancy/vacancy. The versioned compatibility artifact classifies every current mapping as `comparable_with_limitation` or `not_comparable`; none is currently `directly_comparable` for pooled target modeling.
 
+Historical AVB disclosures are also versioned within the AVB source domain. The 2021 through
+2022-Q2 schedule labels the measure `Average Rental Rates` and reports a separate cash-basis
+revenue change. From 2022-Q3 the disclosure uses revenue per occupied home, and later filings
+add a distinct rent-relief adjustment. Test3 retains `average_rental_rate_growth_yoy`,
+`average_monthly_revenue_growth_yoy`, `revenue_growth_yoy_cash_basis`, and
+`revenue_growth_yoy_excluding_rent_relief` as separate governed metrics. The series manifest
+now reports quarter gaps, market-label additions/removals, and schema transitions, with
+automatic harmonization disabled whenever a methodology transition exists.
+
 ## Cross-source validation
 
 `cross_source_generalization` performs hard train-one-source/test-the-other experiments and retains each prediction. It reports MAE, RMSE, bias, directional accuracy, and a deterministic artifact hash. Company residual summaries flag possible portfolio/operator effects. The cross-source gate rejects a broad-market claim unless at least two independently approved sources have actual predictions and satisfy the governed error rule.

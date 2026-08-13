@@ -85,6 +85,11 @@ class PanelDataset:
     def periods(self) -> tuple[str, ...]:
         return tuple(sorted({row[self.time_column] for row in self.rows}))
 
+    @property
+    def periods_by_entity(self) -> dict[str, int]:
+        return {entity: len({row[self.time_column] for row in self.rows
+                             if row[self.entity_column] == entity}) for entity in self.entities}
+
 
 def prepare_panel(
     records: Iterable[Mapping[str, object]], *, target: str, features: Iterable[str],

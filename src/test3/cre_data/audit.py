@@ -136,7 +136,8 @@ def target_readiness_funnel(paths: WarehousePaths, *, property_type: str | None 
             else:
                 excluded["source_conflict"] += 1
                 continue
-            if not findings.intersection({"methodology_change", "methodology_mismatch", "market_geography_mismatch"}):
+            if not findings.intersection({"methodology_change", "methodology_mismatch", "market_geography_mismatch",
+                                          "occupancy_vacancy_mismatch"}):
                 stages["methodology_compatible"] += 1
             else:
                 excluded["methodology_or_geography"] += 1

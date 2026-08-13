@@ -25,7 +25,7 @@ from test3.research.specifications import ModelSpecification
 
 TARGET_PANEL_VERSION = "1.0.0"
 BLOCKING_FINDINGS = frozenset({"duplicate_observation", "source_conflict", "methodology_mismatch",
-                               "methodology_change", "market_geography_mismatch"})
+                               "methodology_change", "market_geography_mismatch", "occupancy_vacancy_mismatch"})
 SUPPORTED_FREQUENCIES = frozenset({"annual", "quarterly"})
 
 
@@ -109,6 +109,12 @@ def _eligible_rows(paths: WarehousePaths, property_type: str | None = None, targ
     return _eligible_rows_from_reports(verification_reports(paths), property_type, target)
 
 
+def _market_period_depth(rows: list[dict], minimum_periods: int) -> tuple[dict[str, int], int]:
+    counts = {market: len({row["period"] for row in rows if row["geography_id"] == market})
+              for market in {row["geography_id"] for row in rows}}
+    return counts, sum(count >= minimum_periods for count in counts.values())
+
+
 def target_readiness(paths: WarehousePaths, *, policy: ReadinessPolicy = ReadinessPolicy()) -> list[dict]:
     reports = verification_reports(paths)
     pairs = sorted({(property_type, metric.metric) for metric in CRE_METRICS.values()
@@ -123,19 +129,27 @@ def target_readiness(paths: WarehousePaths, *, policy: ReadinessPolicy = Readine
         eligible, exclusions = _eligible_rows_from_reports(reports, property_type, target)
         markets = {row["geography_id"] for row in eligible}
         periods = {row["period"] for row in eligible}
+        periods_by_market, longitudinal_markets = _market_period_depth(eligible, policy.minimum_periods)
         possible = len(markets) * len(periods)
-        ready = len(markets) >= policy.minimum_markets and len(periods) >= policy.minimum_periods and len(eligible) >= policy.minimum_observations
+        ready = (len(markets) >= policy.minimum_markets and len(periods) >= policy.minimum_periods
+                 and longitudinal_markets >= policy.minimum_markets
+                 and len(eligible) >= policy.minimum_observations)
         reasons = []
         if len(markets) < policy.minimum_markets:
             reasons.append(f"markets {len(markets)} below minimum {policy.minimum_markets}")
         if len(periods) < policy.minimum_periods:
             reasons.append(f"periods {len(periods)} below minimum {policy.minimum_periods}")
+        if longitudinal_markets < policy.minimum_markets:
+            reasons.append(f"markets meeting {policy.minimum_periods}-period depth {longitudinal_markets} "
+                           f"below minimum {policy.minimum_markets}")
         if len(eligible) < policy.minimum_observations:
             reasons.append(f"eligible observations {len(eligible)} below minimum {policy.minimum_observations}")
         output.append({
             "property_type": property_type, "target": target, "observations": len(all_rows),
             "verified_observations": sum(row.get("verification_status") == "analyst_verified" for row in all_rows),
             "model_eligible_observations": len(eligible), "markets": len(markets), "periods": len(periods),
+            "markets_meeting_period_minimum": longitudinal_markets,
+            "periods_by_market": dict(sorted(periods_by_market.items())),
             "earliest": min(periods, default=None), "latest": max(periods, default=None),
             "missingness": (1.0 - len(eligible) / possible) if possible else None,
             "status": "ready" if ready else "not_ready", "reasons": reasons,

@@ -44,6 +44,7 @@ class MAAParseResult:
     period: str
     effective_rent_rows: int
     rent_growth_rows: int
+    inventory_rows: int
     occupancy_rows: int
     vacancy_rows: int
     observations: tuple[dict, ...]
@@ -162,6 +163,7 @@ def parse_maa_accessibility_snapshot(snapshot: str, *, filing_url: str, filing_d
         for metric, value, unit, method, evidence in (
             ("effective_rent", current_rent, "USD_per_unit_month", "effective_rent", "same-store-qoq-effective-rent"),
             ("rent_growth_yoy", reported_yoy, "decimal_fraction", "same_store_yoy", "same-store-qoq-rent-yoy"),
+            ("inventory", Decimal(units), "units", "same_store_inventory", "same-store-qoq-apartment-units"),
         ):
             raw = _base_row(market=market, period=period, filing_url=filing_url, filing_date=filing_date,
                             retrieved_at=retrieved_at, metric=metric, value=value, unit=unit,
@@ -194,6 +196,12 @@ def parse_maa_accessibility_snapshot(snapshot: str, *, filing_url: str, filing_d
                         verification_status=verification_status)
         occupancy_rows.append(normalize_cre_record(raw, row_number=len(rows) + len(occupancy_rows) + 1))
     rows.extend(occupancy_rows)
+    rent_units = {(row["geography_id"], row["period"]): row["sample_count"] for row in rows
+                  if row["metric"] == "effective_rent"}
+    for row in occupancy_rows:
+        key = row["geography_id"], row["period"]
+        if key in rent_units and rent_units[key] != row["sample_count"]:
+            raise ValueError(f"MAA apartment-unit cross-check failed for {row['market']} {row['period']}")
     vacancy_rows = derive_vacancy_from_occupancy(occupancy_rows)
     rows.extend(vacancy_rows)
     return MAAParseResult(
@@ -202,6 +210,7 @@ def parse_maa_accessibility_snapshot(snapshot: str, *, filing_url: str, filing_d
         period=period,
         effective_rent_rows=sum(row["metric"] == "effective_rent" for row in rows),
         rent_growth_rows=sum(row["metric"] == "rent_growth_yoy" for row in rows),
+        inventory_rows=sum(row["metric"] == "inventory" for row in rows),
         occupancy_rows=sum(row["metric"] == "occupancy_rate" for row in rows),
         vacancy_rows=sum(row["metric"] == "vacancy_rate" for row in rows),
         observations=tuple(rows),

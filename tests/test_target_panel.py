@@ -11,7 +11,7 @@ import duckdb
 from test3.cre_data.importer import import_cre_csv
 from test3.cre_data.geography import MarketDefinition, save_market_definition
 from test3.features.manifests import FEATURE_MANIFEST_VERSION, feature_file_entry, write_feature_manifest
-from test3.research.target_panel import (_eligible_rows_from_reports, ReadinessPolicy,
+from test3.research.target_panel import (_eligible_rows_from_reports, _market_period_depth, ReadinessPolicy,
                                          build_target_panel, target_readiness)
 from test3.warehouse.storage import WarehousePaths
 
@@ -91,6 +91,21 @@ class TargetPanelTests(unittest.TestCase):
             self.assertEqual(report["status"], "not_ready")
             self.assertEqual(report["model_eligible_observations"], 0)
             self.assertEqual(report["exclusions"]["unresolved_multiple_sources"], 2)
+
+    def test_readiness_rejects_sparse_markets_despite_aggregate_period_depth(self):
+        reports = [{"raw_snapshot": {"sha256": "a" * 64}, "warehouse_manifest_hash": "b" * 64,
+                    "observations": []}]
+        for market_index in range(5):
+            for period_index in range(4):
+                period = f"{2020 + market_index}-Q{period_index + 1}"
+                item = _row(f"Market {market_index}", "11111", period, ".03")
+                reports[0]["observations"].append({**item,
+                    "observation_id": f"{market_index}-{period}", "model_eligible": True,
+                    "verification_findings": [], "target_classification": "institutional_target"})
+        eligible, _ = _eligible_rows_from_reports(reports, "multifamily", "rent_growth_yoy")
+        self.assertEqual((len(eligible), len({row["period"] for row in eligible})), (20, 20))
+        periods_by_market, qualifying = _market_period_depth(eligible, 20)
+        self.assertEqual((set(periods_by_market.values()), qualifying), ({4}, 0))
 
     def test_methodology_change_spans_distinct_quarterly_documents(self):
         first = _row("Market A", "11111", "2024-Q1", ".03")

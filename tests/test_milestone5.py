@@ -74,6 +74,16 @@ class Milestone5GovernanceTests(unittest.TestCase):
         result = _governance(_panel(6, 19), _spec())
         self.assertIn("period count 19 is below 20", result["failures"])
 
+    def test_promotion_requires_longitudinal_depth_in_each_required_market(self):
+        records = []
+        for market in range(5):
+            for period in range(4):
+                records.append({"market": f"M{market}", "period": str(2000 + market * 4 + period),
+                                "target": .01, "feature": 1.0})
+        panel = prepare_panel(records, target="target", features=("feature",), entity_column="market")
+        result = _governance(panel, _spec(minimum_sample=20))
+        self.assertIn("markets meeting 20-period depth 0 is below 5", result["failures"])
+
     def test_generic_real_research_cannot_become_controlling(self):
         walk, holdout = _passed_validation()
         result = assess_model(_panel(5, 20), walk, holdout, data_status="real",

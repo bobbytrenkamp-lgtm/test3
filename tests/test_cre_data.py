@@ -111,6 +111,30 @@ class CREDataTests(unittest.TestCase):
         checked = verify_observations(parsed, analyst_review_confirmed=True)
         self.assertEqual(checked["summary"]["model_eligible"], 1)
 
+    def test_occupancy_and_vacancy_must_be_exact_complements(self):
+        parsed, errors, _ = parse_cre_csv(cre_csv([
+            row(metric="occupancy_rate", methodology="physical_occupancy", value=".94",
+                source_identifier="fixture://cre/occupancy"),
+            row(metric="vacancy_rate", methodology="physical_vacancy", value=".08",
+                source_identifier="fixture://cre/vacancy"),
+        ]))
+        self.assertFalse(errors)
+        checked = verify_observations(parsed, analyst_review_confirmed=True)
+        self.assertIn("occupancy_vacancy_mismatch", {item["code"] for item in checked["findings"]})
+        self.assertEqual(checked["summary"]["model_eligible"], 0)
+
+    def test_resolved_complementary_rates_remain_eligible(self):
+        parsed, errors, _ = parse_cre_csv(cre_csv([
+            row(metric="occupancy_rate", methodology="physical_occupancy", value=".94",
+                source_identifier="fixture://cre/occupancy"),
+            row(metric="vacancy_rate", methodology="physical_vacancy", value=".06",
+                source_identifier="fixture://cre/vacancy"),
+        ]))
+        self.assertFalse(errors)
+        checked = verify_observations(parsed, analyst_review_confirmed=True)
+        self.assertNotIn("occupancy_vacancy_mismatch", {item["code"] for item in checked["findings"]})
+        self.assertEqual(checked["summary"]["model_eligible"], 2)
+
     def test_reconciliation_uses_explicit_priority_and_never_averages(self):
         parsed, _, _ = parse_cre_csv(cre_csv([row(), row(source_name="Preferred", source_identifier="fixture://preferred", value=".07")]))
         checked = verify_observations(parsed, analyst_review_confirmed=True)["observations"]

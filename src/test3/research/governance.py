@@ -55,6 +55,10 @@ def assess_model(panel: PanelDataset, walk_forward: dict, market_holdout: dict |
         failures.append(f"market count {len(panel.entities)} is below {policy.minimum_markets}")
     if len(panel.periods) < policy.minimum_periods:
         failures.append(f"period count {len(panel.periods)} is below {policy.minimum_periods}")
+    longitudinal_markets = sum(count >= policy.minimum_periods for count in panel.periods_by_entity.values())
+    if longitudinal_markets < policy.minimum_markets:
+        failures.append(f"markets meeting {policy.minimum_periods}-period depth {longitudinal_markets} "
+                        f"is below {policy.minimum_markets}")
     if walk_forward.get("look_ahead") is not False:
         failures.append("walk-forward result does not affirm absence of look-ahead")
     if walk_forward.get("metrics", {}).get("model", {}).get("sample_size", 0) == 0:

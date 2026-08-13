@@ -91,6 +91,20 @@ def verify_observations(rows: list[dict], *, evaluated_at: str | date | None = N
     for grouped in method_series.values():
         if len({row["methodology"] for row in grouped}) > 1:
             add("methodology_change", "warning", "Source methodology changes within the longitudinal series; affected periods require explicit reconciliation.", grouped)
+    complements = defaultdict(list)
+    for row in rows:
+        if row["metric"] in {"occupancy_rate", "vacancy_rate"}:
+            complements[(row["geography_type"], row["geography_id"], row["period"], row["frequency"],
+                         row["property_type"], row.get("property_subtype"), row["source_name"], row["vintage"])].append(row)
+    for grouped in complements.values():
+        occupancy = [row for row in grouped if row["metric"] == "occupancy_rate"]
+        vacancy = [row for row in grouped if row["metric"] == "vacancy_rate"]
+        if len(occupancy) == len(vacancy) == 1:
+            total = Decimal(occupancy[0]["value"]) + Decimal(vacancy[0]["value"])
+            if abs(total - Decimal("1")) > Decimal("0.000001"):
+                add("occupancy_vacancy_mismatch", "error",
+                    "Same-source occupancy and vacancy are not exact complements; reconcile definitions before modeling.",
+                    (occupancy[0], vacancy[0]))
     if governed_market_ids is not None:
         for row in rows:
             if row["geography_type"] in {"market", "submarket"} and row["geography_id"] not in governed_market_ids:
@@ -135,7 +149,8 @@ def verify_observations(rows: list[dict], *, evaluated_at: str | date | None = N
         confidence = sum(components[name] * weight for name, weight in
                          (("source_reliability", .25), ("methodology_clarity", .15), ("independent_agreement", .15),
                           ("recency", .10), ("completeness", .10), ("analyst_verification", .15), ("series_consistency", .10)))
-        blocking_codes = {"duplicate_observation", "methodology_change", "market_geography_mismatch",
+        blocking_codes = {"duplicate_observation", "source_conflict", "methodology_mismatch", "methodology_change",
+                          "frequency_mismatch", "market_geography_mismatch", "occupancy_vacancy_mismatch",
                           "proxy_not_institutional_target"}
         blocking = row["verification_status"] == "rejected" or bool(blocking_codes & set(by_observation[row["observation_id"]]))
         scored.append({**row, "confidence": round(confidence, 6), "confidence_components": components,

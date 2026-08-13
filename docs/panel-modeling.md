@@ -39,3 +39,5 @@ test3-research lags --input panel.parquet --target rent_growth --feature employm
 ```
 
 Both commands emit machine-readable JSON. A `real` status alone does not validate a model: source manifest hashes, minimum coverage, leakage-free walk-forward results, market holdouts, and improvement over the best governed baseline are all required.
+
+Readiness and promotion require longitudinal depth, not merely a large sparse matrix. If a governed specification requires five markets and twenty periods, at least five individual markets must each contain twenty eligible periods. Twenty aggregate periods scattered across shallow market histories cannot pass. Readiness output exposes `periods_by_market` and `markets_meeting_period_minimum` so the gate is auditable.

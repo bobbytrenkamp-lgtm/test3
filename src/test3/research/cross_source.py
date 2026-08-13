@@ -13,6 +13,34 @@ from .validation import prediction_metrics
 
 
 SOURCE_COLUMN = "source_company"
+GOVERNED_HORIZONS = (1, 2, 4)
+
+
+def _quarter_index(value: str) -> int:
+    year, quarter = str(value).split("-Q")
+    return int(year) * 4 + int(quarter) - 1
+
+
+def exact_horizon_pairs(rows: list[dict], *, horizon: int, entity_column: str = "market_id",
+                        time_column: str = "period", target_column: str = "target") -> list[dict]:
+    """Pair forecast-origin rows with exact future targets; gaps are never row-shifted."""
+    if horizon not in GOVERNED_HORIZONS:
+        raise ValueError(f"horizon must be one of {GOVERNED_HORIZONS}")
+    by_key = {(str(row[entity_column]), _quarter_index(str(row[time_column]))): row for row in rows}
+    if len(by_key) != len(rows):
+        raise ValueError("duplicate entity-period rows are prohibited")
+    paired = []
+    for row in rows:
+        future = by_key.get((str(row[entity_column]), _quarter_index(str(row[time_column])) + horizon))
+        if future is None: continue
+        output = dict(row)
+        output["forecast_origin_period"] = row[time_column]
+        output["target_period"] = future[time_column]
+        output["forecast_horizon_quarters"] = horizon
+        output[target_column] = future[target_column]
+        output["future_target_observation_id"] = future.get("target_observation_id")
+        paired.append(output)
+    return paired
 
 
 def methodology_comparison() -> list[dict]:

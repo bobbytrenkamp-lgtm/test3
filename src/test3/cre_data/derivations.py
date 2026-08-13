@@ -53,3 +53,39 @@ def derive_vacancy_from_occupancy(rows: list[dict], *, transformation_version: s
                "notes": f"Derived exactly as 1 - occupancy; transformation={transformation_version}; input={row['observation_id']}."}
         output.append(normalize_cre_record(raw, row_number=int(row.get("source_row", 0))))
     return output
+
+
+def derive_noi_margin(rows: list[dict], *, transformation_version: str = "noi-margin/1.0.0") -> list[dict]:
+    """Derive NOI margin only from an unambiguous same-source revenue/NOI pair."""
+    grouped: dict[tuple, dict[str, list[dict]]] = {}
+    for row in rows:
+        if row["metric"] not in {"same_store_revenue", "same_store_noi"}:
+            continue
+        key = (row["geography_type"], row["geography_id"], row["period"], row["property_type"],
+               row.get("property_subtype"), row["source_name"], row.get("methodology_version"), row["unit"])
+        grouped.setdefault(key, {}).setdefault(row["metric"], []).append(row)
+    output = []
+    for metrics in grouped.values():
+        revenue_rows = metrics.get("same_store_revenue", [])
+        noi_rows = metrics.get("same_store_noi", [])
+        if len(revenue_rows) != 1 or len(noi_rows) != 1:
+            continue
+        revenue, noi = revenue_rows[0], noi_rows[0]
+        if Decimal(revenue["value"]) <= 0:
+            continue
+        margin = Decimal(noi["value"]) / Decimal(revenue["value"])
+        raw = {
+            **noi,
+            "metric": "noi_margin",
+            "value": format(margin, "f"),
+            "unit": "decimal_fraction",
+            "methodology": "same_store_noi_margin",
+            "source_identifier": f"derived:{revenue['observation_id']}:{noi['observation_id']}",
+            "verification_status": "unverified",
+            "notes": (
+                f"Derived exactly as NOI / operating revenue; transformation={transformation_version}; "
+                f"inputs={revenue['observation_id']},{noi['observation_id']}."
+            ),
+        }
+        output.append(normalize_cre_record(raw, row_number=int(noi.get("source_row", 0))))
+    return output

@@ -13,6 +13,7 @@
 - table:
   - row "MULTIFAMILY SAME STORE PORTFOLIO QUARTER OVER QUARTER COMPARISONS":
       - cell "MULTIFAMILY SAME STORE PORTFOLIO QUARTER OVER QUARTER COMPARISONS"
+- generic: Dollars in thousands, except Average Effective Rent per Unit
 - table:
   - row "Units Q2 2025 Q2 2024 % Chg Q2 2025 Q2 2024 % Chg Q2 2025 Q2 2024 % Chg Q2 2025 Q2 2024 % Chg":
       - cell "Units"

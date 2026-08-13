@@ -25,18 +25,21 @@ class Milestone6Tests(unittest.TestCase):
         )
         self.assertEqual(result.period, "2025-Q2")
         self.assertEqual((result.effective_rent_rows, result.rent_growth_rows, result.revenue_growth_rows,
-                          result.expense_growth_rows, result.noi_growth_rows, result.inventory_rows,
-                          result.occupancy_rows, result.vacancy_rows), (1, 1, 1, 1, 1, 1, 1, 1))
+                          result.expense_growth_rows, result.noi_growth_rows, result.revenue_rows,
+                          result.expense_rows, result.noi_rows, result.noi_margin_rows, result.inventory_rows,
+                          result.occupancy_rows, result.vacancy_rows), (1,) * 12)
         values = {row["metric"]: row["value"] for row in result.observations}
         self.assertEqual(values, {
             "effective_rent": "1500", "rent_growth_yoy": "0.034",
             "revenue_growth_yoy": "0.053", "operating_expense_growth_yoy": "0.053",
             "noi_growth_yoy": "0.053",
+            "same_store_revenue": "10000", "same_store_operating_expense": "4000",
+            "same_store_noi": "6000", "noi_margin": "0.6",
             "inventory": "1200", "occupancy_rate": "0.955", "vacancy_rate": "0.045",
         })
         checked = verify_observations(list(result.observations), analyst_review_confirmed=False)
         self.assertEqual(checked["summary"]["model_eligible"], 0)
-        self.assertEqual(checked["summary"]["unverified"], 8)
+        self.assertEqual(checked["summary"]["unverified"], 12)
 
     def test_sec_maa_source_is_real_target_but_local_only(self):
         source = CRE_TARGET_SOURCES["sec_maa_same_store"]
@@ -44,6 +47,8 @@ class Milestone6Tests(unittest.TestCase):
         self.assertFalse(source.requires_payment)
         self.assertTrue(source.automation_permitted)
         self.assertEqual(source.redistribution_permitted, "no")
+        self.assertTrue({"same_store_revenue", "same_store_operating_expense", "same_store_noi", "noi_margin"}
+                        <= set(source.metrics_available))
 
     def test_maa_parser_accepts_governed_2026_heading_drift(self):
         snapshot = FIXTURE.read_text(encoding="utf-8").replace(
@@ -88,6 +93,26 @@ class Milestone6Tests(unittest.TestCase):
                 filing_date="2025-07-30",
             )
 
+    def test_maa_parser_requires_disclosed_monetary_units(self):
+        snapshot = FIXTURE.read_text(encoding="utf-8").replace(
+            "Dollars in thousands, except Average Effective Rent per Unit", "Amounts omitted"
+        )
+        with self.assertRaisesRegex(ValueError, "monetary unit label"):
+            parse_maa_accessibility_snapshot(
+                snapshot,
+                filing_url="https://www.sec.gov/Archives/edgar/data/912595/fictional/maa-ex99_2.htm",
+                filing_date="2025-07-30",
+            )
+
+    def test_maa_parser_enforces_revenue_expense_noi_identity(self):
+        snapshot = FIXTURE.read_text(encoding="utf-8").replace("$ 6,000 $ 5,700 5.3 %", "$ 6,001 $ 5,700 5.3 %")
+        with self.assertRaisesRegex(ValueError, "revenue-expense-NOI identity failed"):
+            parse_maa_accessibility_snapshot(
+                snapshot,
+                filing_url="https://www.sec.gov/Archives/edgar/data/912595/fictional/maa-ex99_2.htm",
+                filing_date="2025-07-30",
+            )
+
     def test_maa_parser_fails_when_independent_tables_disagree_on_units(self):
         snapshot = FIXTURE.read_text(encoding="utf-8").replace(
             "Fictionville, NC 1,200 60.0 %", "Fictionville, NC 1,199 60.0 %"
@@ -116,7 +141,7 @@ class Milestone6Tests(unittest.TestCase):
             packet_path = folder / "review-packet.json"
             packet = prepare_cre_review(review, packet_path)
             self.assertFalse(packet["authoritative"])
-            self.assertEqual((packet["observations"], packet["markets"]), (8, 1))
+            self.assertEqual((packet["observations"], packet["markets"]), (12, 1))
             self.assertEqual(packet["evidence_documents"], 1)
             packet_payload = json.loads(packet_path.read_text(encoding="utf-8"))
             self.assertEqual(packet_payload["attestation_template"]["approved_markets"], [])

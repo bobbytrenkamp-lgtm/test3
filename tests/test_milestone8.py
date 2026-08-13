@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import unittest
+import tempfile
+from pathlib import Path
 
-from test3.cre_data.sources.sec_avb import AVBSchemaDriftError, COMPATIBILITY, methodology_comparison_artifact, parse_avb_html
-from test3.research.cross_source import company_bias, cross_source_gate, cross_source_generalization
+from test3.cre_data.sources.sec_avb import (AVBSchemaDriftError, COMPATIBILITY,
+                                            methodology_comparison_artifact, parse_avb_html,
+                                            write_avb_series_review_csv)
+from test3.research.cross_source import (company_bias, cross_source_gate, cross_source_generalization,
+                                         exact_horizon_pairs)
+from test3.research.test2_evidence import build_test2_assumption_evidence
 from test3.research.datasets import prepare_panel
 
 
@@ -18,6 +24,12 @@ AVB_FIXTURE = """
 <td>95.4</td><td>96.2</td><td>(0.8)</td><td>95,057</td><td>94,686</td><td>0.4</td></tr>
 </table>
 """
+
+AVB_RENT_RELIEF_FIXTURE = AVB_FIXTURE.replace(
+    "<th>Q1 26</th><th>Q1 25</th><th>% Change</th></tr>",
+    "<th>Q1 26</th><th>Q1 25</th><th>% Change</th><th>% Change Excluding Rent Relief</th></tr>",
+).replace("<td>95,057</td><td>94,686</td><td>0.4</td></tr>",
+          "<td>95,057</td><td>94,686</td><td>0.4</td><td>0.6</td></tr>")
 
 
 class Milestone8Tests(unittest.TestCase):
@@ -42,6 +54,30 @@ class Milestone8Tests(unittest.TestCase):
             parse_avb_html(broken,
                 filing_url="https://www.sec.gov/Archives/edgar/data/915912/000091591226000010/q12026ex-992.htm",
                 filing_date="2026-04-27")
+
+    def test_avb_rent_relief_methodology_is_preserved_separately(self):
+        result = parse_avb_html(AVB_RENT_RELIEF_FIXTURE,
+            filing_url="https://www.sec.gov/Archives/edgar/data/915912/000091591226000010/q12026ex-992.htm",
+            filing_date="2026-04-27")
+        self.assertEqual(result.schema_version, "avb-attachment-4/rent-relief-adjusted-v1")
+        by_metric = {row["metric"]: row for row in result.observations}
+        self.assertEqual(by_metric["revenue_growth_yoy_excluding_rent_relief"]["value"], "0.006")
+        self.assertEqual(len(result.observations), 7)
+
+    def test_avb_series_manifest_is_immutable_and_deduplicated(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / "q1.html"; source.write_text(AVB_FIXTURE, encoding="utf-8")
+            destination = Path(folder) / "review.csv"
+            filing = {"path": str(source),
+                      "filing_url": "https://www.sec.gov/Archives/edgar/data/915912/000091591226000010/q12026ex-992.htm",
+                      "filing_date": "2026-04-27", "retrieved_at": "2026-04-28T00:00:00+00:00"}
+            result = write_avb_series_review_csv([filing], destination)
+            self.assertEqual(result["periods"], ["2026-Q1"])
+            self.assertEqual(result["observations"], 6)
+            with self.assertRaises(FileExistsError):
+                write_avb_series_review_csv([filing], destination)
+            with self.assertRaisesRegex(ValueError, "duplicate AVB observations"):
+                write_avb_series_review_csv([filing, filing], Path(folder) / "duplicate.csv")
 
     def test_cross_source_generalization_is_bidirectional_and_auditable(self):
         rows = []
@@ -72,6 +108,30 @@ class Milestone8Tests(unittest.TestCase):
         artifact = methodology_comparison_artifact()
         self.assertTrue(artifact["artifact_hash"])
         self.assertNotIn("directly_comparable", {row["classification"] for row in artifact["metrics"]})
+
+    def test_exact_horizon_pairs_do_not_row_shift_across_gaps(self):
+        rows = [{"market_id": "a", "period": "2024-Q1", "target": 1, "target_observation_id": "1"},
+                {"market_id": "a", "period": "2024-Q3", "target": 3, "target_observation_id": "3"},
+                {"market_id": "a", "period": "2025-Q1", "target": 5, "target_observation_id": "5"}]
+        self.assertEqual(exact_horizon_pairs(rows, horizon=1), [])
+        pairs = exact_horizon_pairs(rows, horizon=2)
+        self.assertEqual([(row["forecast_origin_period"], row["target_period"]) for row in pairs],
+                         [("2024-Q1", "2024-Q3"), ("2024-Q3", "2025-Q1")])
+
+    def test_test2_evidence_is_advisory_and_requires_validated_lineage(self):
+        forecast = {"status": "validated_production", "model_id": "m1", "model_version": "1",
+                    "market": "m", "property_type": "multifamily", "target": "rent_growth_yoy",
+                    "forecast_period": "2026-Q4", "estimate": 0.02,
+                    "validation": {"walk_forward_mae": .01, "best_baseline_mae": .02,
+                                   "market_holdout_mae": .015},
+                    "lineage_hashes": {"target_dataset_hash": "a", "feature_panel_hash": "b",
+                                       "market_definition_hash": "c", "model_result_hash": "d"}}
+        evidence = build_test2_assumption_evidence(forecast)
+        self.assertTrue(evidence["advisory_only"])
+        self.assertFalse(evidence["test2_assumption_overwritten"])
+        self.assertEqual(evidence["application_status"], "analyst_review_required")
+        with self.assertRaisesRegex(ValueError, "validated_production"):
+            build_test2_assumption_evidence({**forecast, "status": "candidate"})
 
 
 if __name__ == "__main__":

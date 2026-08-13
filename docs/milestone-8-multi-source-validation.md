@@ -20,4 +20,18 @@ AVB Average Monthly Revenue per Occupied Home includes concessions amortized ove
 
 ## Current honest limitation
 
-The installed MAA history and AVB candidates are not human-approved, and neither source has approved portfolio-to-county market definitions. AVB currently has only one locally installed quarter. Therefore MAA-only, AVB-only, pooled, bidirectional source transfer, horizon validation, forecast scenarios, and Test2 evidence remain prerequisite-blocked. This is a valid rejection state, not a forecast.
+The installed MAA history and AVB candidates are not human-approved, and neither source has approved portfolio-to-county market definitions. Therefore MAA-only, AVB-only, pooled, bidirectional source transfer, forecast scenarios, and Test2 evidence remain prerequisite-blocked. This is a valid rejection state, not a forecast.
+
+## Depth hardening
+
+`test3-data parse-avb-sec-series` accepts an explicitly enumerated manifest of official, locally
+preserved SEC exhibits. The adapter versions the 2023–2024 rent-relief-adjusted disclosure separately;
+it never silently pools that adjusted series with reported revenue growth. Missing numeric facts fail
+closed rather than becoming zero.
+
+Cross-source research supports exact 1-, 2-, and 4-quarter target horizons. A future target must exist
+at the exact calendar quarter; a later non-null row is never treated as the requested horizon merely
+because it is next in row order.
+
+The Test2 evidence builder is advisory-only. It rejects non-production forecasts, incomplete validation,
+or missing immutable lineage hashes, and never applies an assumption without a separate analyst decision.

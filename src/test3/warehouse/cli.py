@@ -30,7 +30,7 @@ from test3.cre_data.report_inbox import save_report_discovery
 from test3.cre_data.report_tables import ReportMappingProfile, save_report_profile
 from test3.cre_data.verification import available_as_of, verify_observations
 from test3.cre_data.sources.sec_maa import write_review_csv
-from test3.cre_data.sources.sec_avb import write_avb_review_csv
+from test3.cre_data.sources.sec_avb import write_avb_review_csv, write_avb_series_review_csv
 from test3.cre_data.review import approve_cre_review, prepare_cre_review
 from test3.cre_data.maa_governance import prepare_maa_rent_growth_review, approve_maa_rent_growth_review
 
@@ -93,6 +93,8 @@ def _parser():
     avb = commands.add_parser("parse-avb-sec-exhibit", help="parse a lawfully obtained official AVB SEC Attachment 4 into review candidates")
     avb.add_argument("--input", required=True); avb.add_argument("--output", required=True)
     avb.add_argument("--filing-url", required=True); avb.add_argument("--filing-date", required=True)
+    avb_series = commands.add_parser("parse-avb-sec-series", help="combine an explicit manifest of lawfully obtained AVB exhibits")
+    avb_series.add_argument("--manifest", required=True); avb_series.add_argument("--output", required=True)
     publish_avb = commands.add_parser("publish-avb-sec-candidates", help="publish unverified AVB SEC observations for analyst review")
     publish_avb.add_argument("--input", required=True); publish_avb.add_argument("--version", required=True)
     approve_review = commands.add_parser("approve-cre-review", help="create a hash-bound analyst-approved CRE review file")
@@ -165,6 +167,9 @@ def main(argv=None):
     elif args.command == "parse-avb-sec-exhibit":
         output = write_avb_review_csv(args.input, args.output, filing_url=args.filing_url,
                                       filing_date=args.filing_date)
+    elif args.command == "parse-avb-sec-series":
+        manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
+        output = write_avb_series_review_csv(manifest["filings"], args.output)
     elif args.command == "publish-avb-sec-candidates":
         source = Path(args.input)
         output = asdict(import_cre_file(paths, source.read_bytes(), suffix=source.suffix,

@@ -110,6 +110,9 @@ class Milestone5GovernanceTests(unittest.TestCase):
         self.assertEqual(result["policy"], {"minimum_markets": 5, "minimum_periods": 20,
                                              "minimum_observations": 100})
         self.assertEqual(result["status"], "not_ready")
+        expense = MODEL_SPECIFICATIONS["mf_operating_expense_growth_macro"]
+        self.assertEqual(expense.target, "operating_expense_growth_yoy")
+        self.assertEqual(expense.features, ("cpi_growth_yoy", "personal_income_growth_yoy"))
 
     def test_recommendation_policy_is_versioned_deterministic_and_quality_aware(self):
         historical = {"median": ".03", "q1": ".01", "q3": ".05"}

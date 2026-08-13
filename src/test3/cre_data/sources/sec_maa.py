@@ -44,6 +44,9 @@ class MAAParseResult:
     period: str
     effective_rent_rows: int
     rent_growth_rows: int
+    revenue_growth_rows: int
+    expense_growth_rows: int
+    noi_growth_rows: int
     inventory_rows: int
     occupancy_rows: int
     vacancy_rows: int
@@ -157,12 +160,25 @@ def parse_maa_accessibility_snapshot(snapshot: str, *, filing_url: str, filing_d
         if len(values) < 13:
             continue
         units = int(values[0])
-        current_rent, prior_rent, reported_yoy = values[-3], values[-2], values[-1] / Decimal("100")
-        if prior_rent <= 0 or abs((current_rent / prior_rent - 1) - reported_yoy) > Decimal("0.0015"):
-            raise ValueError(f"MAA rent-growth cross-check failed for {market} {period}")
+        current_revenue, prior_revenue, revenue_yoy = values[1], values[2], values[3] / Decimal("100")
+        current_expense, prior_expense, expense_yoy = values[4], values[5], values[6] / Decimal("100")
+        current_noi, prior_noi, noi_yoy = values[7], values[8], values[9] / Decimal("100")
+        current_rent, prior_rent, reported_yoy = values[10], values[11], values[12] / Decimal("100")
+        growth_checks = (
+            ("revenue", current_revenue, prior_revenue, revenue_yoy),
+            ("operating-expense", current_expense, prior_expense, expense_yoy),
+            ("NOI", current_noi, prior_noi, noi_yoy),
+            ("rent", current_rent, prior_rent, reported_yoy),
+        )
+        for label, current, prior, reported in growth_checks:
+            if prior <= 0 or abs((current / prior - 1) - reported) > Decimal("0.0015"):
+                raise ValueError(f"MAA {label}-growth cross-check failed for {market} {period}")
         for metric, value, unit, method, evidence in (
             ("effective_rent", current_rent, "USD_per_unit_month", "effective_rent", "same-store-qoq-effective-rent"),
             ("rent_growth_yoy", reported_yoy, "decimal_fraction", "same_store_yoy", "same-store-qoq-rent-yoy"),
+            ("revenue_growth_yoy", revenue_yoy, "decimal_fraction", "same_store_revenue_yoy", "same-store-qoq-revenue-yoy"),
+            ("operating_expense_growth_yoy", expense_yoy, "decimal_fraction", "same_store_operating_expense_yoy", "same-store-qoq-expense-yoy"),
+            ("noi_growth_yoy", noi_yoy, "decimal_fraction", "same_store_noi_yoy", "same-store-qoq-noi-yoy"),
             ("inventory", Decimal(units), "units", "same_store_inventory", "same-store-qoq-apartment-units"),
         ):
             raw = _base_row(market=market, period=period, filing_url=filing_url, filing_date=filing_date,
@@ -210,6 +226,9 @@ def parse_maa_accessibility_snapshot(snapshot: str, *, filing_url: str, filing_d
         period=period,
         effective_rent_rows=sum(row["metric"] == "effective_rent" for row in rows),
         rent_growth_rows=sum(row["metric"] == "rent_growth_yoy" for row in rows),
+        revenue_growth_rows=sum(row["metric"] == "revenue_growth_yoy" for row in rows),
+        expense_growth_rows=sum(row["metric"] == "operating_expense_growth_yoy" for row in rows),
+        noi_growth_rows=sum(row["metric"] == "noi_growth_yoy" for row in rows),
         inventory_rows=sum(row["metric"] == "inventory" for row in rows),
         occupancy_rows=sum(row["metric"] == "occupancy_rate" for row in rows),
         vacancy_rows=sum(row["metric"] == "vacancy_rate" for row in rows),

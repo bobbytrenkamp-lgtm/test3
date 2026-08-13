@@ -45,4 +45,14 @@ MULTIFAMILY_RENT_GROWTH_SPECS = (
 )
 
 
-MODEL_SPECIFICATIONS = {item.name: item for item in MULTIFAMILY_RENT_GROWTH_SPECS}
+MULTIFAMILY_EXPENSE_GROWTH_SPECS = (
+    ModelSpecification(
+        "mf_operating_expense_growth_macro", "1.0.0", "operating_expense_growth_yoy", "multifamily", "quarterly",
+        ("cpi_growth_yoy", "personal_income_growth_yoy"), True, True, "cluster_entity",
+        rationale="Transparent inflation and local-income candidate for same-store operating-expense growth.",
+    ),
+)
+
+
+MODEL_SPECIFICATIONS = {item.name: item for item in (*MULTIFAMILY_RENT_GROWTH_SPECS,
+                                                     *MULTIFAMILY_EXPENSE_GROWTH_SPECS)}

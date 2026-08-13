@@ -115,7 +115,10 @@ def _market_period_depth(rows: list[dict], minimum_periods: int) -> tuple[dict[s
     return counts, sum(count >= minimum_periods for count in counts.values())
 
 
-def target_readiness(paths: WarehousePaths, *, policy: ReadinessPolicy = ReadinessPolicy()) -> list[dict]:
+def target_readiness(paths: WarehousePaths, *, policy: ReadinessPolicy = ReadinessPolicy(),
+                     frequency: str | None = None) -> list[dict]:
+    if frequency is not None and frequency not in SUPPORTED_FREQUENCIES:
+        raise ValueError("target readiness currently supports annual or quarterly frequency")
     reports = verification_reports(paths)
     pairs = sorted({(property_type, metric.metric) for metric in CRE_METRICS.values()
                     for property_type in metric.property_types} |
@@ -125,8 +128,11 @@ def target_readiness(paths: WarehousePaths, *, policy: ReadinessPolicy = Readine
     output = []
     for property_type, target in pairs:
         all_rows = [row for report in reports for row in report.get("observations", [])
-                    if row.get("property_type") == property_type and row.get("metric") == target]
+                    if row.get("property_type") == property_type and row.get("metric") == target
+                    and (frequency is None or row.get("frequency") == frequency)]
         eligible, exclusions = _eligible_rows_from_reports(reports, property_type, target)
+        if frequency is not None:
+            eligible = [row for row in eligible if row.get("frequency") == frequency]
         markets = {row["geography_id"] for row in eligible}
         periods = {row["period"] for row in eligible}
         periods_by_market, longitudinal_markets = _market_period_depth(eligible, policy.minimum_periods)
@@ -146,6 +152,7 @@ def target_readiness(paths: WarehousePaths, *, policy: ReadinessPolicy = Readine
             reasons.append(f"eligible observations {len(eligible)} below minimum {policy.minimum_observations}")
         output.append({
             "property_type": property_type, "target": target, "observations": len(all_rows),
+            "frequency": frequency or "all",
             "verified_observations": sum(row.get("verification_status") == "analyst_verified" for row in all_rows),
             "model_eligible_observations": len(eligible), "markets": len(markets), "periods": len(periods),
             "markets_meeting_period_minimum": longitudinal_markets,
@@ -165,7 +172,7 @@ def target_readiness_for_specification(paths: WarehousePaths, specification: Mod
         minimum_periods=specification.minimum_periods,
         minimum_observations=specification.minimum_sample,
     )
-    matches = [item for item in target_readiness(paths, policy=policy)
+    matches = [item for item in target_readiness(paths, policy=policy, frequency=specification.frequency)
                if item["property_type"] == specification.property_type and item["target"] == specification.target]
     if not matches:
         raise ValueError("model specification target is not registered")

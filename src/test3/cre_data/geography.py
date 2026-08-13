@@ -19,6 +19,12 @@ class MarketDefinition:
     effective_from: str
     effective_to: str | None
     counties: tuple[dict, ...]
+    source_market_name: str | None = None
+    definition_version: str = "1.0.0"
+    weighting_methodology: str = ""
+    analyst_rationale: str = ""
+    source_evidence: str = ""
+    review_status: str = "draft"
 
     def validate(self) -> None:
         date.fromisoformat(self.effective_from)
@@ -26,16 +32,28 @@ class MarketDefinition:
             raise ValueError("market definition effective_to precedes effective_from")
         if not self.source_definition.strip() or not self.counties:
             raise ValueError("market definition requires source evidence and counties")
+        if self.review_status not in {"draft", "analyst_approved", "rejected"}:
+            raise ValueError("invalid market definition review status")
+        if self.review_status == "analyst_approved" and not all((
+            (self.source_market_name or "").strip(), self.definition_version.strip(),
+            self.weighting_methodology.strip(), self.analyst_rationale.strip(), self.source_evidence.strip(),
+        )):
+            raise ValueError("approved market definitions require version, rationale, weighting, and evidence")
         total = Decimal("0")
+        seen = set()
         for item in self.counties:
-            if not str(item.get("county_fips", "")).isdigit() or len(str(item["county_fips"])) != 5:
+            county_fips = str(item.get("county_fips", ""))
+            if not county_fips.isdigit() or len(county_fips) != 5:
                 raise ValueError("market county mapping requires five-digit county FIPS")
+            if county_fips in seen:
+                raise ValueError("market county mappings may not repeat a county")
+            seen.add(county_fips)
             weight = Decimal(str(item.get("weight")))
             if weight <= 0:
                 raise ValueError("market weights must be positive")
             total += weight
-        if abs(total - Decimal("1")) > Decimal("0.000001"):
-            raise ValueError("market county weights must total one")
+        if total != Decimal("1"):
+            raise ValueError("market county weights must total one exactly")
 
 
 def save_market_definition(paths: WarehousePaths, definition: MarketDefinition) -> Path:

@@ -12,6 +12,7 @@ from .lags import evaluate_candidate_lags
 from .modeling import train_panel_candidate
 from .specifications import MODEL_SPECIFICATIONS
 from .target_panel import build_target_panel, target_readiness, target_readiness_for_specification
+from .milestone7 import feature_compatibility, market_definition_coverage, milestone7_status
 from test3.warehouse.storage import WarehousePaths
 
 
@@ -54,6 +55,12 @@ def main(argv: list[str] | None = None) -> int:
     readiness = subparsers.add_parser("target-readiness", help="report real CRE target eligibility without fabricating readiness")
     readiness.add_argument("--data-root", default="data")
     readiness.add_argument("--model-specification", choices=tuple(sorted(MODEL_SPECIFICATIONS)))
+    milestone = subparsers.add_parser("milestone7-status", help="show approval, market-map, feature, and model gates")
+    milestone.add_argument("--data-root", default="data")
+    definitions = subparsers.add_parser("market-definition-coverage", help="audit MAA market-definition eligibility")
+    definitions.add_argument("--data-root", default="data")
+    compatibility = subparsers.add_parser("feature-compatibility", help="audit a governed model at its declared frequency")
+    compatibility.add_argument("--model-specification", required=True, choices=tuple(sorted(MODEL_SPECIFICATIONS)))
     target_panel = subparsers.add_parser("build-target-panel", help="join approved CRE targets to immutable feature panels")
     target_panel.add_argument("--data-root", default="data")
     target_panel.add_argument("--property-type", required=True, choices=("multifamily", "industrial", "office", "retail"))
@@ -96,6 +103,17 @@ def main(argv: list[str] | None = None) -> int:
         output = (target_readiness_for_specification(paths, MODEL_SPECIFICATIONS[args.model_specification])
                   if args.model_specification else target_readiness(paths))
         print(json.dumps(output, indent=2, sort_keys=True))
+        return 0
+    if args.command == "milestone7-status":
+        print(json.dumps(milestone7_status(WarehousePaths.from_data_root(Path(args.data_root))), indent=2, sort_keys=True))
+        return 0
+    if args.command == "market-definition-coverage":
+        print(json.dumps(market_definition_coverage(WarehousePaths.from_data_root(Path(args.data_root))), indent=2,
+                         sort_keys=True))
+        return 0
+    if args.command == "feature-compatibility":
+        print(json.dumps(feature_compatibility(MODEL_SPECIFICATIONS[args.model_specification]), indent=2,
+                         sort_keys=True))
         return 0
     if args.command == "build-target-panel":
         try:

@@ -39,7 +39,7 @@ def _passed_validation():
 
 def _spec(**changes):
     base = ModelSpecification("governed_test", "1", "target", "multifamily", "annual", ("feature",),
-                              False, False, "hc1", 100, 5, 20, "fixture")
+                              False, False, "hc1", 100, 5, 20, "fixture", purpose="forecast")
     return replace(base, **changes)
 
 

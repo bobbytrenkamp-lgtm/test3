@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 import re
 
-from test3.cre_data.derivations import derive_vacancy_from_occupancy
+from test3.cre_data.derivations import derive_noi_margin, derive_vacancy_from_occupancy
 from test3.cre_data.schema import REQUIRED, normalize_cre_record
 
 
@@ -47,6 +47,10 @@ class MAAParseResult:
     revenue_growth_rows: int
     expense_growth_rows: int
     noi_growth_rows: int
+    revenue_rows: int
+    expense_rows: int
+    noi_rows: int
+    noi_margin_rows: int
     inventory_rows: int
     occupancy_rows: int
     vacancy_rows: int
@@ -149,6 +153,8 @@ def parse_maa_accessibility_snapshot(snapshot: str, *, filing_url: str, filing_d
 
     qoq_heading = _first_heading(snapshot, _QOQ_HEADINGS)
     qoq = _section(snapshot, qoq_heading, _first_heading(snapshot, _SEQUENTIAL_HEADINGS))
+    if "Dollars in thousands, except" not in qoq:
+        raise ValueError("MAA filing does not expose the governed monetary unit label")
     for row_text in _ROW.findall(qoq):
         match = _MARKET.match(row_text)
         if not match:
@@ -173,12 +179,17 @@ def parse_maa_accessibility_snapshot(snapshot: str, *, filing_url: str, filing_d
         for label, current, prior, reported in growth_checks:
             if prior <= 0 or abs((current / prior - 1) - reported) > Decimal("0.0015"):
                 raise ValueError(f"MAA {label}-growth cross-check failed for {market} {period}")
+        if current_revenue - current_expense != current_noi or prior_revenue - prior_expense != prior_noi:
+            raise ValueError(f"MAA revenue-expense-NOI identity failed for {market} {period}")
         for metric, value, unit, method, evidence in (
             ("effective_rent", current_rent, "USD_per_unit_month", "effective_rent", "same-store-qoq-effective-rent"),
             ("rent_growth_yoy", reported_yoy, "decimal_fraction", "same_store_yoy", "same-store-qoq-rent-yoy"),
             ("revenue_growth_yoy", revenue_yoy, "decimal_fraction", "same_store_revenue_yoy", "same-store-qoq-revenue-yoy"),
             ("operating_expense_growth_yoy", expense_yoy, "decimal_fraction", "same_store_operating_expense_yoy", "same-store-qoq-expense-yoy"),
             ("noi_growth_yoy", noi_yoy, "decimal_fraction", "same_store_noi_yoy", "same-store-qoq-noi-yoy"),
+            ("same_store_revenue", current_revenue, "USD_thousands_quarter", "same_store_operating_revenue", "same-store-qoq-revenue"),
+            ("same_store_operating_expense", current_expense, "USD_thousands_quarter", "same_store_operating_expense", "same-store-qoq-expense"),
+            ("same_store_noi", current_noi, "USD_thousands_quarter", "same_store_net_operating_income", "same-store-qoq-noi"),
             ("inventory", Decimal(units), "units", "same_store_inventory", "same-store-qoq-apartment-units"),
         ):
             raw = _base_row(market=market, period=period, filing_url=filing_url, filing_date=filing_date,
@@ -186,6 +197,8 @@ def parse_maa_accessibility_snapshot(snapshot: str, *, filing_url: str, filing_d
                             methodology=method, sample_count=units, evidence=f"{evidence}:{_market_id(market)}",
                             verification_status=verification_status)
             rows.append(normalize_cre_record(raw, row_number=len(rows) + 1))
+
+    rows.extend(derive_noi_margin(rows))
 
     occupancy_heading = _first_heading(snapshot, _OCCUPANCY_HEADINGS)
     occupancy = _section(snapshot, occupancy_heading, qoq_heading)
@@ -229,6 +242,10 @@ def parse_maa_accessibility_snapshot(snapshot: str, *, filing_url: str, filing_d
         revenue_growth_rows=sum(row["metric"] == "revenue_growth_yoy" for row in rows),
         expense_growth_rows=sum(row["metric"] == "operating_expense_growth_yoy" for row in rows),
         noi_growth_rows=sum(row["metric"] == "noi_growth_yoy" for row in rows),
+        revenue_rows=sum(row["metric"] == "same_store_revenue" for row in rows),
+        expense_rows=sum(row["metric"] == "same_store_operating_expense" for row in rows),
+        noi_rows=sum(row["metric"] == "same_store_noi" for row in rows),
+        noi_margin_rows=sum(row["metric"] == "noi_margin" for row in rows),
         inventory_rows=sum(row["metric"] == "inventory" for row in rows),
         occupancy_rows=sum(row["metric"] == "occupancy_rate" for row in rows),
         vacancy_rows=sum(row["metric"] == "vacancy_rate" for row in rows),

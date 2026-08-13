@@ -30,7 +30,7 @@ from test3.cre_data.report_inbox import save_report_discovery
 from test3.cre_data.report_tables import ReportMappingProfile, save_report_profile
 from test3.cre_data.verification import available_as_of, verify_observations
 from test3.cre_data.sources.sec_maa import write_review_csv
-from test3.cre_data.review import approve_cre_review
+from test3.cre_data.review import approve_cre_review, prepare_cre_review
 
 
 PUBLIC_SOURCES = ("census", "bls", "bea", "fred", "building_permits", "crosswalk", "hud", "hvs")
@@ -91,6 +91,8 @@ def _parser():
     approve_review = commands.add_parser("approve-cre-review", help="create a hash-bound analyst-approved CRE review file")
     approve_review.add_argument("--input", required=True); approve_review.add_argument("--attestation", required=True)
     approve_review.add_argument("--output", required=True)
+    prepare_review = commands.add_parser("prepare-cre-review", help="inventory a CRE review file and create an unsigned attestation template")
+    prepare_review.add_argument("--input", required=True); prepare_review.add_argument("--output", required=True)
     bulk = commands.add_parser("import-cre-bulk", help="import multiple authorized CRE history files independently")
     bulk.add_argument("--input-folder", required=True); bulk.add_argument("--dataset-prefix", required=True)
     bulk.add_argument("--version-prefix", required=True); bulk.add_argument("--mapping")
@@ -145,6 +147,8 @@ def main(argv=None):
                                         analyst_review_confirmed=False))
     elif args.command == "approve-cre-review":
         output = approve_cre_review(args.input, args.attestation, args.output)
+    elif args.command == "prepare-cre-review":
+        output = prepare_cre_review(args.input, args.output)
     elif args.command == "import-cre-bulk":
         folder = Path(args.input_folder).resolve()
         if not folder.is_dir(): raise ValueError("bulk import folder does not exist")

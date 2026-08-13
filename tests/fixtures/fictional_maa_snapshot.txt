@@ -4,7 +4,9 @@
 - table:
   - row "Apartment Units Same Store NOI June 30 2025 95.0 % 94.0 %":
       - cell "Apartment Units Same Store NOI June 30 2025 95.0 % 94.0 %"
-  - row "Fictionville, NC 1,200 60.0 % 95.5 % 95.0 %":
+  - row "March 31 2025 March 31 2024 31.0 % 30.0 %":
+      - cell "March 31 2025 March 31 2024 31.0 % 30.0 %"
+  - row "Fictionville, NC 1,200 60.0 % 95.5 % 95.0 % 93.1 % 92.8 %":
       - cell "Fictionville, NC"
   - row "Other 100 5.0 % 90.0 % 89.0 %":
       - cell "Other"

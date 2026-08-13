@@ -379,3 +379,9 @@ def diligence_summary(deal: dict, approved: list[dict], findings: list[dict], do
         "executiveSummary": sections[0]["items"][0]["statement"], "sections": sections,
         "approvedFacts": facts, "keyDiscrepancies": discrepancy_items, "sourceAppendix": appendix,
     }
+
+
+# These are stable production API names, not pytest functions. Test modules
+# import them directly, so explicit collection metadata avoids fixture errors.
+test1_enrichment.__test__ = False
+test2_export.__test__ = False

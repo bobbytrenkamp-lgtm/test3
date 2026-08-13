@@ -15,6 +15,7 @@ import duckdb
 
 from test3.features.manifests import verify_feature_manifest
 from test3.features.panel import FeaturePanel
+from test3.cre_data.geography import market_definitions
 from test3.cre_data.metrics import CRE_METRICS
 from test3.cre_data.versions import verification_reports
 from test3.warehouse.manifests import canonical_json, file_sha256
@@ -173,6 +174,55 @@ def _feature_source(paths: WarehousePaths, frequency: str, geography: str) -> tu
     return manifest, panel_path
 
 
+def _period_end(period: str, frequency: str) -> date:
+    if frequency == "annual":
+        return date(int(period), 12, 31)
+    match = re.fullmatch(r"(\d{4})-Q([1-4])", period)
+    if not match:
+        raise ValueError(f"invalid quarterly target period: {period}")
+    year, quarter = int(match.group(1)), int(match.group(2))
+    month = quarter * 3
+    next_month = date(year + (month == 12), 1 if month == 12 else month + 1, 1)
+    return date.fromordinal(next_month.toordinal() - 1)
+
+
+def _active_market_definition(definitions: list[dict], row: dict) -> tuple[dict | None, str | None]:
+    """Select one source-backed market definition effective at the target period end."""
+    period_end = _period_end(row["period"], row["frequency"])
+    matches = [item for item in definitions
+               if item["market_id"] == row["geography_id"]
+               and item["property_type"] == row["property_type"]
+               and date.fromisoformat(item["effective_from"]) <= period_end
+               and (not item.get("effective_to") or period_end <= date.fromisoformat(item["effective_to"]))]
+    if len(matches) > 1:
+        return None, "ambiguous_market_definition"
+    if not matches:
+        return None, "missing_market_definition"
+    return matches[0], None
+
+
+def _weighted_county_features(definition: dict, period: str, feature_names: set[str],
+                              feature_rows: dict) -> dict | None:
+    component_rows = []
+    for component in definition["counties"]:
+        row = feature_rows.get(("county", str(component["county_fips"]), period))
+        if row is None:
+            return None
+        component_rows.append((row, float(component["weight"])))
+    output = {}
+    for name in sorted(feature_names):
+        values = [(row.get(name), weight) for row, weight in component_rows]
+        # Missing county inputs remain missing; they are never zero-filled or
+        # reweighted over the counties that happen to have data.
+        output[name] = (sum(float(value) * weight for value, weight in values)
+                        if values and all(value is not None for value, _ in values) else None)
+        availability = [row.get(name + "__available_at") for row, _ in component_rows]
+        output[name + "__available_at"] = (max(availability)
+                                             if availability and all(value is not None for value in availability)
+                                             else None)
+    return output
+
+
 def _manifest_hash(payload: dict) -> str:
     return hashlib.sha256(canonical_json({key: value for key, value in payload.items() if key != "manifest_hash"}).encode()).hexdigest()
 
@@ -188,6 +238,8 @@ def build_target_panel(paths: WarehousePaths, *, property_type: str, target: str
     if not eligible:
         raise ValueError("no model-eligible target observations match the requested panel")
 
+    definitions = market_definitions(paths)
+    row_definitions: dict[str, dict] = {}
     required = set()
     for row in eligible:
         if row.get("cbsa"):
@@ -195,7 +247,12 @@ def build_target_panel(paths: WarehousePaths, *, property_type: str, target: str
         elif row.get("county_fips") or row.get("geography_type") == "county":
             required.add("county")
         else:
-            exclusions["no_feature_geography"] += 1
+            definition, problem = _active_market_definition(definitions, row)
+            if problem:
+                exclusions[problem] += 1
+            else:
+                required.add("county")
+                row_definitions[row["observation_id"]] = definition
     sources = {geography: _feature_source(paths, frequency, geography) for geography in required}
     feature_rows, feature_names, feature_hashes, source_hashes = {}, set(), set(), set()
     for geography, (manifest, panel_path) in sources.items():
@@ -211,13 +268,18 @@ def build_target_panel(paths: WarehousePaths, *, property_type: str, target: str
 
     joined = []
     for target_row in eligible:
+        definition = None
         if target_row.get("cbsa"):
             geography, feature_id = "cbsa", target_row["cbsa"]
         elif target_row.get("county_fips") or target_row.get("geography_type") == "county":
             geography, feature_id = "county", target_row.get("county_fips") or target_row["geography_id"]
+        elif target_row["observation_id"] in row_definitions:
+            geography, feature_id = "market_weighted_counties", target_row["geography_id"]
+            definition = row_definitions[target_row["observation_id"]]
         else:
             continue
-        features = feature_rows.get((geography, feature_id, target_row["period"]))
+        features = (_weighted_county_features(definition, target_row["period"], feature_names, feature_rows)
+                    if definition else feature_rows.get((geography, feature_id, target_row["period"])))
         if features is None:
             exclusions["missing_feature_period"] += 1
             continue
@@ -229,6 +291,7 @@ def build_target_panel(paths: WarehousePaths, *, property_type: str, target: str
             "target_observation_id": target_row["observation_id"],
             "target_dataset_hash": target_row["target_dataset_hash"],
             "target_source_manifest_hash": target_row["target_source_manifest_hash"],
+            "market_definition_hash": definition["sha256"] if definition else None,
         }
         for name in sorted(feature_names):
             row[name] = features.get(name)
@@ -245,6 +308,8 @@ def build_target_panel(paths: WarehousePaths, *, property_type: str, target: str
         "schema_version": TARGET_PANEL_VERSION, "property_type": property_type, "target": target,
         "frequency": frequency, "target_dataset_hashes": list(target_hashes),
         "source_manifest_hashes": sorted(source_hashes), "feature_table_hashes": sorted(feature_hashes),
+        "market_definition_hashes": sorted({row["market_definition_hash"] for row in joined
+                                             if row.get("market_definition_hash")}),
         "rows_hash": hashlib.sha256(canonical_json(joined).encode()).hexdigest(),
     }
     version = hashlib.sha256(canonical_json(identity).encode()).hexdigest()[:24]
@@ -278,6 +343,7 @@ def build_target_panel(paths: WarehousePaths, *, property_type: str, target: str
                    "exclusions": dict(sorted(exclusions.items())), "panel_sha256": file_sha256(staging / "panel.parquet"),
                    "limitations": ["Only analyst-approved, model-eligible targets are included.",
                                    "Multiple unresolved sources for one market-period are excluded, never averaged.",
+                                   "Analyst-defined markets use only explicit, effective-dated county weights; missing county features remain null.",
                                    "Unknown release dates use the conservative retrieval-date fallback recorded at import."]}
         payload["manifest_hash"] = _manifest_hash(payload)
         (staging / "target_panel_manifest.json").write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")

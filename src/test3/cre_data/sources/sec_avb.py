@@ -26,6 +26,10 @@ COMPATIBILITY = {
         "maa_metric": "rent_growth_yoy", "classification": "comparable_with_limitation",
         "limitation": "Growth is based on AVB residential revenue per occupied home, not MAA effective rent.",
     },
+    "average_rental_rate_growth_yoy": {
+        "maa_metric": "rent_growth_yoy", "classification": "comparable_with_limitation",
+        "limitation": "AVB's legacy average rental rate includes its disclosed concession methodology; issuer portfolios differ.",
+    },
     "occupancy_rate": {
         "maa_metric": "occupancy_rate", "classification": "not_comparable",
         "limitation": "AVB reports economic occupancy while MAA reports physical occupancy.",
@@ -41,6 +45,10 @@ COMPATIBILITY = {
     "revenue_growth_yoy_excluding_rent_relief": {
         "maa_metric": "revenue_growth_yoy", "classification": "not_comparable",
         "limitation": "AVB's disclosed rent-relief adjustment is source-specific and is retained separately.",
+    },
+    "revenue_growth_yoy_cash_basis": {
+        "maa_metric": "revenue_growth_yoy", "classification": "not_comparable",
+        "limitation": "AVB's cash-basis concession treatment is a distinct source-specific series.",
     },
     "inventory": {
         "maa_metric": "inventory", "classification": "comparable_with_limitation",
@@ -136,10 +144,62 @@ def write_avb_series_review_csv(filings: list[dict], destination: str | Path) ->
                "observations": len(observations), "schema_versions": sorted(schemas),
                "metrics": sorted({row["metric"] for row in observations}),
                "analyst_review_required": True, "compatibility": methodology_comparison_artifact()}
+    payload["continuity"] = series_continuity_artifact(observations, evidence)
     payload["artifact_hash"] = hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
     return payload
+
+
+def _quarter_ordinal(period: str) -> int:
+    match = re.fullmatch(r"(\d{4})-Q([1-4])", period)
+    if not match:
+        raise ValueError(f"invalid quarterly period: {period}")
+    return int(match.group(1)) * 4 + int(match.group(2)) - 1
+
+
+def series_continuity_artifact(observations: list[dict], evidence: list[dict]) -> dict:
+    """Expose market-universe and methodology breaks; never harmonize them silently."""
+    periods = sorted({row["period"] for row in observations}, key=_quarter_ordinal)
+    markets_by_period = {
+        period: sorted({row["market"] for row in observations if row["period"] == period})
+        for period in periods
+    }
+    period_gaps = []
+    market_transitions = []
+    for previous, current in zip(periods, periods[1:]):
+        distance = _quarter_ordinal(current) - _quarter_ordinal(previous)
+        if distance != 1:
+            period_gaps.append({"previous_period": previous, "next_period": current,
+                                "missing_quarters": distance - 1})
+        previous_markets, current_markets = set(markets_by_period[previous]), set(markets_by_period[current])
+        added, removed = sorted(current_markets - previous_markets), sorted(previous_markets - current_markets)
+        if added or removed:
+            market_transitions.append({"previous_period": previous, "next_period": current,
+                                       "added": added, "removed": removed,
+                                       "review_required": True})
+    ordered_evidence = sorted(evidence, key=lambda row: _quarter_ordinal(row["period"]))
+    schema_transitions = []
+    for previous, current in zip(ordered_evidence, ordered_evidence[1:]):
+        if previous["schema_version"] != current["schema_version"]:
+            schema_transitions.append({"previous_period": previous["period"], "next_period": current["period"],
+                                       "from_schema": previous["schema_version"],
+                                       "to_schema": current["schema_version"],
+                                       "pooling_permitted": False, "review_required": True})
+    metric_periods = {
+        metric: sorted({row["period"] for row in observations if row["metric"] == metric}, key=_quarter_ordinal)
+        for metric in sorted({row["metric"] for row in observations})
+    }
+    body = {"schema_version": "test3-avb-series-continuity/1.0.0", "periods": periods,
+            "period_gaps": period_gaps, "markets_by_period": markets_by_period,
+            "market_transitions": market_transitions, "schema_transitions": schema_transitions,
+            "metric_periods": metric_periods,
+            "homogeneous_methodology": not schema_transitions,
+            "automatic_harmonization_permitted": False if schema_transitions else True}
+    body["artifact_hash"] = hashlib.sha256(
+        json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return body
 
 
 def methodology_comparison_artifact() -> dict:
@@ -167,7 +227,7 @@ def _market_id(name: str) -> str:
 
 
 def _base(*, market, period, filing_url, filing_date, retrieved_at, metric, value, unit,
-          methodology, homes, evidence):
+          methodology, homes, evidence, schema_version):
     return normalize_cre_record({
         "market": market, "geography_type": "market", "geography_id": _market_id(market),
         "period": period, "frequency": "quarterly", "property_type": "multifamily",
@@ -178,7 +238,8 @@ def _base(*, market, period, filing_url, filing_date, retrieved_at, metric, valu
         "licensing_notes": "Public SEC-filed numeric facts used for local research; filing text is not redistributed.",
         "redistribution_permitted": "no", "verification_status": "unverified", "source_class": SOURCE_CLASS,
         "sample_count": homes, "target_classification": "institutional_target",
-        "notes": "Source-defined AVB same-store portfolio market, not a CBSA; analyst approval and governed geography required.",
+        "notes": ("Source-defined AVB same-store portfolio market, not a CBSA; analyst approval and governed "
+                  f"geography required. Source schema: {schema_version}."),
     }, row_number=1)
 
 
@@ -192,7 +253,8 @@ def parse_avb_html(content: str, *, filing_url: str, filing_date: str,
     for table in parser.tables:
         flat = " ".join(cell for row in table for cell in row)
         if not ("Apartment Homes" in flat and
-                ("Average Monthly Revenue" in flat or "Average Monthly Rental Revenue" in flat) and
+                ("Average Monthly Revenue" in flat or "Average Monthly Rental Revenue" in flat or
+                 "Average Rental Rates" in flat or "Average Rental Revenue Per Occupied Home" in flat) and
                 "Economic Occupancy" in flat and
                 ("Residential Revenue" in flat or "Residential Rental Revenue" in flat)):
             continue
@@ -204,16 +266,20 @@ def parse_avb_html(content: str, *, filing_url: str, filing_date: str,
     table, match = candidates[0]
     period = f"20{match.group(2)}-Q{match.group(1)}"; retrieved_at = retrieved_at or datetime.now(timezone.utc).isoformat()
     output = []
-    has_rent_relief_adjustment = "% Change Excluding Rent Relief" in " ".join(
+    table_text = " ".join(
         cell for row in table for cell in row
     )
-    schema_version = (
-        "avb-attachment-4/rent-relief-adjusted-v1"
-        if has_rent_relief_adjustment else "avb-attachment-4/core-v1"
-    )
+    has_rent_relief_adjustment = "% Change Excluding Rent Relief" in table_text
+    has_cash_basis_adjustment = "% Change on a Cash Basis" in table_text
+    legacy_rental_rate = "Average Rental Rates" in table_text
+    rental_revenue_per_home = "Average Rental Revenue Per Occupied Home" in table_text
+    schema_version = ("avb-attachment-4/legacy-rental-rate-cash-basis-v1" if legacy_rental_rate else
+                      "avb-attachment-4/rental-revenue-cash-basis-v1" if rental_revenue_per_home else
+                      "avb-attachment-4/rent-relief-adjusted-v1" if has_rent_relief_adjustment else
+                      "avb-attachment-4/core-v1")
     for raw_cells in table:
         cells = [cell for cell in raw_cells if cell not in {"", "$", "%"}]
-        expected_cells = 12 if has_rent_relief_adjustment else 11
+        expected_cells = 12 if (has_rent_relief_adjustment or has_cash_basis_adjustment) else 11
         if len(cells) != expected_cells: continue
         market = cells[0].strip()
         if not market or market in {"Market"} or market.startswith(("Total", "Apartment Homes", "Quarterly", "AvalonBay")): continue
@@ -223,6 +289,7 @@ def parse_avb_html(content: str, *, filing_url: str, filing_date: str,
             prior_occupancy = _number(cells[6]) / 100; occupancy_change = _number(cells[7], reported_change=True) / 100
             revenue = _number(cells[8]); prior_revenue = _number(cells[9]); reported_revenue_growth = _number(cells[10], reported_change=True) / 100
             adjusted_revenue_growth = (_number(cells[11], reported_change=True) / 100) if has_rent_relief_adjustment else None
+            cash_basis_revenue_growth = (_number(cells[11], reported_change=True) / 100) if has_cash_basis_adjustment else None
         except (ValueError, ArithmeticError):
             raise AVBSchemaDriftError(f"REVIEW_REQUIRED_SCHEMA_DRIFT: malformed AVB row {market!r}") from None
         if homes <= 0 or prior <= 0 or prior_revenue <= 0:
@@ -235,8 +302,12 @@ def parse_avb_html(content: str, *, filing_url: str, filing_date: str,
         if abs(revenue_growth - reported_revenue_growth) > Decimal("0.0015"):
             raise AVBSchemaDriftError(f"REVIEW_REQUIRED_SCHEMA_DRIFT: residential revenue reconciliation failed for {market}")
         values = [
-            ("average_monthly_revenue_per_occupied_home", current, "USD_per_unit_month", "same_store_revenue_per_occupied_home"),
-            ("average_monthly_revenue_growth_yoy", growth, "decimal_fraction", "same_store_revenue_per_occupied_home_yoy"),
+            (("average_rental_rate" if legacy_rental_rate else "average_monthly_revenue_per_occupied_home"),
+             current, "USD_per_unit_month",
+             ("same_store_average_rental_rate" if legacy_rental_rate else "same_store_revenue_per_occupied_home")),
+            (("average_rental_rate_growth_yoy" if legacy_rental_rate else "average_monthly_revenue_growth_yoy"),
+             growth, "decimal_fraction",
+             ("same_store_average_rental_rate_yoy" if legacy_rental_rate else "same_store_revenue_per_occupied_home_yoy")),
             ("occupancy_rate", occupancy, "decimal_fraction", "economic_occupancy"),
             ("economic_vacancy_rate", Decimal("1") - occupancy, "decimal_fraction", "economic_vacancy"),
             ("revenue_growth_yoy", revenue_growth, "decimal_fraction", "same_store_revenue_yoy"),
@@ -245,10 +316,14 @@ def parse_avb_html(content: str, *, filing_url: str, filing_date: str,
         if adjusted_revenue_growth is not None:
             values.append(("revenue_growth_yoy_excluding_rent_relief", adjusted_revenue_growth,
                            "decimal_fraction", "same_store_revenue_yoy_excluding_rent_relief"))
+        if cash_basis_revenue_growth is not None:
+            values.append(("revenue_growth_yoy_cash_basis", cash_basis_revenue_growth,
+                           "decimal_fraction", "same_store_revenue_yoy_cash_basis"))
         for metric, value, unit, method in values:
             output.append(_base(market=market, period=period, filing_url=filing_url, filing_date=filing_date,
                                 retrieved_at=retrieved_at, metric=metric, value=value, unit=unit,
-                                methodology=method, homes=homes, evidence=f"attachment-4:{_market_id(market)}:{metric}"))
+                                methodology=method, homes=homes, evidence=f"attachment-4:{_market_id(market)}:{metric}",
+                                schema_version=schema_version))
     if not output:
         raise AVBSchemaDriftError("REVIEW_REQUIRED_SCHEMA_DRIFT: no unambiguous AVB market rows")
     return AVBParseResult(filing_url, filing_date, period,

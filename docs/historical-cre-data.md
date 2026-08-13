@@ -64,6 +64,13 @@ The first installed local series is MAA's quarterly SEC supplemental schedule. T
 
 The central CRE verifier independently repeats the operating-statement checks for every import path, including user-owned CSV, XLSX, and Parquet histories. Revenue, operating expense, and NOI must share a unit and reconcile within one disclosed unit; NOI margin must reconcile to `NOI / revenue` within one basis point. Failures are preserved as findings and block model eligibility rather than being silently corrected.
 
+AVB historical candidate series fail closed across disclosure changes. Legacy average rental
+rates are not relabeled as monthly revenue per occupied home, cash-basis changes are not pooled
+with rent-relief-adjusted changes, and a content-hashed continuity artifact exposes missing
+quarters, changes in the disclosed market universe, and source-schema transitions. These
+controls increase historical depth without manufacturing one homogeneous target where the
+issuer's own definitions changed.
+
 Analyst review packets include aggregate quality-finding counts, a bounded finding list with affected market/period/metric/value/evidence rows, a truncation indicator, and explicit model-blocking codes. An attestation cannot create an approved output when its selected observations still fail a central blocking rule; the analyst must correct, reject, or narrow the selection while the original evidence remains immutable.
 
 Parsing and publication never approve rows. `publish-maa-sec-candidates` intentionally publishes unverified evidence with `source_id=sec_maa`; an analyst must review the local CSV and source snapshots before a separate immutable approved version can become model-eligible. No forecasting model may be described as validated until legitimate historical targets are approved, feature-compatible, and tested out of sample.

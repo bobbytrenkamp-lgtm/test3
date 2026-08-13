@@ -6,7 +6,7 @@ from pathlib import Path
 
 from test3.cre_data.sources.sec_avb import (AVBSchemaDriftError, COMPATIBILITY,
                                             methodology_comparison_artifact, parse_avb_html,
-                                            write_avb_series_review_csv)
+                                            series_continuity_artifact, write_avb_series_review_csv)
 from test3.research.cross_source import (company_bias, cross_source_gate, cross_source_generalization,
                                          exact_horizon_pairs)
 from test3.research.test2_evidence import build_test2_assumption_evidence
@@ -30,6 +30,14 @@ AVB_RENT_RELIEF_FIXTURE = AVB_FIXTURE.replace(
     "<th>Q1 26</th><th>Q1 25</th><th>% Change</th><th>% Change Excluding Rent Relief</th></tr>",
 ).replace("<td>95,057</td><td>94,686</td><td>0.4</td></tr>",
           "<td>95,057</td><td>94,686</td><td>0.4</td><td>0.6</td></tr>")
+
+AVB_CASH_BASIS_FIXTURE = AVB_FIXTURE.replace(
+    "Average Monthly Revenue Per Occupied Home", "Average Rental Rates"
+).replace(
+    "<th>Q1 26</th><th>Q1 25</th><th>% Change</th></tr>",
+    "<th>Q1 26</th><th>Q1 25</th><th>% Change</th><th>% Change on a Cash Basis</th></tr>",
+).replace("<td>95,057</td><td>94,686</td><td>0.4</td></tr>",
+          "<td>95,057</td><td>94,686</td><td>0.4</td><td>0.5</td></tr>")
 
 
 class Milestone8Tests(unittest.TestCase):
@@ -63,6 +71,35 @@ class Milestone8Tests(unittest.TestCase):
         by_metric = {row["metric"]: row for row in result.observations}
         self.assertEqual(by_metric["revenue_growth_yoy_excluding_rent_relief"]["value"], "0.006")
         self.assertEqual(len(result.observations), 7)
+
+    def test_avb_legacy_cash_basis_schema_cannot_be_silently_pooled(self):
+        result = parse_avb_html(AVB_CASH_BASIS_FIXTURE,
+            filing_url="https://www.sec.gov/Archives/edgar/data/915912/000091591222000009/q12022ex-992.htm",
+            filing_date="2026-04-27")
+        self.assertEqual(result.schema_version, "avb-attachment-4/legacy-rental-rate-cash-basis-v1")
+        by_metric = {row["metric"]: row for row in result.observations}
+        self.assertIn("average_rental_rate_growth_yoy", by_metric)
+        self.assertNotIn("average_monthly_revenue_growth_yoy", by_metric)
+        self.assertEqual(by_metric["revenue_growth_yoy_cash_basis"]["value"], "0.005")
+        self.assertIn(result.schema_version, by_metric["average_rental_rate"]["notes"])
+
+    def test_series_continuity_surfaces_gaps_universe_and_schema_breaks(self):
+        observations = [
+            {"period": "2022-Q1", "market": "A", "metric": "average_rental_rate_growth_yoy"},
+            {"period": "2022-Q1", "market": "B", "metric": "average_rental_rate_growth_yoy"},
+            {"period": "2022-Q3", "market": "A", "metric": "average_monthly_revenue_growth_yoy"},
+            {"period": "2022-Q3", "market": "C", "metric": "average_monthly_revenue_growth_yoy"},
+        ]
+        evidence = [
+            {"period": "2022-Q1", "schema_version": "legacy"},
+            {"period": "2022-Q3", "schema_version": "current"},
+        ]
+        result = series_continuity_artifact(observations, evidence)
+        self.assertEqual(result["period_gaps"][0]["missing_quarters"], 1)
+        self.assertEqual(result["market_transitions"][0]["added"], ["C"])
+        self.assertEqual(result["market_transitions"][0]["removed"], ["B"])
+        self.assertFalse(result["schema_transitions"][0]["pooling_permitted"])
+        self.assertFalse(result["automatic_harmonization_permitted"])
 
     def test_avb_series_manifest_is_immutable_and_deduplicated(self):
         with tempfile.TemporaryDirectory() as folder:

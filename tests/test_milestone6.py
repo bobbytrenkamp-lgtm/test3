@@ -144,6 +144,8 @@ class Milestone6Tests(unittest.TestCase):
             self.assertEqual((packet["observations"], packet["markets"]), (12, 1))
             self.assertEqual(packet["evidence_documents"], 1)
             packet_payload = json.loads(packet_path.read_text(encoding="utf-8"))
+            self.assertFalse(packet_payload["quality_summary"]["blocking_findings_present"])
+            self.assertEqual(packet_payload["quality_summary"]["model_eligible_before_review"], 0)
             self.assertEqual(packet_payload["attestation_template"]["approved_markets"], [])
             self.assertTrue(all(value is False for value in packet_payload["attestation_template"]["acknowledgements"].values()))
             with self.assertRaises(FileExistsError):

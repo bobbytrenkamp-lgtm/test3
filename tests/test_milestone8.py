@@ -55,6 +55,39 @@ class Milestone8Tests(unittest.TestCase):
         self.assertEqual(COMPATIBILITY["average_monthly_revenue_growth_yoy"]["classification"],
                          "comparable_with_limitation")
         self.assertEqual(by_metric["average_monthly_revenue_growth_yoy"]["verification_status"], "unverified")
+        self.assertEqual(by_metric["average_monthly_revenue_growth_yoy"]["source_geography_role"],
+                         "leaf_or_standalone")
+        self.assertEqual(by_metric["average_monthly_revenue_growth_yoy"]["release_date_evidence_status"],
+                         "manifest_asserted_review_required")
+
+    def test_avb_release_date_must_match_embedded_evidence(self):
+        content = "<p>For Immediate News Release April 27, 2026</p>" + AVB_FIXTURE
+        result = parse_avb_html(content,
+            filing_url="https://www.sec.gov/Archives/edgar/data/915912/000091591226000010/q12026ex-992.htm",
+            filing_date="2026-04-27", retrieved_at="2026-04-28T00:00:00+00:00")
+        self.assertEqual(result.observations[0]["release_date_evidence_status"],
+                         "embedded_release_date_verified")
+        with self.assertRaisesRegex(ValueError, "does not match embedded"):
+            parse_avb_html(content,
+                filing_url="https://www.sec.gov/Archives/edgar/data/915912/000091591226000010/q12026ex-992.htm",
+                filing_date="2026-04-28", retrieved_at="2026-04-29T00:00:00+00:00")
+
+    def test_avb_overlapping_rollup_is_explicitly_non_leaf(self):
+        rollup = AVB_FIXTURE.replace("Boston, MA", "Metro NY/NJ")
+        result = parse_avb_html(rollup,
+            filing_url="https://www.sec.gov/Archives/edgar/data/915912/000091591226000010/q12026ex-992.htm",
+            filing_date="2026-04-27", retrieved_at="2026-04-28T00:00:00+00:00")
+        self.assertEqual(result.observations[0]["source_geography_role"], "overlapping_region_rollup")
+
+    def test_avb_punctuation_alias_preserves_source_label_with_stable_identity(self):
+        old = parse_avb_html(AVB_FIXTURE.replace("Boston, MA", "Oakland-East Bay, CA"),
+            filing_url="https://www.sec.gov/Archives/edgar/data/915912/000091591226000010/q12026ex-992.htm",
+            filing_date="2026-04-27")
+        new = parse_avb_html(AVB_FIXTURE.replace("Boston, MA", "East Bay"),
+            filing_url="https://www.sec.gov/Archives/edgar/data/915912/000091591226000010/q12026ex-992.htm",
+            filing_date="2026-04-27")
+        self.assertEqual(old.observations[0]["geography_id"], new.observations[0]["geography_id"])
+        self.assertNotEqual(old.observations[0]["source_market_name"], new.observations[0]["source_market_name"])
 
     def test_avb_schema_drift_fails_closed(self):
         broken = AVB_FIXTURE.replace("Economic Occupancy", "Physical Occupancy")
@@ -135,6 +168,9 @@ class Milestone8Tests(unittest.TestCase):
                          {("AVB", "MAA"), ("MAA", "AVB")})
         self.assertTrue(result["artifact_hash"])
         self.assertEqual(len(company_bias([row for item in result["experiments"] for row in item["predictions"]])), 2)
+        gate = cross_source_gate(result)
+        self.assertFalse(gate["passed"])
+        self.assertIn("harmonization", " ".join(gate["reasons"]))
 
     def test_cross_source_gate_rejects_single_source(self):
         gate = cross_source_gate({"status": "INSUFFICIENT_INDEPENDENT_SOURCES", "experiments": []})

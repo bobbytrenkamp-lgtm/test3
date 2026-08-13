@@ -64,12 +64,17 @@ def assess_model(panel: PanelDataset, walk_forward: dict, market_holdout: dict |
                         f"is below {policy.minimum_markets}")
     if walk_forward.get("look_ahead") is not False:
         failures.append("walk-forward result does not affirm absence of look-ahead")
+    if model_mode == "validated_production" and walk_forward.get("feature_availability_enforced") is not True:
+        failures.append("walk-forward result does not enforce forecast-origin feature availability")
     if walk_forward.get("metrics", {}).get("model", {}).get("sample_size", 0) == 0:
         failures.append("walk-forward validation has no predictions")
     if policy.require_baseline_improvement and not walk_forward.get("model_beats_best_baseline"):
         failures.append("model did not beat the best governed baseline")
     if policy.require_market_holdout and (not market_holdout or market_holdout.get("metrics", {}).get("sample_size", 0) == 0):
         failures.append("market-holdout validation is missing")
+    if (model_mode == "validated_production" and market_holdout and
+            market_holdout.get("feature_availability_enforced") is not True):
+        failures.append("market-holdout result does not enforce forecast-origin feature availability")
     if data_status == "real" and not source_manifest_hashes:
         failures.append("real-data model has no source manifest hashes")
     if data_status == "real" and not target_dataset_hashes:

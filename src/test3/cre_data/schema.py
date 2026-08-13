@@ -121,6 +121,12 @@ def normalize_cre_record(raw: dict, *, row_number: int) -> dict:
         "redistribution_permitted": redistribution,
         "verification_status": verification_status, "source_class": source_class, "sample_count": sample_count,
         "target_classification": target_classification,
+        "source_market_name": row.get("source_market_name") or None,
+        "canonical_source_market": row.get("canonical_source_market") or None,
+        "source_geography_role": row.get("source_geography_role") or None,
+        "source_parent_market": row.get("source_parent_market") or None,
+        "source_accession": row.get("source_accession") or None,
+        "release_date_evidence_status": row.get("release_date_evidence_status") or None,
         "notes": row.get("notes") or None, "source_row": row_number, "raw_row_hash": "sha256:" + _hash(raw),
     }
     normalized["observation_id"] = _hash({key: value for key, value in normalized.items() if key not in {"notes", "source_row"}})

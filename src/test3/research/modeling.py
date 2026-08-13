@@ -52,8 +52,11 @@ def train_panel_candidate(panel: PanelDataset, *, entity_fixed_effects: bool = T
     # Time effects are not enabled in forward validation because the future time level is unknowable.
     walk = walk_forward_validate(panel, minimum_training_periods=minimum_training_periods,
                                  entity_fixed_effects=entity_fixed_effects, time_fixed_effects=False,
-                                 covariance=covariance)
-    holdout = market_holdout_validate(panel)
+                                 covariance=covariance,
+                                 enforce_feature_availability=(data_status == "real" or
+                                                               model_mode == "validated_production"))
+    holdout = market_holdout_validate(panel, enforce_feature_availability=(data_status == "real" or
+                                                                           model_mode == "validated_production"))
     stability = stability_diagnostics(panel, entity_fixed_effects=entity_fixed_effects, covariance=covariance,
                                       predictions=walk["predictions"])
     governance = assess_model(panel, walk, holdout, source_manifest_hashes=source_manifest_hashes,

@@ -15,6 +15,13 @@ SOURCE_RELIABILITY = {
     "manual_research": .60, "unknown": .40,
 }
 
+MODEL_BLOCKING_FINDING_CODES = frozenset({
+    "duplicate_observation", "source_conflict", "methodology_mismatch", "methodology_change",
+    "frequency_mismatch", "market_geography_mismatch", "occupancy_vacancy_mismatch",
+    "operating_unit_mismatch", "operating_identity_mismatch", "noi_margin_mismatch",
+    "proxy_not_institutional_target",
+})
+
 
 def _period_index(label: str, frequency: str) -> int:
     if frequency == "annual":
@@ -105,6 +112,34 @@ def verify_observations(rows: list[dict], *, evaluated_at: str | date | None = N
                 add("occupancy_vacancy_mismatch", "error",
                     "Same-source occupancy and vacancy are not exact complements; reconcile definitions before modeling.",
                     (occupancy[0], vacancy[0]))
+    operating = defaultdict(list)
+    for row in rows:
+        if row["metric"] in {"same_store_revenue", "same_store_operating_expense", "same_store_noi", "noi_margin"}:
+            operating[(row["geography_type"], row["geography_id"], row["period"], row["frequency"],
+                       row["property_type"], row.get("property_subtype"), row["source_name"], row["vintage"])].append(row)
+    for grouped in operating.values():
+        by_metric = defaultdict(list)
+        for row in grouped:
+            by_metric[row["metric"]].append(row)
+        revenue = by_metric["same_store_revenue"]
+        expense = by_metric["same_store_operating_expense"]
+        noi = by_metric["same_store_noi"]
+        margin = by_metric["noi_margin"]
+        if len(revenue) == len(expense) == len(noi) == 1:
+            if len({revenue[0]["unit"], expense[0]["unit"], noi[0]["unit"]}) != 1:
+                add("operating_unit_mismatch", "error",
+                    "Same-source revenue, operating expense, and NOI use different units.",
+                    (revenue[0], expense[0], noi[0]))
+            elif abs(Decimal(revenue[0]["value"]) - Decimal(expense[0]["value"]) - Decimal(noi[0]["value"])) > Decimal("1"):
+                add("operating_identity_mismatch", "error",
+                    "Same-source revenue less operating expense does not equal NOI within one disclosed unit.",
+                    (revenue[0], expense[0], noi[0]))
+        if len(revenue) == len(noi) == len(margin) == 1 and Decimal(revenue[0]["value"]) > 0:
+            expected = Decimal(noi[0]["value"]) / Decimal(revenue[0]["value"])
+            if abs(expected - Decimal(margin[0]["value"])) > Decimal("0.0001"):
+                add("noi_margin_mismatch", "error",
+                    "Same-source NOI margin does not reconcile to NOI divided by operating revenue.",
+                    (revenue[0], noi[0], margin[0]))
     if governed_market_ids is not None:
         for row in rows:
             if row["geography_type"] in {"market", "submarket"} and row["geography_id"] not in governed_market_ids:
@@ -149,10 +184,8 @@ def verify_observations(rows: list[dict], *, evaluated_at: str | date | None = N
         confidence = sum(components[name] * weight for name, weight in
                          (("source_reliability", .25), ("methodology_clarity", .15), ("independent_agreement", .15),
                           ("recency", .10), ("completeness", .10), ("analyst_verification", .15), ("series_consistency", .10)))
-        blocking_codes = {"duplicate_observation", "source_conflict", "methodology_mismatch", "methodology_change",
-                          "frequency_mismatch", "market_geography_mismatch", "occupancy_vacancy_mismatch",
-                          "proxy_not_institutional_target"}
-        blocking = row["verification_status"] == "rejected" or bool(blocking_codes & set(by_observation[row["observation_id"]]))
+        blocking = (row["verification_status"] == "rejected"
+                    or bool(MODEL_BLOCKING_FINDING_CODES & set(by_observation[row["observation_id"]])))
         scored.append({**row, "confidence": round(confidence, 6), "confidence_components": components,
                        "verification_findings": sorted(by_observation[row["observation_id"]]),
                        "model_eligible": effective_verified and not blocking})

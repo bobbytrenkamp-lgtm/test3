@@ -9,6 +9,7 @@ from pathlib import Path
 from decimal import Decimal
 
 from .schema import parse_cre_file
+from .verification import MODEL_BLOCKING_FINDING_CODES, verify_observations
 
 
 ATTESTATION_SCHEMA = "test3-cre-analyst-attestation/1.0.0"
@@ -70,6 +71,23 @@ def prepare_cre_review(input_path: str | Path, output_path: str | Path) -> dict:
             "evidence_documents": len(set().union(*(evidence_documents(row) for row in rows))),
         })
     input_hash = _sha256(source)
+    verification = verify_observations(parsed, analyst_review_confirmed=False)
+    finding_counts: dict[str, int] = {}
+    for finding in verification["findings"]:
+        finding_counts[finding["code"]] = finding_counts.get(finding["code"], 0) + 1
+    blocking_findings = sorted(MODEL_BLOCKING_FINDING_CODES & set(finding_counts))
+    quality_findings = []
+    for finding in verification["findings"][:500]:
+        affected = [by_observation_id[item] for item in finding["observation_ids"] if item in by_observation_id]
+        quality_findings.append({
+            **finding,
+            "affected_observations": [{
+                "observation_id": row["observation_id"], "market": row["market"],
+                "geography_id": row["geography_id"], "period": row["period"],
+                "metric": row["metric"], "value": row["value"], "unit": row["unit"],
+                "source_identifier": row["source_identifier"],
+            } for row in affected],
+        })
     payload = {
         "schema_version": "test3-cre-review-packet/1.0.0",
         "authoritative": False,
@@ -81,6 +99,14 @@ def prepare_cre_review(input_path: str | Path, output_path: str | Path) -> dict:
         "periods": sorted({row["period"] for row in parsed}),
         "source_names": sorted({row["source_name"] for row in parsed}),
         "evidence_documents": len(set().union(*(evidence_documents(row) for row in parsed))),
+        "quality_summary": {
+            "finding_counts": dict(sorted(finding_counts.items())),
+            "blocking_finding_codes": blocking_findings,
+            "blocking_findings_present": bool(blocking_findings),
+            "model_eligible_before_review": verification["summary"]["model_eligible"],
+        },
+        "quality_findings": quality_findings,
+        "quality_findings_truncated": len(verification["findings"]) > 500,
         "series": series,
         "attestation_template": {
             "schema_version": ATTESTATION_SCHEMA,
@@ -163,6 +189,14 @@ def approve_cre_review(input_path: str | Path, attestation_path: str | Path,
         raise ValueError(f"attestation selects unknown or empty metrics: {sorted(missing_metrics)}")
     if any(row["verification_status"] == "rejected" for row in selected):
         raise ValueError("rejected observations cannot be analyst-approved")
+    approval_check = verify_observations(
+        [{**row, "verification_status": "analyst_verified"} for row in selected],
+        analyst_review_confirmed=True,
+    )
+    approval_blockers = sorted({finding["code"] for finding in approval_check["findings"]
+                                if finding["code"] in MODEL_BLOCKING_FINDING_CODES})
+    if approval_blockers:
+        raise ValueError(f"selected observations fail central verification: {approval_blockers}")
     attestation_hash = hashlib.sha256(json.dumps(attestation, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     output.parent.mkdir(parents=True, exist_ok=True)
     with source.open(encoding="utf-8-sig", newline="") as source_handle:

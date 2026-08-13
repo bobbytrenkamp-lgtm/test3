@@ -12,7 +12,8 @@ from test3.cre_data.importer import import_cre_csv
 from test3.cre_data.geography import MarketDefinition, save_market_definition
 from test3.features.manifests import FEATURE_MANIFEST_VERSION, feature_file_entry, write_feature_manifest
 from test3.research.target_panel import (_eligible_rows_from_reports, _market_period_depth, ReadinessPolicy,
-                                         build_target_panel, target_readiness)
+                                         build_target_panel, target_readiness, target_readiness_for_specification)
+from test3.research.specifications import ModelSpecification
 from test3.warehouse.storage import WarehousePaths
 
 
@@ -106,6 +107,21 @@ class TargetPanelTests(unittest.TestCase):
         self.assertEqual((len(eligible), len({row["period"] for row in eligible})), (20, 20))
         periods_by_market, qualifying = _market_period_depth(eligible, 20)
         self.assertEqual((set(periods_by_market.values()), qualifying), ({4}, 0))
+
+    def test_model_specific_readiness_cannot_mix_frequencies(self):
+        with tempfile.TemporaryDirectory() as root:
+            paths = WarehousePaths.from_data_root(root)
+            quarterly = _row("Market A", "11111", "2024-Q1", ".03")
+            annual = {**_row("Market A", "11111", "2024-Q1", ".04"), "period": "2024",
+                      "source_period": "2024", "frequency": "annual", "release_date": "2025-03-31",
+                      "source_identifier": "fixture://licensed-history/annual", "source_name": "Annual Source"}
+            import_cre_csv(paths, _csv([quarterly, annual]), dataset_id="mixed_frequency", source_version="v1",
+                           evaluated_at="2026-08-09", analyst_review_confirmed=True)
+            spec = ModelSpecification("annual_test", "1", "rent_growth_yoy", "multifamily", "annual", (),
+                                      False, False, "hc1", 1, 1, 1, "fixture")
+            readiness = target_readiness_for_specification(paths, spec)
+            self.assertEqual((readiness["frequency"], readiness["observations"],
+                              readiness["model_eligible_observations"]), ("annual", 1, 1))
 
     def test_methodology_change_spans_distinct_quarterly_documents(self):
         first = _row("Market A", "11111", "2024-Q1", ".03")

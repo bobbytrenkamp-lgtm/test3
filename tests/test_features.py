@@ -61,6 +61,13 @@ def seed_feature_warehouse(paths: WarehousePaths):
                                      geography_id="US", metric="treasury_10y", value=value, year=year, unit="percent",
                                      period_type="daily", observed=f"{year}-{month:02d}-15"))
     ingest_observations(paths, source_id="fred_public", dataset_id="fixture_dgs10", source_version="v1", domain="capital_markets", rows=macro)
+    cpi = []
+    for year, value in ((2020, 100), (2021, 110), (2022, 121), (2023, 133.1)):
+        cpi.append(observation(source_id="fred_public", dataset="fixture_cpi", version="v1", series="CPIAUCSL",
+                               geography_id="US", metric="cpi", value=value, year=year,
+                               unit="index_1982_1984_100", period_type="monthly", observed=f"{year}-12"))
+    ingest_observations(paths, source_id="fred_public", dataset_id="fixture_cpi", source_version="v1",
+                        domain="capital_markets", rows=cpi)
     crosswalk = [observation(source_id="census_cbsa_crosswalk", dataset="fixture_crosswalk", version="v1", series="OMB2023",
                              geography_id=county, metric="county_cbsa_membership", value=1, year=2023, unit="membership", cbsa="12345",
                              period_type="irregular", observed="2023-07-21") for county in counties]
@@ -75,6 +82,7 @@ class FeatureTableTests(unittest.TestCase):
     def test_registry_frequency_and_growth_are_governed(self):
         self.assertEqual(len(registry_fingerprint()), 64)
         self.assertEqual(FEATURE_REGISTRY["fair_market_rent_2br"].input_metrics, ("fair_market_rent",))
+        self.assertEqual(FEATURE_REGISTRY["cpi_growth_yoy"].input_features, ("cpi_period_end",))
         with self.assertRaisesRegex(ValueError, "cannot be registered"):
             FeatureSpec("market_rent", "bad", ("fair_market_rent",), source_ids=("hud_public",))
         validate_frequency_conversion("annual", "quarterly", "annual_carry_forward")
@@ -94,11 +102,13 @@ class FeatureTableTests(unittest.TestCase):
             self.assertEqual((same.status, same.manifest_hash), ("unchanged", annual.manifest_hash))
             panel = FeaturePanel(paths, "county_year")
             rows = panel.query(columns=("geography_id", "period_start", "population", "population_growth_yoy",
-                                        "multifamily_permits_per_1000_population", "fair_market_rent_2br"), limit=100)
+                                        "multifamily_permits_per_1000_population", "fair_market_rent_2br",
+                                        "cpi_growth_yoy"), limit=100)
             county = next(row for row in rows if row["geography_id"] == "01001" and str(row["period_start"]) == "2021-01-01")
             self.assertAlmostEqual(county["population_growth_yoy"], .1)
             self.assertAlmostEqual(county["multifamily_permits_per_1000_population"], 12 / 110 * 1000)
             self.assertEqual(county["fair_market_rent_2br"], 945)
+            self.assertAlmostEqual(county["cpi_growth_yoy"], .1)
             self.assertNotIn("market_rent", panel.latest()["features"])
             lineage_rows = panel.latest()["quality"]["feature_values"]
             self.assertGreater(lineage_rows, annual.row_count)

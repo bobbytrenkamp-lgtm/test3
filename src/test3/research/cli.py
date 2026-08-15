@@ -14,6 +14,8 @@ from .specifications import MODEL_SPECIFICATIONS
 from .target_panel import build_target_panel, target_readiness, target_readiness_for_specification
 from .milestone7 import feature_compatibility, market_definition_coverage, milestone7_status
 from .milestone8 import milestone8_status
+from .target_harmonization import (approve_target_harmonization, prepare_target_harmonization_review,
+                                   target_harmonization_status)
 from test3.warehouse.storage import WarehousePaths
 from test3.cre_data.maa_markets import prepare_maa_market_definitions, approve_maa_market_definitions
 
@@ -60,6 +62,17 @@ def main(argv: list[str] | None = None) -> int:
     milestone = subparsers.add_parser("milestone7-status", help="show approval, market-map, feature, and model gates")
     milestone8 = subparsers.add_parser("milestone8-status", help="show multi-source approval and generalization gates")
     milestone8.add_argument("--data-root", default="data")
+    prepare_harmonization = subparsers.add_parser(
+        "prepare-target-harmonization", help="create a blank MAA/AVB semantic-comparison review packet")
+    prepare_harmonization.add_argument("--output", required=True)
+    approve_harmonization = subparsers.add_parser(
+        "approve-target-harmonization", help="publish a completed human target-harmonization attestation")
+    approve_harmonization.add_argument("--data-root", default="data")
+    approve_harmonization.add_argument("--packet", required=True)
+    approve_harmonization.add_argument("--attestation", required=True)
+    harmonization_status = subparsers.add_parser(
+        "target-harmonization-status", help="show approved cross-source semantic-bridge status")
+    harmonization_status.add_argument("--data-root", default="data")
     milestone.add_argument("--data-root", default="data")
     definitions = subparsers.add_parser("market-definition-coverage", help="audit MAA market-definition eligibility")
     definitions.add_argument("--data-root", default="data")
@@ -135,6 +148,17 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "milestone8-status":
         print(json.dumps(milestone8_status(WarehousePaths.from_data_root(Path(args.data_root))), indent=2, sort_keys=True))
+        return 0
+    if args.command == "prepare-target-harmonization":
+        print(json.dumps(prepare_target_harmonization_review(args.output), indent=2, sort_keys=True))
+        return 0
+    if args.command == "approve-target-harmonization":
+        print(json.dumps(approve_target_harmonization(WarehousePaths.from_data_root(Path(args.data_root)),
+                                                       args.packet, args.attestation), indent=2, sort_keys=True))
+        return 0
+    if args.command == "target-harmonization-status":
+        print(json.dumps(target_harmonization_status(WarehousePaths.from_data_root(Path(args.data_root))),
+                         indent=2, sort_keys=True))
         return 0
     if args.command == "prepare-maa-market-definitions":
         print(json.dumps(prepare_maa_market_definitions(args.target_input, args.output, args.property_inventory),

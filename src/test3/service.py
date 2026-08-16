@@ -29,7 +29,7 @@ from .assumptions.factors import derived_change_factors, market_factor_scorecard
 from .assumptions.governance import cadence_findings, research_manifest, revision_conflicts, source_scorecards
 from .assumptions.validation import market_regimes, walk_forward_baselines
 from .research.comparables import analyze_location, parse_csv_records
-from .opportunity import analyze_property_opportunity, parse_sale_comps
+from .opportunity import analyze_property_opportunity, parse_location_evidence, parse_sale_comps
 
 
 def _sha256_file(path: Path) -> str:
@@ -266,9 +266,14 @@ class Service:
 
     def property_opportunity_analysis(self, organization_id: str, user_id: str, deal_id: str,
                                       payload: dict) -> dict:
+        if not isinstance(payload, dict):
+            raise ValueError("Property opportunity request must be a JSON object")
         with self.db.connect() as connection:
             deal = connection.execute("SELECT * FROM deals WHERE id=? AND organization_id=?",
                                       (deal_id, organization_id)).fetchone()
+            approved_fips = connection.execute("SELECT rd.proposed_normalized_value FROM manual_assumptions ma JOIN review_decisions rd ON rd.entity_id=ma.id AND rd.entity_type='manual_assumption' WHERE ma.organization_id=? AND ma.deal_id=? AND ma.field_name='county_fips' AND ma.review_status='approved' ORDER BY rd.rowid DESC LIMIT 1", (organization_id, deal_id)).fetchone()
+            if not approved_fips:
+                approved_fips = connection.execute("SELECT rd.proposed_normalized_value FROM extracted_values ev JOIN review_decisions rd ON rd.entity_id=ev.id AND rd.entity_type='extracted_value' WHERE ev.organization_id=? AND ev.deal_id=? AND ev.field_name='county_fips' AND ev.review_status='approved' ORDER BY rd.rowid DESC LIMIT 1", (organization_id, deal_id)).fetchone()
         if not deal:
             raise LookupError("Deal not found")
         rent_text, sale_text = str(payload.get("rent_comps_csv") or ""), str(payload.get("sale_comps_csv") or "")
@@ -277,10 +282,43 @@ class Service:
         subject = dict(payload.get("subject") or {})
         subject.setdefault("address", deal["address"])
         subject.setdefault("property_type", deal["property_type"])
+        subject.pop("county_fips_analyst_approved", None)
+        subject.pop("county_fips", None)
+        if approved_fips:
+            subject["county_fips"] = approved_fips[0]
+        pois_text = str(payload.get("location_evidence_csv") or "")
+        location_rows = parse_location_evidence(pois_text) if pois_text else None
+        raw_source_metadata = payload.get("source_metadata") or {}
+        if not isinstance(raw_source_metadata, dict):
+            raise ValueError("source_metadata must be an object")
+        source_metadata = {key: dict(value) if isinstance(value, dict) else value
+                           for key, value in raw_source_metadata.items()}
+        if pois_text:
+            source_metadata.setdefault("location_evidence", {})["file_sha256"] = hashlib.sha256(pois_text.encode()).hexdigest()
+        if self.test1_data_dir and approved_fips:
+            try:
+                test1_context = test1_enrichment(
+                    {"address": subject.get("address"), "county_fips": approved_fips[0]},
+                    load_snapshot(self.test1_data_dir),
+                )
+            except Test1SnapshotError as error:
+                test1_context = {"status": "invalid_snapshot", "verified": False, "coverage": "missing",
+                                 "networkRequests": 0, "results": {}, "message": str(error)}
+        elif self.test1_data_dir:
+            test1_context = {"status": "input_approval_required", "verified": False, "coverage": "missing",
+                             "networkRequests": 0, "results": {},
+                             "message": "A reviewer-approved county FIPS is required; Test3 does not infer geography."}
+        else:
+            test1_context = {"status": "not_configured", "verified": False, "coverage": "missing",
+                             "networkRequests": 0, "results": {}}
         result = analyze_property_opportunity(
             subject, parse_csv_records(rent_text, "comps"), parse_sale_comps(sale_text),
             analysis_as_of=str(payload.get("analysis_as_of") or ""),
-            source_metadata=dict(payload.get("source_metadata") or {}),
+            source_metadata=source_metadata,
+            location_evidence=location_rows,
+            test1_context=test1_context,
+            location_thresholds=dict(payload.get("location_thresholds") or {}) or None,
+            location_maximum_age_days=int(payload.get("location_maximum_age_days", 3650)),
             max_distance_miles=float(payload.get("max_distance_miles", 15)),
             rent_maximum_age_days=int(payload.get("rent_maximum_age_days", 365)),
             sale_maximum_age_days=int(payload.get("sale_maximum_age_days", 730)),

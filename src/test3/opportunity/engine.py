@@ -7,11 +7,12 @@ import json
 
 from test3.research.comparables import analyze_location
 
+from .location import analyze_location_evidence
 from .sales import analyze_sale_comps
 
 
-SCHEMA_VERSION = "test3-property-opportunity/1.0.0"
-POLICY_VERSION = "property-opportunity-screening/1.0.0"
+SCHEMA_VERSION = "test3-property-opportunity/1.1.0"
+POLICY_VERSION = "property-opportunity-screening/1.1.0"
 RIGHTS_STATUSES = {"public_open", "user_owned", "licensed_local", "unknown_review_required"}
 
 
@@ -31,6 +32,8 @@ def _decimal(value: object, name: str, *, positive: bool = False) -> Decimal:
 
 
 def _source_metadata(value: dict, name: str) -> dict:
+    if not isinstance(value, dict):
+        raise ValueError(f"{name} source metadata must be an object")
     source_name = str(value.get("source_name") or "").strip()
     licensing_notes = str(value.get("licensing_notes") or "").strip()
     rights_status = str(value.get("rights_status") or "").strip()
@@ -38,8 +41,11 @@ def _source_metadata(value: dict, name: str) -> dict:
         raise ValueError(f"{name} source name and licensing notes are required")
     if rights_status not in RIGHTS_STATUSES:
         raise ValueError(f"{name} rights_status must be one of {sorted(RIGHTS_STATUSES)}")
+    file_sha256 = str(value.get("file_sha256") or "").strip().lower() or None
+    if file_sha256 is not None and (len(file_sha256) != 64 or any(character not in "0123456789abcdef" for character in file_sha256)):
+        raise ValueError(f"{name} file_sha256 must be a lowercase SHA-256 digest when provided")
     return {"sourceName": source_name, "licensingNotes": licensing_notes, "rightsStatus": rights_status,
-            "rightsDocumented": rights_status != "unknown_review_required"}
+            "rightsDocumented": rights_status != "unknown_review_required", "fileSha256": file_sha256}
 
 
 def _eligible_rents(rows: list[dict], *, as_of: date, maximum_age_days: int) -> tuple[list[dict], dict]:
@@ -90,6 +96,10 @@ def _screening_scenarios(subject: dict, sale_benchmark: dict | None) -> dict | N
 
 def analyze_property_opportunity(subject: dict, rent_comps: list[dict], sale_comps: list[dict], *,
                                  analysis_as_of: str, source_metadata: dict,
+                                 location_evidence: list[dict] | None = None,
+                                 test1_context: dict | None = None,
+                                 location_thresholds: dict[str, float] | None = None,
+                                 location_maximum_age_days: int = 3650,
                                  max_distance_miles: float = 15.0, rent_maximum_age_days: int = 365,
                                  sale_maximum_age_days: int = 730, limit: int = 10) -> dict:
     """Build a deterministic research artifact, never a controlling underwriting result."""
@@ -101,8 +111,8 @@ def analyze_property_opportunity(subject: dict, rent_comps: list[dict], sale_com
                           "latitude": float(subject["latitude"]), "longitude": float(subject["longitude"])}
     if not -90 <= normalized_subject["latitude"] <= 90 or not -180 <= normalized_subject["longitude"] <= 180:
         raise ValueError("subject coordinates are outside their valid range")
-    sources = {name: _source_metadata(source_metadata.get(name) or {}, name)
-               for name in ("rent_comps", "sale_comps")}
+    source_names = ["rent_comps", "sale_comps"] + (["location_evidence"] if location_evidence is not None else [])
+    sources = {name: _source_metadata(source_metadata.get(name) or {}, name) for name in source_names}
     eligible_rents, rent_date_exclusions = _eligible_rents(
         rent_comps, as_of=as_of, maximum_age_days=rent_maximum_age_days)
     rent_result = analyze_location(normalized_subject, eligible_rents, [],
@@ -110,6 +120,16 @@ def analyze_property_opportunity(subject: dict, rent_comps: list[dict], sale_com
     sale_result = analyze_sale_comps(normalized_subject, sale_comps, analysis_as_of=as_of,
                                      max_distance_miles=max_distance_miles,
                                      maximum_age_days=sale_maximum_age_days, limit=limit)
+    location_result = (analyze_location_evidence(
+        normalized_subject, location_evidence, analysis_as_of=as_of,
+        thresholds=location_thresholds, maximum_age_days=location_maximum_age_days,
+    ) if location_evidence is not None else {
+        "status": "not_provided",
+        "findings": [],
+        "nearestByCategory": {},
+        "rejected": {},
+        "methodology": {"travelTimeAvailable": False, "warning": "No local location-evidence file was provided."},
+    })
     rent_rejected = {**rent_result["rejectedComparables"], **rent_date_exclusions}
     rent_benchmark = rent_result["rentBenchmark"]
     gross_rent_proxy = None
@@ -143,7 +163,9 @@ def analyze_property_opportunity(subject: dict, rent_comps: list[dict], sale_com
         "subject": normalized_subject, "sources": sources,
         "rentEvidence": {"comparables": rent_result["rentComparables"], "benchmark": rent_benchmark,
                          "rejected": rent_rejected, "grossPotentialRentProxy": gross_rent_proxy},
-        "saleEvidence": sale_result, "screeningScenarios": scenarios,
+        "saleEvidence": sale_result, "locationEvidence": location_result,
+        "test1Context": test1_context or {"status": "not_configured", "verified": False, "networkRequests": 0, "results": {}},
+        "screeningScenarios": scenarios,
         "quality": {"level": quality, "components": components},
         "governance": {"analystApprovalRequired": True, "eligibleForAutomaticUnderwriting": False,
                        "test2AssumptionsOverwritten": False, "scoreProduced": False},
@@ -152,14 +174,20 @@ def analyze_property_opportunity(subject: dict, rent_comps: list[dict], sale_com
             "The equity-wedge screen excludes financing, taxes, insurance, operating expenses, sale costs and tax consequences.",
             "Source-rights status is analyst supplied and is not a legal determination by Test3.",
             "No physical-condition or renovation-scope conclusion is inferred from market data.",
+            "Straight-line proximity is not travel time and does not establish accessibility, school quality, safety, desirability, or causality.",
+            "Test1 context is read-only upstream evidence and cannot become a controlling underwriting assumption without analyst review.",
             "Selected comparable minimum/median/maximum values are not statistical confidence intervals.",
         ],
     }
     output["analysisInputHash"] = _hash({"subject": normalized_subject, "rentComps": rent_comps,
-                                         "saleComps": sale_comps, "analysisAsOf": as_of.isoformat(),
+                                         "saleComps": sale_comps, "locationEvidence": location_evidence,
+                                         "test1Context": test1_context, "analysisAsOf": as_of.isoformat(),
                                          "sources": sources, "policyVersion": POLICY_VERSION,
                                          "maxDistanceMiles": max_distance_miles,
                                          "rentMaximumAgeDays": rent_maximum_age_days,
-                                         "saleMaximumAgeDays": sale_maximum_age_days, "limit": limit})
+                                         "saleMaximumAgeDays": sale_maximum_age_days,
+                                         "locationThresholds": location_thresholds,
+                                         "locationMaximumAgeDays": location_maximum_age_days,
+                                         "limit": limit})
     output["artifactHash"] = _hash(output)
     return output

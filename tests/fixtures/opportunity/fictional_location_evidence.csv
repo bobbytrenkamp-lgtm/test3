@@ -1,0 +1,7 @@
+name,category,latitude,longitude,evidence_date,effective_from,effective_to,source_reference
+Fictional Elementary,school,35.785,-78.645,2026-01-15,2020-01-01,,fictional://public-schools/1
+Fictional Grocer,grocery,35.790,-78.650,2026-02-01,,,fictional://public-pois/2
+Fictional Downtown,downtown,35.830,-78.600,2026-02-01,,,fictional://public-pois/3
+Future Shopping Center,shopping_center,35.800,-78.640,2027-01-01,,,fictional://public-pois/4
+Expired Transit Stop,transit,35.781,-78.641,2025-01-01,2020-01-01,2025-12-31,fictional://public-pois/5
+Forbidden Crime Score,crime_score,35.781,-78.641,2026-01-01,,,fictional://prohibited/6

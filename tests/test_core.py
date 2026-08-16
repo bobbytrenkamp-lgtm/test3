@@ -1128,7 +1128,7 @@ class ServiceTests(unittest.TestCase):
         report = verify_backup(destination)
         self.assertTrue(report["valid"])
         self.assertEqual(report["format"], "test3-backup/6.0")
-        self.assertEqual(report["schemaVersion"], 5)
+        self.assertEqual(report["schemaVersion"], 6)
         self.assertTrue(report["restoredOperationalIntegrity"])
         self.assertEqual(report["counts"]["documents"], 1)
         self.assertEqual(report["counts"]["semantic_entities"], 1)

@@ -1,0 +1,6 @@
+address,latitude,longitude,property_type,sale_price,price_unit,sale_date,units,year_built,source_reference
+10 Fictional Oak Street,35.7810,-78.6380,multifamily,125000,USD/unit,2026-05-01,105,2018,fixture://opportunity/sale/2
+20 Fictional Pine Street,35.7900,-78.6500,multifamily,120000,USD/unit,2026-03-15,95,2015,fixture://opportunity/sale/3
+30 Fictional Cedar Street,35.7750,-78.6350,multifamily,130000,USD/unit,2026-01-01,110,2020,fixture://opportunity/sale/4
+40 Fictional Future Street,35.7760,-78.6360,multifamily,999999,USD/unit,2026-07-01,100,2019,fixture://opportunity/sale/5
+50 Fictional Stale Street,35.7770,-78.6370,multifamily,1000,USD/unit,2019-01-01,100,2019,fixture://opportunity/sale/6

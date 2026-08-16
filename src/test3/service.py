@@ -29,6 +29,7 @@ from .assumptions.factors import derived_change_factors, market_factor_scorecard
 from .assumptions.governance import cadence_findings, research_manifest, revision_conflicts, source_scorecards
 from .assumptions.validation import market_regimes, walk_forward_baselines
 from .research.comparables import analyze_location, parse_csv_records
+from .opportunity import analyze_property_opportunity, parse_sale_comps
 
 
 def _sha256_file(path: Path) -> str:
@@ -229,13 +230,16 @@ class Service:
             entity["review_status"] = "approved" if statuses and all(status == "approved" for status in statuses) else ("rejected" if any(status == "rejected" for status in statuses) else "needs_review")
         with self.db.connect() as connection:
             runs = [dict(row) for row in connection.execute("SELECT * FROM assumption_runs WHERE deal_id=? AND organization_id=? ORDER BY created_at DESC", (deal_id, organization_id))]
+            opportunity_runs = [dict(row) for row in connection.execute("SELECT * FROM opportunity_runs WHERE deal_id=? AND organization_id=? ORDER BY created_at DESC", (deal_id, organization_id))]
             snapshots = [dict(row) for row in connection.execute("SELECT * FROM data_source_snapshots WHERE (deal_id=? OR deal_id IS NULL) AND organization_id=? ORDER BY created_at DESC", (deal_id, organization_id))]
             observations = [dict(row) for row in connection.execute("SELECT o.* FROM market_observations o JOIN data_source_snapshots s ON s.id=o.snapshot_id WHERE o.organization_id=? AND (s.deal_id=? OR s.deal_id IS NULL) ORDER BY o.observation_date", (organization_id, deal_id))]
             decision_contexts = [dict(row) for row in connection.execute("SELECT * FROM assumption_decision_context WHERE deal_id=? AND organization_id=? ORDER BY created_at DESC", (deal_id, organization_id))]
         for run in runs:
             for key in ("evidence_snapshot_ids_json", "input_features_json", "confidence_components_json", "limitations_json"):
                 run[key.removesuffix("_json")] = json.loads(run.pop(key))
-        return {"deal": dict(deal), "documents": documents, "values": values, "entities": entities, "findings": findings, "audit": audit, "review_decisions": decisions, "assumption_runs": runs, "data_source_snapshots": snapshots, "market_observations": observations, "data_profile": profile_observations(observations), "benchmark_matrix": benchmark_matrix(observations), "correlation_matrix": correlation_matrix(observations), "time_series_diagnostics": time_series_diagnostics(observations), "stress_scenarios": stress_scenarios(observations), "lead_lag_matrix": lead_lag_matrix(observations), "derived_change_factors": derived_change_factors(observations), "market_factor_scorecards": market_factor_scorecards(observations), "revision_conflicts": revision_conflicts(observations), "cadence_findings": cadence_findings(observations), "source_scorecards": source_scorecards(observations, snapshots), "research_manifest": research_manifest(observations, snapshots), "walk_forward_baselines": walk_forward_baselines(observations), "market_regimes": market_regimes(observations), "assumption_decision_contexts": decision_contexts}
+        for run in opportunity_runs:
+            run["content"] = json.loads(run.pop("content_json"))
+        return {"deal": dict(deal), "documents": documents, "values": values, "entities": entities, "findings": findings, "audit": audit, "review_decisions": decisions, "assumption_runs": runs, "opportunity_runs": opportunity_runs, "data_source_snapshots": snapshots, "market_observations": observations, "data_profile": profile_observations(observations), "benchmark_matrix": benchmark_matrix(observations), "correlation_matrix": correlation_matrix(observations), "time_series_diagnostics": time_series_diagnostics(observations), "stress_scenarios": stress_scenarios(observations), "lead_lag_matrix": lead_lag_matrix(observations), "derived_change_factors": derived_change_factors(observations), "market_factor_scorecards": market_factor_scorecards(observations), "revision_conflicts": revision_conflicts(observations), "cadence_findings": cadence_findings(observations), "source_scorecards": source_scorecards(observations, snapshots), "research_manifest": research_manifest(observations, snapshots), "walk_forward_baselines": walk_forward_baselines(observations), "market_regimes": market_regimes(observations), "assumption_decision_contexts": decision_contexts}
 
     def location_analysis(self, organization_id: str, user_id: str, deal_id: str, payload: dict) -> dict:
         with self.db.connect() as connection:
@@ -259,6 +263,50 @@ class Service:
                       {"comps_file_sha256": result["provenance"]["compsFileSha256"], "pois_file_sha256": result["provenance"]["poisFileSha256"],
                        "comp_count": len(result["rentComparables"]), "poi_count": len(pois), "analysis_version": "location-comparables/1.0"}, deal_id)
         return result
+
+    def property_opportunity_analysis(self, organization_id: str, user_id: str, deal_id: str,
+                                      payload: dict) -> dict:
+        with self.db.connect() as connection:
+            deal = connection.execute("SELECT * FROM deals WHERE id=? AND organization_id=?",
+                                      (deal_id, organization_id)).fetchone()
+        if not deal:
+            raise LookupError("Deal not found")
+        rent_text, sale_text = str(payload.get("rent_comps_csv") or ""), str(payload.get("sale_comps_csv") or "")
+        if not rent_text or not sale_text:
+            raise ValueError("Both rent-comparable and sale-comparable CSV files are required")
+        subject = dict(payload.get("subject") or {})
+        subject.setdefault("address", deal["address"])
+        subject.setdefault("property_type", deal["property_type"])
+        result = analyze_property_opportunity(
+            subject, parse_csv_records(rent_text, "comps"), parse_sale_comps(sale_text),
+            analysis_as_of=str(payload.get("analysis_as_of") or ""),
+            source_metadata=dict(payload.get("source_metadata") or {}),
+            max_distance_miles=float(payload.get("max_distance_miles", 15)),
+            rent_maximum_age_days=int(payload.get("rent_maximum_age_days", 365)),
+            sale_maximum_age_days=int(payload.get("sale_maximum_age_days", 730)),
+            limit=int(payload.get("limit", 10)),
+        )
+        run_id, created = str(uuid.uuid4()), now()
+        content_json = json.dumps(result, sort_keys=True, separators=(",", ":"))
+        with self.db.connect() as connection:
+            if connection.execute(
+                "SELECT 1 FROM opportunity_runs WHERE organization_id=? AND deal_id=? AND content_sha256=?",
+                (organization_id, deal_id, result["artifactHash"]),
+            ).fetchone():
+                raise ValueError("This exact property opportunity analysis already exists for the deal")
+            connection.execute(
+                "INSERT INTO opportunity_runs VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (run_id, organization_id, deal_id, result["schemaVersion"], result["policyVersion"],
+                 result["analysisAsOf"], result["analysisInputHash"], content_json, result["artifactHash"],
+                 "research_candidate", user_id, created),
+            )
+        self.db.audit(organization_id, user_id, "research.property_opportunity_created", "opportunity_run",
+                      run_id, {"artifact_hash": result["artifactHash"],
+                               "input_hash": result["analysisInputHash"],
+                               "rent_comparables": len(result["rentEvidence"]["comparables"]),
+                               "sale_comparables": len(result["saleEvidence"]["comparables"]),
+                               "status": "research_candidate"}, deal_id)
+        return {**result, "runId": run_id, "createdAt": created}
 
     def import_market_panel(self, organization_id: str, user_id: str, deal_id: str | None, filename: str, content: bytes, metadata: dict) -> dict:
         parsed, rows, errors = parse_market_panel(content)

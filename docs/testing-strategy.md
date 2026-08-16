@@ -12,5 +12,7 @@ The dependency-free accessibility guard runs in CI over static semantics and CSS
 
 Destructive-operation recovery tests simulate both crash boundaries: bytes staged before a database commit are hash-verified and restored on a new `Service` instance, while verified bytes left after a committed tombstone are deleted. Both paths must remove their sidecars, preserve readiness and append the expected recovery audit action.
 
+Property Opportunity Engine tests use fictional local rent and sale comparables. They verify deterministic ranking and hashing, exact date eligibility, future/stale exclusions, mixed-unit withholding, rights-note enforcement, negative-value rejection, immutable persistence, duplicate rejection, organization-scoped service access, audit linkage, and the prohibition on automatic scoring, underwriting, approval, or Test2 mutation.
+
 Not yet sufficient for production: browser accessibility/e2e automation, complex PDF corpus benchmarks, OCR failure matrix, load tests, restore drill and independent penetration review.
 

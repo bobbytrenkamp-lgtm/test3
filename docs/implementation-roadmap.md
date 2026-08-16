@@ -17,3 +17,16 @@ Every phase begins and ends with the cost guard. Required confirmation: “ZERO-
 | 10 — hardening | Tested, bounded; final audit active | Auth, retention, readiness, load/restore and browser audit complete within documented limits |
 
 Next implementation slice: broaden fictional semantic header/category-negative coverage and add advanced test2 mappings only where approved source semantics remain complete. See `docs/institutional-readiness-audit.md`.
+
+## Property Opportunity Engine program
+
+The governed implementation program for local property opportunity screening is tracked in `docs/property-opportunity-engine.md`. Its sequence is:
+
+1. governed property intake and comparable evidence;
+2. neighborhood/accessibility evidence and Test1 reuse;
+3. renovation, operating, financing, and downside evidence;
+4. backtested opportunity scoring and ranking;
+5. analyst workbench and approval;
+6. Test2 evidence handoff and institutional release audit.
+
+Milestone 1 is implemented on its feature branch and must pass the complete repository validation suite before merge. Later milestones must be delivered incrementally; none may bypass the evidence, approval, model-promotion, Test2, or zero-cost boundaries.

@@ -119,6 +119,7 @@ class OpportunityScreeningResult:
     warnings: tuple[OpportunityWarning, ...]
     evidence_completeness: Decimal
     evidence_freshness_days: int | None
+    evidence_freshness_detail: Mapping[str, object]
     input_snapshot_hash: str
     evidence_hash: str
     policy_id: str
@@ -138,6 +139,7 @@ class OpportunityScreeningResult:
             "warnings": [_canonical(asdict(item)) for item in self.warnings],
             "evidenceCompleteness": format(self.evidence_completeness, "f"),
             "evidenceFreshnessDays": self.evidence_freshness_days,
+            "evidenceFreshnessDetail": _canonical(self.evidence_freshness_detail),
             "inputSnapshotHash": self.input_snapshot_hash,
             "evidenceHash": self.evidence_hash,
             "policyId": self.policy_id,
@@ -259,12 +261,15 @@ def screen_opportunity(value: OpportunityScreeningInput, *, policy: OpportunityS
     evaluated = evaluated_at or datetime.now(timezone.utc)
     if evaluated.tzinfo is None:
         raise ValueError("evaluated_at must be timezone-aware")
+    if value.analysis_as_of > evaluated.astimezone(timezone.utc).date():
+        raise ValueError("analysis_as_of cannot be after the screening evaluation date")
     metrics = calculate_screening_metrics(value)
     available = _available_dimensions(value, metrics)
     warnings: list[OpportunityWarning] = []
     governed_dimensions: list[str] = []
     all_hashes: dict[str, tuple[str, ...]] = {}
     ages: list[int] = []
+    evidence_age_by_dimension: dict[str, int | None] = {dimension: None for dimension in DIMENSIONS}
     for dimension in DIMENSIONS:
         hashes = _valid_hashes(value, dimension)
         all_hashes[dimension] = hashes
@@ -281,9 +286,27 @@ def screen_opportunity(value: OpportunityScreeningInput, *, policy: OpportunityS
         if observed > value.analysis_as_of:
             raise ValueError(f"{dimension} evidence is dated after the analysis date")
         ages.append((value.analysis_as_of - observed).days)
+        evidence_age_by_dimension[dimension] = ages[-1]
         governed_dimensions.append(dimension)
     completeness = (Decimal(len(governed_dimensions)) / Decimal(len(DIMENSIONS))).quantize(Decimal("0.0001"))
     freshness = max(ages) if ages else None
+    sorted_ages = sorted(ages)
+    if not sorted_ages:
+        median_age: Decimal | None = None
+    elif len(sorted_ages) % 2:
+        median_age = Decimal(sorted_ages[len(sorted_ages) // 2])
+    else:
+        middle = len(sorted_ages) // 2
+        median_age = (Decimal(sorted_ages[middle - 1]) + Decimal(sorted_ages[middle])) / Decimal("2")
+    signal_ages = [evidence_age_by_dimension[item] for item in ("rent", "basis", "noi", "cap_rate", "vacancy")
+                   if evidence_age_by_dimension[item] is not None]
+    freshness_detail = {
+        "oldestEvidenceAgeDays": freshness,
+        "newestEvidenceAgeDays": min(ages) if ages else None,
+        "medianEvidenceAgeDays": median_age,
+        "signalEvidenceMaxAgeDays": max(signal_ages) if signal_ages else None,
+        "evidenceAgeByDimension": evidence_age_by_dimension,
+    }
     if freshness is not None and freshness > policy.stale_evidence_warning_days:
         warnings.append(OpportunityWarning("STALE_EVIDENCE", f"At least one relied-upon evidence dimension is {freshness} days old."))
     if value.renovation_budget_verified is False:
@@ -374,6 +397,7 @@ def screen_opportunity(value: OpportunityScreeningInput, *, policy: OpportunityS
         "warnings": [_canonical(asdict(item)) for item in warnings],
         "completeness": format(completeness, "f"),
         "freshness": freshness,
+        "freshnessDetail": _canonical(freshness_detail),
         "inputHash": input_hash,
         "evidenceHash": evidence_hash,
         "policyHash": policy.content_hash,
@@ -386,6 +410,7 @@ def screen_opportunity(value: OpportunityScreeningInput, *, policy: OpportunityS
         warnings=tuple(warnings),
         evidence_completeness=completeness,
         evidence_freshness_days=freshness,
+        evidence_freshness_detail=freshness_detail,
         input_snapshot_hash=input_hash,
         evidence_hash=evidence_hash,
         policy_id=policy.policy_id,

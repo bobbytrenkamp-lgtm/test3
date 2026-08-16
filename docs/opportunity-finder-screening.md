@@ -15,7 +15,7 @@ The versioned `OpportunityScreeningPolicy` produces one of four workflow tiers:
 - `LOW_PRIORITY`
 - `INSUFFICIENT_EVIDENCE`
 
-These tiers are deterministic review priorities, not predictions, investment recommendations, appraisals, or expected-return estimates. Each result includes the exact policy ID, version and hash; evaluation time; source-evidence hash; normalized input hash; evidence completeness; conservative evidence age; explicit reasons; explicit warnings; derived Decimal metrics; and a result hash.
+These tiers are deterministic review priorities, not predictions, investment recommendations, appraisals, or expected-return estimates. Each result includes the exact policy ID, version and hash; evaluation time; source-evidence hash; normalized input hash; evidence completeness; conservative evidence age; a structured freshness breakdown; explicit reasons; explicit warnings; derived Decimal metrics; and a result hash. `analysis_as_of` cannot be later than the UTC evaluation date.
 
 The statistically governed opportunity-score system remains separate. Until eligible realized property outcomes pass time and geography holdouts, baseline competition, stability checks, independent implementation checks, and immutable-lineage gates, the score state remains:
 
@@ -46,6 +46,25 @@ Money and rates use Python `Decimal`; authoritative screening calculations do no
 
 Every relied-upon dimension carries field-level source hashes and an evidence date. The combined evidence hash and normalized input snapshot hash allow future persistence/API layers to bind screening results to the exact evidence evaluated. A result also records `automaticUnderwritingApply = false`.
 
-## Current PR boundary
+## Persistent Opportunity Finder contract
 
-This milestone implements the domain and policy layer only. It deliberately does not add persistence, API routes, Finder UI, Opportunity Detail, review transitions, Deal Pipeline promotion, Test2 handoff permissions, or a realized-outcome warehouse. Those are subsequent focused milestones and must reuse this policy rather than reimplementing its rules in UI code.
+SQLite schema version 9 persists three organization-scoped records:
+
+- `opportunity_candidates`: stable candidate identity and optional linkage to an existing deal. Candidate creation never creates a deal.
+- `opportunity_candidate_versions`: immutable, sequential, content-hashed evidence snapshots. A `BEGIN IMMEDIATE` transaction assigns each version number safely.
+- `opportunity_screening_runs`: immutable bindings between a candidate version, policy hash, input/evidence hashes, and complete screening result.
+
+The JSON API provides bounded list/filter/sort pagination and candidate detail/history endpoints:
+
+- `GET /api/opportunities`
+- `POST /api/opportunities`
+- `GET /api/opportunities/{id}`
+- `POST /api/opportunities/{id}/versions`
+- `POST /api/opportunities/{id}/screen`
+- `GET /api/opportunities/{id}/history`
+
+Analysts have separate `opportunity.create` and `opportunity.screen` permissions. Reviewers can read candidates and retain the independent `opportunity.review` authority, but cannot create evidence or run Finder screening. API clients must send financial and rate values as decimal strings (or exact integers); JSON floats are rejected. Clients cannot submit tiers, reasons, derived metrics, or any other server-computed result.
+
+The current screening projection is derived from the latest immutable run. Operational integrity reproduces every screening result from its persisted evidence version and evaluation timestamp, verifies all hashes and membership bindings, and fails closed on tampering. Backup format 9.0 includes these records; prior backup formats remain readable.
+
+The Finder UI, lifecycle transitions, Deal Pipeline promotion, and enhanced Opportunity Detail remain the recommended scope for PR #68. Those surfaces must consume this API rather than reproduce policy logic in browser code.

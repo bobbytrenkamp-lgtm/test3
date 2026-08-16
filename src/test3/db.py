@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -74,6 +74,17 @@ CREATE TABLE IF NOT EXISTS opportunity_handoffs(id TEXT PRIMARY KEY, organizatio
 CREATE TRIGGER IF NOT EXISTS opportunity_handoffs_no_update BEFORE UPDATE ON opportunity_handoffs BEGIN SELECT RAISE(ABORT, 'opportunity handoffs are immutable advisory evidence'); END;
 CREATE TRIGGER IF NOT EXISTS opportunity_handoffs_no_delete BEFORE DELETE ON opportunity_handoffs BEGIN SELECT RAISE(ABORT, 'opportunity handoffs are retained evidence'); END;
 CREATE INDEX IF NOT EXISTS opportunity_handoffs_deal ON opportunity_handoffs(organization_id,deal_id,created_at);
+CREATE TABLE IF NOT EXISTS opportunity_candidates(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), deal_id TEXT REFERENCES deals(id), created_by TEXT NOT NULL REFERENCES users(id), property_type TEXT NOT NULL, display_name TEXT, address TEXT, normalized_address_sha256 TEXT, market TEXT, submarket TEXT, status TEXT NOT NULL CHECK(status IN ('candidate','promoted_to_diligence','archived')), origin_type TEXT NOT NULL CHECK(origin_type IN ('manual','authorized_csv','existing_deal','test1_handoff')), created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS opportunity_candidates_list ON opportunity_candidates(organization_id,status,property_type,created_at);
+CREATE INDEX IF NOT EXISTS opportunity_candidates_address ON opportunity_candidates(organization_id,normalized_address_sha256);
+CREATE TABLE IF NOT EXISTS opportunity_candidate_versions(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), candidate_id TEXT NOT NULL REFERENCES opportunity_candidates(id), version INTEGER NOT NULL CHECK(version > 0), schema_version TEXT NOT NULL, analysis_as_of TEXT NOT NULL, content_json TEXT NOT NULL, content_sha256 TEXT NOT NULL, created_by TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL, UNIQUE(candidate_id,version), UNIQUE(organization_id,candidate_id,content_sha256));
+CREATE TRIGGER IF NOT EXISTS opportunity_candidate_versions_no_update BEFORE UPDATE ON opportunity_candidate_versions BEGIN SELECT RAISE(ABORT, 'opportunity candidate versions are immutable evidence'); END;
+CREATE TRIGGER IF NOT EXISTS opportunity_candidate_versions_no_delete BEFORE DELETE ON opportunity_candidate_versions BEGIN SELECT RAISE(ABORT, 'opportunity candidate versions are retained evidence'); END;
+CREATE INDEX IF NOT EXISTS opportunity_candidate_versions_candidate ON opportunity_candidate_versions(organization_id,candidate_id,version);
+CREATE TABLE IF NOT EXISTS opportunity_screening_runs(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), candidate_id TEXT NOT NULL REFERENCES opportunity_candidates(id), candidate_version_id TEXT NOT NULL REFERENCES opportunity_candidate_versions(id), policy_id TEXT NOT NULL, policy_version TEXT NOT NULL, policy_sha256 TEXT NOT NULL, input_snapshot_sha256 TEXT NOT NULL, evidence_sha256 TEXT NOT NULL, screening_tier TEXT NOT NULL CHECK(screening_tier IN ('HIGH_PRIORITY_REVIEW','WORTH_REVIEWING','LOW_PRIORITY','INSUFFICIENT_EVIDENCE')), result_json TEXT NOT NULL, result_sha256 TEXT NOT NULL, created_by TEXT NOT NULL REFERENCES users(id), evaluated_at TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS opportunity_screening_runs_no_update BEFORE UPDATE ON opportunity_screening_runs BEGIN SELECT RAISE(ABORT, 'opportunity screening runs are immutable evidence'); END;
+CREATE TRIGGER IF NOT EXISTS opportunity_screening_runs_no_delete BEFORE DELETE ON opportunity_screening_runs BEGIN SELECT RAISE(ABORT, 'opportunity screening runs are retained evidence'); END;
+CREATE INDEX IF NOT EXISTS opportunity_screening_runs_candidate ON opportunity_screening_runs(organization_id,candidate_id,evaluated_at);
 CREATE TABLE IF NOT EXISTS audit_events(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), deal_id TEXT, actor_id TEXT REFERENCES users(id), action TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT, details_json TEXT NOT NULL, previous_hash TEXT, event_hash TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TRIGGER IF NOT EXISTS audit_events_no_update BEFORE UPDATE ON audit_events BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END;
 CREATE TRIGGER IF NOT EXISTS audit_events_no_delete BEFORE DELETE ON audit_events BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END;

@@ -84,6 +84,8 @@ class PropertyOpportunityTests(unittest.TestCase):
         self.assertFalse(first["governance"]["eligibleForAutomaticUnderwriting"])
         self.assertFalse(first["governance"]["test2AssumptionsOverwritten"])
         self.assertFalse(first["governance"]["scoreProduced"])
+        self.assertEqual(first["opportunityScore"]["status"], "NO_VALIDATED_OPPORTUNITY_SCORE")
+        self.assertFalse(first["opportunityScore"]["scoreProduced"])
         self.assertEqual(first["quality"]["scope"], "comparable_selection_quality")
         self.assertEqual(first["readiness"]["status"], "RESEARCH_EVIDENCE_ONLY")
         self.assertFalse(first["readiness"]["analystApprovalReady"])

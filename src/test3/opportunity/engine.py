@@ -10,6 +10,7 @@ from test3.research.comparables import analyze_location
 from .economics import economic_screen, normalize_economic_evidence
 from .location import analyze_location_evidence
 from .sales import analyze_sale_comps
+from .scoring import current_score_status
 
 
 SCHEMA_VERSION = "test3-property-opportunity/1.2.0"
@@ -203,6 +204,7 @@ def analyze_property_opportunity(subject: dict, rent_comps: list[dict], sale_com
         },
         "governance": {"analystApprovalRequired": True, "eligibleForAutomaticUnderwriting": False,
                        "test2AssumptionsOverwritten": False, "scoreProduced": False},
+        "opportunityScore": current_score_status(),
         "limitations": [
             "Comparable indications are descriptive and are not appraisals, forecasts, offers, or certified market values.",
             "The equity-wedge screen excludes financing, taxes, insurance, operating expenses, sale costs and tax consequences.",

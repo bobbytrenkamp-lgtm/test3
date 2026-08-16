@@ -140,6 +140,8 @@ Exit criteria:
 
 ### Milestone 6 — Test2 evidence handoff and institutional release audit
 
+Status: implemented on the Milestone 6 branch. The handoff is a distinct advisory sidecar, requires the latest independent approval, preserves evidence and decision hashes, is immutable and versioned, and never writes a Test2 underwriting assumption. See `docs/opportunity-test2-evidence-contract.md`.
+
 Deliverables:
 
 - Define and version the Test3-to-Test2 property-opportunity evidence contract.

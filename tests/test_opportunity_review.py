@@ -77,8 +77,41 @@ class OpportunityReviewTests(unittest.TestCase):
             archive = Path(root) / "review.zip"
             create_backup(Path(root), archive)
             report = verify_backup(archive)
-            self.assertEqual(report["format"], "test3-backup/7.0")
+            self.assertEqual(report["format"], "test3-backup/8.0")
             self.assertEqual(report["counts"]["opportunity_decisions"], 1)
+
+    def test_test2_handoff_requires_latest_approval_and_remains_advisory(self):
+        with tempfile.TemporaryDirectory() as root:
+            service, creator, reviewer_id, deal_id = self._workspace(root)
+            run = _candidate(service, creator["organization_id"], creator["id"], deal_id)
+            with self.assertRaisesRegex(ValueError, "latest independent opportunity decision"):
+                service.create_opportunity_test2_handoff(creator["organization_id"], creator["id"], run["runId"])
+            approval = service.review_property_opportunity(creator["organization_id"], reviewer_id, run["runId"], {
+                "decision": "approved", "rationale": "Independent evidence review completed for advisory handoff.",
+                "acknowledgements": ACKNOWLEDGEMENTS,
+            })
+            handoff = service.create_opportunity_test2_handoff(creator["organization_id"], creator["id"], run["runId"])
+            content = handoff["content"]
+            self.assertEqual(content["status"], "ADVISORY_APPROVED_EVIDENCE_NOT_APPLIED")
+            self.assertFalse(content["automaticApply"])
+            self.assertEqual(content["controllingUnderwritingEngine"], "test2")
+            self.assertEqual(content["approval"]["decisionHash"], approval["decision_hash"])
+            self.assertEqual(content["opportunityArtifactSha256"], run["artifactHash"])
+            self.assertEqual(content["opportunityScore"]["status"], "NO_VALIDATED_OPPORTUNITY_SCORE")
+            self.assertGreaterEqual(len(content["comparableEvidence"]["rent"]), 3)
+            self.assertTrue(all(item["referenceHash"] for item in content["comparableEvidence"]["sale"]))
+            retrieved = service.opportunity_handoff(creator["organization_id"], handoff["artifact"]["id"])
+            self.assertEqual(retrieved["content_sha256"], handoff["artifact"]["content_sha256"])
+            with self.assertRaises(LookupError):
+                service.opportunity_handoff("different-organization", handoff["artifact"]["id"])
+            with self.assertRaisesRegex(ValueError, "already exists"):
+                service.create_opportunity_test2_handoff(creator["organization_id"], creator["id"], run["runId"])
+            with service.db.connect() as connection:
+                with self.assertRaises(sqlite3.DatabaseError):
+                    connection.execute("UPDATE opportunity_handoffs SET content_json='{}' WHERE id=?", (handoff["artifact"]["id"],))
+                with self.assertRaises(sqlite3.DatabaseError):
+                    connection.execute("DELETE FROM opportunity_handoffs WHERE id=?", (handoff["artifact"]["id"],))
+            self.assertTrue(service.operational_integrity(creator["organization_id"])["ok"])
 
     def test_change_request_is_structured_and_never_mutates_candidate(self):
         with tempfile.TemporaryDirectory() as root:

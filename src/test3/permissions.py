@@ -2,7 +2,7 @@ from __future__ import annotations
 
 PERMISSIONS = {
     "viewer": {"read"},
-    "analyst": {"read", "deal.create", "document.upload", "assumption.create", "opportunity.create", "opportunity.screen", "reconcile.run", "export.generate"},
+    "analyst": {"read", "deal.create", "document.upload", "assumption.create", "opportunity.create", "opportunity.screen", "opportunity.archive", "reconcile.run", "export.generate"},
     "reviewer": {"read", "value.review", "assumption.review", "opportunity.review", "finding.resolve", "reconcile.run", "export.generate"},
     "admin": {"*"},
 }

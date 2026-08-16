@@ -67,4 +67,27 @@ Analysts have separate `opportunity.create` and `opportunity.screen` permissions
 
 The current screening projection is derived from the latest immutable run. Operational integrity reproduces every screening result from its persisted evidence version and evaluation timestamp, verifies all hashes and membership bindings, and fails closed on tampering. Backup format 9.0 includes these records; prior backup formats remain readable.
 
-The Finder UI, lifecycle transitions, Deal Pipeline promotion, and enhanced Opportunity Detail remain the recommended scope for PR #68. Those surfaces must consume this API rather than reproduce policy logic in browser code.
+The Finder UI and enhanced Opportunity Detail remain the recommended scope for PR #69. Deal Pipeline promotion remains a later governed workflow. Those surfaces must consume this API rather than reproduce policy logic in browser code.
+
+## Hardening and query semantics
+
+Finder evidence is historical evidence, not a future scenario schema. Evidence-version creation rejects an `analysis_as_of` later than the current UTC date, any dimension evidence date later than `analysis_as_of`, and an insurance evidence date later than `analysis_as_of`. The screening engine repeats these chronology checks as defense in depth. A future planning workflow must use a separately governed scenario-effective date rather than overloading `analysis_as_of`.
+
+The current screening projection is the newest screening run for the highest evidence version that has actually been screened. It is never silently presented as current when newer evidence exists. API responses expose:
+
+- `latest_evidence_version` and its analysis date;
+- `latest_screened_version`;
+- `screening_currency_status`: `CURRENT`, `OUTDATED_EVIDENCE`, or `NOT_SCREENED`; and
+- the immutable run projection used for display.
+
+Workflow tier ordering is explicit: `HIGH_PRIORITY_REVIEW` (1), `WORTH_REVIEWING` (2), `LOW_PRIORITY` (3), `INSUFFICIENT_EVIDENCE` (4), and no screening (5). `screening_priority_rank` is only an analyst-workflow ordering. It is not an opportunity score, expected return, investment recommendation, or underwriting conclusion.
+
+List projections expose exact decimal strings for rent gap, basis discount, evidence-supported NOI delta, NOI ratio, cap-rate spread, and vacancy delta. Test3 compares supplied current and stabilized NOI evidence; it does not forecast NOI in Finder. Test2 remains responsible for controlling underwriting. Completeness, evidence age, reason/warning counts, score availability, and screening currency are also projected from the immutable result so browser code does not reproduce authoritative calculations.
+
+The bounded list endpoint supports deterministic search across display name, address, market, and submarket plus filters for property type, market, lifecycle status, tier, screening currency, completeness range, minimum rent/basis gaps, and maximum evidence age. Search is limited to 200 characters and escapes SQL wildcard characters. Tier sorting uses workflow rank. Completeness sorts numerically. Freshness sorts by evidence age: ascending means fresher first and descending means stalest first. The version and screening indexes support local pagination; a committed test exercises the bounded projection at 10,000 candidates.
+
+Address duplicate warnings use conservative normalization only: case and whitespace normalization, harmless punctuation removal, and a small explicit street-suffix dictionary. Unit/subunit text remains part of identity. The system never geocodes, fuzzily matches, merges, or blocks candidate creation.
+
+The only lifecycle transition introduced here is the explicit, audited `candidate -> archived` action at `POST /api/opportunities/{id}/archive`. Archiving retains every evidence version and screening run. Archived candidates remain queryable with `status=archived`; they cannot receive new evidence or screening. Promotion and reopening remain separate future governed workflows.
+
+Historic policy implementations are immutable and registered by policy ID and version. Integrity reproduction selects the exact registered policy and verifies its stored hash. It never evaluates an old run with a newer default policy. If an implementation is unavailable or its hash differs, integrity reports `policyImplementationUnavailable`, counts a screening mismatch, and fails closed.

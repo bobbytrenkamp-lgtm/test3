@@ -317,6 +317,7 @@ class Service:
             source_metadata=source_metadata,
             location_evidence=location_rows,
             test1_context=test1_context,
+            economic_inputs=payload.get("economic_inputs") if "economic_inputs" in payload else None,
             location_thresholds=dict(payload.get("location_thresholds") or {}) or None,
             location_maximum_age_days=int(payload.get("location_maximum_age_days", 3650)),
             max_distance_miles=float(payload.get("max_distance_miles", 15)),

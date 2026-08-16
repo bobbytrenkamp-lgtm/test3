@@ -32,6 +32,29 @@ def _inputs() -> tuple[dict, list[dict], list[dict], dict]:
     return subject, rents, sales, metadata
 
 
+def _economic_inputs() -> list[dict]:
+    values = {
+        "purchase_price": ("10000000", "USD"),
+        "renovation_budget": ("500000", "USD"),
+        "closing_costs": ("250000", "USD"),
+        "holding_costs": ("250000", "USD"),
+        "annual_property_taxes": ("200000", "USD/year"),
+        "annual_insurance": ("100000", "USD/year"),
+        "annual_utilities": ("120000", "USD/year"),
+        "annual_other_operating_costs": ("80000", "USD/year"),
+        "vacancy_rate": ("0.05", "decimal_fraction"),
+        "concessions_rate": ("0.01", "decimal_fraction"),
+        "loan_amount": ("7000000", "USD"),
+        "interest_rate": ("0.06", "decimal_fraction"),
+        "amortization_years": ("30", "years"),
+        "loan_term_years": ("10", "years"),
+    }
+    return [{"field": field, "value": value, "unit": unit, "source_type": "analyst_entered",
+             "source_reference": f"fictional://economic-input/{field}",
+             "licensing_notes": "Fictional analyst test input", "as_of_date": "2026-06-15"}
+            for field, (value, unit) in values.items()]
+
+
 class PropertyOpportunityTests(unittest.TestCase):
     @staticmethod
     def _test1_fixture(root: Path) -> None:
@@ -48,9 +71,9 @@ class PropertyOpportunityTests(unittest.TestCase):
     def test_descriptive_screen_is_deterministic_traceable_and_not_underwriting(self):
         subject, rents, sales, metadata = _inputs()
         first = analyze_property_opportunity(subject, rents, sales, analysis_as_of="2026-06-30",
-                                             source_metadata=metadata)
+                                             source_metadata=metadata, economic_inputs=_economic_inputs())
         second = analyze_property_opportunity(subject, rents, sales, analysis_as_of="2026-06-30",
-                                              source_metadata=metadata)
+                                              source_metadata=metadata, economic_inputs=_economic_inputs())
         self.assertEqual(first["artifactHash"], second["artifactHash"])
         self.assertEqual(first["rentEvidence"]["benchmark"]["median"], "1850")
         self.assertEqual(first["rentEvidence"]["grossPotentialRentProxy"]["annual"], "2220000")
@@ -61,6 +84,9 @@ class PropertyOpportunityTests(unittest.TestCase):
         self.assertFalse(first["governance"]["eligibleForAutomaticUnderwriting"])
         self.assertFalse(first["governance"]["test2AssumptionsOverwritten"])
         self.assertFalse(first["governance"]["scoreProduced"])
+        self.assertEqual(first["quality"]["scope"], "comparable_selection_quality")
+        self.assertEqual(first["readiness"]["status"], "RESEARCH_EVIDENCE_ONLY")
+        self.assertFalse(first["readiness"]["analystApprovalReady"])
         self.assertEqual(first["quality"]["components"]["futureEvidenceExcluded"], 2)
         self.assertEqual(first["quality"]["components"]["staleEvidenceExcluded"], 2)
 
@@ -79,11 +105,12 @@ class PropertyOpportunityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "licensing notes"):
             analyze_property_opportunity(subject, rents, sales, analysis_as_of="2026-06-30",
                                          source_metadata=metadata)
-        subject["purchase_price"] = "-1"
         metadata["rent_comps"]["licensing_notes"] = "Fictional test fixture"
+        economic_inputs = _economic_inputs()
+        economic_inputs[0]["value"] = "-1"
         with self.assertRaisesRegex(ValueError, "purchase_price"):
             analyze_property_opportunity(subject, rents, sales, analysis_as_of="2026-06-30",
-                                         source_metadata=metadata)
+                                         source_metadata=metadata, economic_inputs=economic_inputs)
 
     def test_service_persists_immutable_candidate_and_audit_event(self):
         subject, _, _, metadata = _inputs()
@@ -174,6 +201,47 @@ class PropertyOpportunityTests(unittest.TestCase):
             self.assertEqual(approved["test1Context"]["results"]["countyFips"], "37183")
             self.assertEqual(approved["sources"]["location_evidence"]["fileSha256"],
                              __import__("hashlib").sha256(location_text.encode()).hexdigest())
+
+    def test_economic_evidence_is_source_linked_partial_and_test2_advisory(self):
+        subject, rents, sales, metadata = _inputs()
+        without_evidence = analyze_property_opportunity(
+            subject, rents, sales, analysis_as_of="2026-06-30", source_metadata=metadata,
+        )
+        self.assertIsNone(without_evidence["screeningScenarios"])
+        self.assertNotIn("purchase_price", without_evidence["subject"])
+        self.assertEqual(without_evidence["economicEvidence"]["status"], "not_provided")
+        result = analyze_property_opportunity(
+            subject, rents, sales, analysis_as_of="2026-06-30", source_metadata=metadata,
+            economic_inputs=_economic_inputs(),
+        )
+        economics = result["economicEvidence"]
+        self.assertEqual(economics["basis"]["totalEstimatedBasis"], "11000000")
+        self.assertEqual(economics["basis"]["basisPerUnit"], "110000")
+        self.assertEqual(economics["basis"]["renovationPerUnit"], "5000")
+        self.assertEqual(economics["financingScreen"]["loanToBasis"],
+                         "0.6363636363636363636363636364")
+        self.assertFalse(economics["financingScreen"]["debtServiceCalculated"])
+        self.assertEqual(economics["knownOperatingCostScreen"]["knownAnnualOperatingCosts"], "500000")
+        self.assertFalse(economics["knownOperatingCostScreen"]["completeOperatingStatement"])
+        self.assertEqual(economics["test2CandidateInputs"]["status"], "ADVISORY_UNAPPROVED")
+        self.assertFalse(economics["test2CandidateInputs"]["automaticApply"])
+        self.assertTrue(all(item["reviewStatus"] == "candidate_unapproved" for item in economics["evidence"]))
+
+        incomplete = [item for item in _economic_inputs() if item["field"] != "holding_costs"]
+        partial = analyze_property_opportunity(
+            subject, rents, sales, analysis_as_of="2026-06-30", source_metadata=metadata,
+            economic_inputs=incomplete,
+        )
+        self.assertFalse(partial["economicEvidence"]["basis"]["complete"])
+        self.assertIsNone(partial["economicEvidence"]["basis"]["totalEstimatedBasis"])
+        self.assertEqual(partial["economicEvidence"]["basis"]["missingComponents"], ["holding_costs"])
+        self.assertIsNone(partial["screeningScenarios"])
+
+        future = _economic_inputs()
+        future[0]["as_of_date"] = "2026-07-01"
+        with self.assertRaisesRegex(ValueError, "future evidence"):
+            analyze_property_opportunity(subject, rents, sales, analysis_as_of="2026-06-30",
+                                         source_metadata=metadata, economic_inputs=future)
 
 
 if __name__ == "__main__":

@@ -69,6 +69,8 @@ Exit criteria:
 
 ### Milestone 3 — Renovation, operating, financing, and downside evidence
 
+Status: implemented on the `opportunity-engine-m3` branch.
+
 Deliverables:
 
 - Add versioned local inputs for renovation scope, unit mix, taxes, insurance, utilities, operating expenses, debt terms, and holding costs.
@@ -76,6 +78,15 @@ Deliverables:
 - Add deterministic sensitivities and break-even calculations with explicit formulas.
 - Export candidate evidence to Test2; use Test2 for the controlling cash-flow and return calculations.
 - Never infer missing expenses, loan terms, or renovation costs from unrelated comparables.
+
+Implemented controls:
+
+- Versioned candidate evidence for basis, renovation, known operating costs, vacancy/concessions, and financing terms.
+- Exact unit, range, source-reference, licensing-note, and as-of-date validation.
+- Complete-basis calculations only when every basis component exists; missing components remain explicit.
+- Per-unit basis/renovation, loan-to-basis, equity requirement, known-cost ratio, and partial known-cost break-even arithmetic.
+- `ADVISORY_UNAPPROVED` Test2 candidate values with automatic application disabled.
+- Debt service, detailed NOI, reserves, returns, waterfalls, and controlling valuation remain outside Test3.
 
 Exit criteria:
 

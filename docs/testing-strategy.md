@@ -16,5 +16,7 @@ Property Opportunity Engine tests use fictional local rent and sale comparables.
 
 Opportunity-location tests verify effective-date and freshness filtering, deterministic threshold hashing, unsupported-category rejection, missing-coverage disclosure, prohibited sensitive inferences, absence of travel-time claims, local-file SHA lineage, reviewer-approved county-FIPS gating, Test1 snapshot matching, and zero network requests.
 
+Property-economic tests verify source and licensing requirements, exact units, future-evidence rejection, complete versus incomplete basis behavior, no missing-to-zero conversion, per-unit calculations, known-cost break-even disclosure, financing screens without debt-service calculation, candidate-only Test2 status, and disabled automatic application.
+
 Not yet sufficient for production: browser accessibility/e2e automation, complex PDF corpus benchmarks, OCR failure matrix, load tests, restore drill and independent penetration review.
 

@@ -7,12 +7,13 @@ import json
 
 from test3.research.comparables import analyze_location
 
+from .economics import economic_screen, normalize_economic_evidence
 from .location import analyze_location_evidence
 from .sales import analyze_sale_comps
 
 
-SCHEMA_VERSION = "test3-property-opportunity/1.1.0"
-POLICY_VERSION = "property-opportunity-screening/1.1.0"
+SCHEMA_VERSION = "test3-property-opportunity/1.2.0"
+POLICY_VERSION = "property-opportunity-screening/1.2.0"
 RIGHTS_STATUSES = {"public_open", "user_owned", "licensed_local", "unknown_review_required"}
 
 
@@ -98,6 +99,7 @@ def analyze_property_opportunity(subject: dict, rent_comps: list[dict], sale_com
                                  analysis_as_of: str, source_metadata: dict,
                                  location_evidence: list[dict] | None = None,
                                  test1_context: dict | None = None,
+                                 economic_inputs: list[dict] | None = None,
                                  location_thresholds: dict[str, float] | None = None,
                                  location_maximum_age_days: int = 3650,
                                  max_distance_miles: float = 15.0, rent_maximum_age_days: int = 365,
@@ -107,8 +109,13 @@ def analyze_property_opportunity(subject: dict, rent_comps: list[dict], sale_com
     property_type = str(subject.get("property_type") or "").strip().lower()
     if not property_type:
         raise ValueError("subject property_type is required")
-    normalized_subject = {**subject, "property_type": property_type,
-                          "latitude": float(subject["latitude"]), "longitude": float(subject["longitude"])}
+    normalized_subject = {
+        key: subject.get(key) for key in
+        ("address", "units", "year_built", "rentable_sf", "county_fips")
+        if subject.get(key) not in (None, "")
+    }
+    normalized_subject.update({"property_type": property_type,
+                               "latitude": float(subject["latitude"]), "longitude": float(subject["longitude"])})
     if not -90 <= normalized_subject["latitude"] <= 90 or not -180 <= normalized_subject["longitude"] <= 180:
         raise ValueError("subject coordinates are outside their valid range")
     source_names = ["rent_comps", "sale_comps"] + (["location_evidence"] if location_evidence is not None else [])
@@ -140,7 +147,23 @@ def analyze_property_opportunity(subject: dict, rent_comps: list[dict], sale_com
         gross_rent_proxy = {"monthly": format(monthly, "f"), "annual": format(monthly * 12, "f"),
                             "method": "selected_rent_comp_median_times_subject_units",
                             "warning": "Gross potential rent proxy only; excludes vacancy, concessions, expenses and downtime."}
-    scenarios = _screening_scenarios(normalized_subject, sale_result["benchmark"])
+    if economic_inputs is not None:
+        normalized_economics = normalize_economic_evidence(economic_inputs, analysis_as_of=as_of)
+        economics = economic_screen(normalized_economics, units=subject.get("units"),
+                                    gross_potential_rent=gross_rent_proxy)
+        scenario_subject = {**normalized_subject, **{
+            item["field"]: item["value"] for item in normalized_economics
+            if item["field"] in {"purchase_price", "renovation_budget", "closing_costs", "holding_costs"}
+        }}
+        scenarios = (_screening_scenarios(scenario_subject, sale_result["benchmark"])
+                     if economics["basis"] and economics["basis"]["complete"] else None)
+    else:
+        normalized_economics = None
+        economics = {"status": "not_provided", "evidence": [], "basis": None,
+                     "financingScreen": None, "knownOperatingCostScreen": None,
+                     "test2CandidateInputs": {"status": "NOT_AVAILABLE", "values": [], "automaticApply": False},
+                     "limitations": ["No governed economic evidence package was provided."]}
+        scenarios = None
     components = {
         "rentComparableCount": len(rent_result["rentComparables"]),
         "saleComparableCount": len(sale_result["comparables"]),
@@ -149,6 +172,10 @@ def analyze_property_opportunity(subject: dict, rent_comps: list[dict], sale_com
         "saleComparableMinimumMet": len(sale_result["comparables"]) >= 3,
         "saleUnitsConsistent": len(sale_result["priceUnits"]) <= 1,
         "sourceRightsDocumented": all(item["rightsDocumented"] for item in sources.values()),
+        "economicEvidenceProvided": economic_inputs is not None,
+        "economicBasisComplete": bool(economics.get("basis") and economics["basis"].get("complete")),
+        "locationEvidenceProvided": location_evidence is not None,
+        "test1ContextStatus": (test1_context or {}).get("status", "not_configured"),
         "futureEvidenceExcluded": rent_date_exclusions["future_evidence"] + sale_result["rejected"]["future_evidence"],
         "staleEvidenceExcluded": rent_date_exclusions["stale_evidence"] + sale_result["rejected"]["stale_evidence"],
     }
@@ -165,8 +192,15 @@ def analyze_property_opportunity(subject: dict, rent_comps: list[dict], sale_com
                          "rejected": rent_rejected, "grossPotentialRentProxy": gross_rent_proxy},
         "saleEvidence": sale_result, "locationEvidence": location_result,
         "test1Context": test1_context or {"status": "not_configured", "verified": False, "networkRequests": 0, "results": {}},
-        "screeningScenarios": scenarios,
-        "quality": {"level": quality, "components": components},
+        "economicEvidence": economics, "screeningScenarios": scenarios,
+        "quality": {"level": quality, "scope": "comparable_selection_quality", "components": components},
+        "readiness": {
+            "status": "RESEARCH_EVIDENCE_ONLY",
+            "economicEvidenceReady": components["economicBasisComplete"],
+            "locationEvidenceReady": components["locationEvidenceProvided"],
+            "analystApprovalReady": False,
+            "test2HandoffReady": False,
+        },
         "governance": {"analystApprovalRequired": True, "eligibleForAutomaticUnderwriting": False,
                        "test2AssumptionsOverwritten": False, "scoreProduced": False},
         "limitations": [
@@ -181,6 +215,7 @@ def analyze_property_opportunity(subject: dict, rent_comps: list[dict], sale_com
     }
     output["analysisInputHash"] = _hash({"subject": normalized_subject, "rentComps": rent_comps,
                                          "saleComps": sale_comps, "locationEvidence": location_evidence,
+                                         "economicInputs": economic_inputs,
                                          "test1Context": test1_context, "analysisAsOf": as_of.isoformat(),
                                          "sources": sources, "policyVersion": POLICY_VERSION,
                                          "maxDistanceMiles": max_distance_miles,

@@ -96,6 +96,8 @@ Exit criteria:
 
 ### Milestone 4 — Backtested opportunity scoring and ranking
 
+Status: governance implemented on the `opportunity-engine-m4` branch; production score explicitly rejected because no eligible realized property-level outcome dataset is installed.
+
 Deliverables:
 
 - Define a versioned score policy before producing any score.
@@ -103,6 +105,15 @@ Deliverables:
 - Use time-aware validation, geography holdouts, naïve baselines, stability checks, and independent implementation checks.
 - Separate market forecasting evidence from property screening signals.
 - Expose score components, sensitivity, coverage, limitations, and rejection reasons.
+
+Implemented controls:
+
+- Versioned, content-hashed multifamily score policy and property-outcome schema.
+- Real-data, rights, verification, property-type, outcome-definition, lineage, duplicate, chronology, and leakage gates.
+- Minimum observation, market, total-period, and per-market longitudinal-depth requirements.
+- Mandatory time holdout, geography holdout, baseline improvement, stability, independent Python, optional-policy R, and immutable-lineage promotion gates.
+- Synthetic outcomes can never satisfy readiness.
+- The product currently emits `NO_VALIDATED_OPPORTUNITY_SCORE`, a complete rejection-reason list, `scoreProduced=false`, and `eligibleForControllingUnderwriting=false`.
 
 Exit criteria:
 

@@ -40,6 +40,8 @@ Exit criteria:
 
 ### Milestone 2 — Governed neighborhood and accessibility evidence
 
+Status: implemented on the `opportunity-engine-m2` branch.
+
 Deliverables:
 
 - Extend the existing local POI analysis with governed categories for schools, grocery, retail, employment centers, transit, healthcare, parks, and downtown access.
@@ -47,6 +49,16 @@ Deliverables:
 - Add effective-dated, evidence-backed destination definitions and local travel-mode inputs.
 - Distinguish straight-line distance from actual travel time and withhold unsupported claims.
 - Present factual favorable and adverse evidence; never generate subjective school-quality, safety, or demographic desirability claims.
+
+Implemented controls:
+
+- Effective-dated local evidence for schools, grocery, shopping centers, employment centers, transit, healthcare, parks, and downtown context.
+- Deterministic straight-line-distance calculations with explicit disclosure that travel time is unavailable.
+- Future, stale, expired, not-yet-effective, invalid, and unsupported-category exclusions with visible counts.
+- Explicit missing-coverage results rather than false absence claims.
+- Reviewer-approved county-FIPS gating before Test1 enrichment; Test3 never guesses or geocodes the county.
+- Read-only Test1 results retain snapshot integrity hashes, source dates, coverage, citations, and zero-network evidence.
+- Prohibited inference controls for school quality, crime/safety, protected-class demographics, neighborhood desirability, and causal investment performance.
 
 Exit criteria:
 

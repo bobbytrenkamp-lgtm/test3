@@ -14,5 +14,7 @@ Destructive-operation recovery tests simulate both crash boundaries: bytes stage
 
 Property Opportunity Engine tests use fictional local rent and sale comparables. They verify deterministic ranking and hashing, exact date eligibility, future/stale exclusions, mixed-unit withholding, rights-note enforcement, negative-value rejection, immutable persistence, duplicate rejection, organization-scoped service access, audit linkage, and the prohibition on automatic scoring, underwriting, approval, or Test2 mutation.
 
+Opportunity-location tests verify effective-date and freshness filtering, deterministic threshold hashing, unsupported-category rejection, missing-coverage disclosure, prohibited sensitive inferences, absence of travel-time claims, local-file SHA lineage, reviewer-approved county-FIPS gating, Test1 snapshot matching, and zero network requests.
+
 Not yet sufficient for production: browser accessibility/e2e automation, complex PDF corpus benchmarks, OCR failure matrix, load tests, restore drill and independent penetration review.
 

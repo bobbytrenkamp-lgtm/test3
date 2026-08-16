@@ -11,7 +11,7 @@ from http.cookies import SimpleCookie
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import quote, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 from .service import Service
 from .auth import DUMMY_PASSWORD_HASH, SigninLimiter, session_token, verify_password
@@ -103,6 +103,19 @@ class Handler(SimpleHTTPRequestHandler):
                 user = self._identity()
                 require(user["role"], "read")
                 return self._json(200, research_lab_report(self.service.data_dir, self.service.db, user["organization_id"]))
+            if parsed.path == "/api/opportunities":
+                user = self._identity()
+                require(user["role"], "read")
+                parameters = {key: values[-1] for key, values in parse_qs(parsed.query, keep_blank_values=True).items()}
+                return self._json(200, self.service.list_opportunity_candidates(user["organization_id"], parameters))
+            if parsed.path.startswith("/api/opportunities/"):
+                user = self._identity()
+                require(user["role"], "read")
+                parts = parsed.path.strip("/").split("/")
+                if len(parts) == 3:
+                    return self._json(200, self.service.opportunity_candidate(user["organization_id"], parts[2]))
+                if len(parts) == 4 and parts[3] == "history":
+                    return self._json(200, self.service.opportunity_candidate_history(user["organization_id"], parts[2]))
             if parsed.path.startswith("/api/deals/"):
                 user = self._identity()
                 parts = parsed.path.strip("/").split("/")
@@ -251,6 +264,17 @@ class Handler(SimpleHTTPRequestHandler):
             if parts == ["api", "deals"]:
                 self._authorize_post(user, "deal.create")
                 return self._json(201, self.service.create_deal(user["organization_id"], user["id"], self._payload()))
+            if parts == ["api", "opportunities"]:
+                self._authorize_post(user, "opportunity.create")
+                return self._json(201, self.service.create_opportunity_candidate(user["organization_id"], user["id"], self._payload()))
+            if len(parts) == 4 and parts[:2] == ["api", "opportunities"] and parts[3] == "versions":
+                self._authorize_post(user, "opportunity.create")
+                return self._json(201, self.service.create_opportunity_candidate_version(
+                    user["organization_id"], user["id"], parts[2], self._payload()))
+            if len(parts) == 4 and parts[:2] == ["api", "opportunities"] and parts[3] == "screen":
+                self._authorize_post(user, "opportunity.screen")
+                return self._json(201, self.service.screen_opportunity_candidate(
+                    user["organization_id"], user["id"], parts[2], self._payload()))
             if parts == ["api", "market-panel"]:
                 self._authorize_post(user, "assumption.create")
                 length = int(self.headers.get("Content-Length", "0"))

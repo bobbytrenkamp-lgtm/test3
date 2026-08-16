@@ -29,7 +29,11 @@ from .assumptions.factors import derived_change_factors, market_factor_scorecard
 from .assumptions.governance import cadence_findings, research_manifest, revision_conflicts, source_scorecards
 from .assumptions.validation import market_regimes, walk_forward_baselines
 from .research.comparables import analyze_location, parse_csv_records
-from .opportunity import analyze_property_opportunity, parse_location_evidence, parse_sale_comps
+from .opportunity import (CANDIDATE_EVIDENCE_SCHEMA_VERSION, CANDIDATE_STATUSES, ORIGIN_TYPES,
+                          PROPERTY_TYPES, OpportunityScreeningTier, analyze_property_opportunity, canonical_json,
+                          normalize_evidence_payload, normalized_address_hash, parse_location_evidence,
+                          parse_sale_comps, screen_opportunity, screening_input_from_snapshot,
+                          sha256_json)
 
 OPPORTUNITY_ACKNOWLEDGEMENTS = (
     "evidence_reviewed", "source_rights_reviewed", "limitations_acknowledged", "test2_advisory_only",
@@ -281,6 +285,206 @@ class Service:
                       {"comps_file_sha256": result["provenance"]["compsFileSha256"], "pois_file_sha256": result["provenance"]["poisFileSha256"],
                        "comp_count": len(result["rentComparables"]), "poi_count": len(pois), "analysis_version": "location-comparables/1.0"}, deal_id)
         return result
+
+    @staticmethod
+    def _bounded_text(payload: dict, field: str, maximum: int, *, required: bool = False) -> str | None:
+        value = str(payload.get(field) or "").strip()
+        if required and not value:
+            raise ValueError(f"{field} is required")
+        if len(value) > maximum:
+            raise ValueError(f"{field} exceeds {maximum} characters")
+        return value or None
+
+    def create_opportunity_candidate(self, organization_id: str, user_id: str, payload: dict) -> dict:
+        if not isinstance(payload, dict):
+            raise ValueError("Opportunity candidate must be a JSON object")
+        allowed = {"deal_id", "property_type", "display_name", "address", "market", "submarket", "status", "origin_type"}
+        if set(payload) - allowed:
+            raise ValueError("Unsupported opportunity candidate fields: " + ", ".join(sorted(set(payload) - allowed)))
+        property_type = str(payload.get("property_type") or "").strip().lower()
+        if property_type not in PROPERTY_TYPES:
+            raise ValueError("property_type is not a governed property type")
+        status = str(payload.get("status") or "candidate").strip()
+        origin_type = str(payload.get("origin_type") or "manual").strip()
+        if status not in CANDIDATE_STATUSES or origin_type not in ORIGIN_TYPES:
+            raise ValueError("Invalid opportunity status or origin_type")
+        if status != "candidate":
+            raise ValueError("New opportunities must begin with candidate status")
+        display_name = self._bounded_text(payload, "display_name", 300)
+        address = self._bounded_text(payload, "address", 500)
+        market = self._bounded_text(payload, "market", 200)
+        submarket = self._bounded_text(payload, "submarket", 200)
+        if not display_name and not address:
+            raise ValueError("display_name or address is required")
+        deal_id = self._bounded_text(payload, "deal_id", 100)
+        if origin_type == "existing_deal" and not deal_id:
+            raise ValueError("existing_deal origin requires deal_id")
+        address_hash = normalized_address_hash(address)
+        candidate_id, created = str(uuid.uuid4()), now()
+        warnings = []
+        with self.db.connect() as connection:
+            if deal_id and not connection.execute("SELECT 1 FROM deals WHERE id=? AND organization_id=?", (deal_id, organization_id)).fetchone():
+                raise LookupError("Deal not found")
+            if address_hash and connection.execute("SELECT 1 FROM opportunity_candidates WHERE organization_id=? AND normalized_address_sha256=?", (organization_id, address_hash)).fetchone():
+                warnings.append("POSSIBLE_DUPLICATE_CANDIDATE")
+            connection.execute(
+                "INSERT INTO opportunity_candidates(id,organization_id,deal_id,created_by,property_type,display_name,address,normalized_address_sha256,market,submarket,status,origin_type,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (candidate_id, organization_id, deal_id, user_id, property_type, display_name, address,
+                 address_hash, market, submarket, status, origin_type, created),
+            )
+        self.db.audit(organization_id, user_id, "opportunity.candidate_created", "opportunity_candidate",
+                      candidate_id, {"property_type": property_type, "origin_type": origin_type,
+                                     "status": status, "warnings": warnings}, deal_id)
+        return {"id": candidate_id, "organization_id": organization_id, "deal_id": deal_id,
+                "property_type": property_type, "display_name": display_name, "address": address,
+                "market": market, "submarket": submarket, "status": status,
+                "origin_type": origin_type, "created_by": user_id, "created_at": created,
+                "warnings": warnings, "deal_created": False}
+
+    @staticmethod
+    def _screening_summary(row) -> dict | None:
+        if not row or not row["run_id"]:
+            return None
+        result = json.loads(row["result_json"])
+        return {"id": row["run_id"], "candidate_version_id": row["candidate_version_id"],
+                "candidate_version": row["candidate_version"], "screening_tier": row["screening_tier"],
+                "analysis_as_of": row["analysis_as_of"], "evaluated_at": row["evaluated_at"],
+                "evidence_completeness": result.get("evidenceCompleteness"),
+                "evidence_freshness_days": result.get("evidenceFreshnessDays"),
+                "result_sha256": row["result_sha256"]}
+
+    def list_opportunity_candidates(self, organization_id: str, query: dict) -> dict:
+        if not isinstance(query, dict):
+            raise ValueError("Opportunity query must be an object")
+        allowed = {"property_type", "status", "market", "screening_tier", "sort", "direction", "limit", "offset"}
+        if set(query) - allowed:
+            raise ValueError("Unsupported opportunity query fields")
+        try:
+            limit, offset = int(query.get("limit", 50)), int(query.get("offset", 0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("limit and offset must be integers") from exc
+        if not 1 <= limit <= 200 or not 0 <= offset <= 1_000_000:
+            raise ValueError("limit must be 1-200 and offset must be 0-1,000,000")
+        sort = str(query.get("sort") or "created_at")
+        direction = str(query.get("direction") or "desc").lower()
+        sorts = {"created_at": "c.created_at", "analysis_as_of": "v.analysis_as_of",
+                 "screening_tier": "r.screening_tier",
+                 "evidence_completeness": "CAST(json_extract(r.result_json,'$.evidenceCompleteness') AS REAL)",
+                 "evidence_freshness": "CAST(json_extract(r.result_json,'$.evidenceFreshnessDays') AS INTEGER)"}
+        if sort not in sorts or direction not in {"asc", "desc"}:
+            raise ValueError("Unsupported opportunity sort or direction")
+        if query.get("property_type") and query["property_type"] not in PROPERTY_TYPES:
+            raise ValueError("Unsupported property_type filter")
+        if query.get("status") and query["status"] not in CANDIDATE_STATUSES:
+            raise ValueError("Unsupported status filter")
+        if query.get("screening_tier") and query["screening_tier"] not in {item.value for item in OpportunityScreeningTier}:
+            raise ValueError("Unsupported screening_tier filter")
+        if query.get("market") and len(str(query["market"])) > 200:
+            raise ValueError("market filter exceeds 200 characters")
+        where, parameters = ["c.organization_id=?"], [organization_id]
+        for field in ("property_type", "status", "market"):
+            if query.get(field):
+                where.append(f"c.{field}=?")
+                parameters.append(str(query[field]))
+        if query.get("screening_tier"):
+            where.append("r.screening_tier=?")
+            parameters.append(str(query["screening_tier"]))
+        joins = """ FROM opportunity_candidates c
+            LEFT JOIN opportunity_screening_runs r ON r.id=(SELECT r2.id FROM opportunity_screening_runs r2 WHERE r2.organization_id=c.organization_id AND r2.candidate_id=c.id ORDER BY r2.evaluated_at DESC,r2.rowid DESC LIMIT 1)
+            LEFT JOIN opportunity_candidate_versions v ON v.id=r.candidate_version_id """
+        clause = " WHERE " + " AND ".join(where)
+        fields = """SELECT c.*,r.id run_id,r.candidate_version_id,r.screening_tier,r.result_json,r.result_sha256,r.evaluated_at,v.version candidate_version,v.analysis_as_of"""
+        with self.db.connect() as connection:
+            total = connection.execute("SELECT COUNT(*)" + joins + clause, parameters).fetchone()[0]
+            rows = connection.execute(fields + joins + clause + f" ORDER BY {sorts[sort]} {direction.upper()},c.id ASC LIMIT ? OFFSET ?",
+                                      (*parameters, limit, offset)).fetchall()
+        items = []
+        for row in rows:
+            candidate = {key: row[key] for key in ("id", "deal_id", "created_by", "property_type", "display_name",
+                                                   "address", "market", "submarket", "status", "origin_type", "created_at")}
+            candidate["current_screening"] = self._screening_summary(row)
+            items.append(candidate)
+        return {"items": items, "pagination": {"limit": limit, "offset": offset, "returned": len(items), "total": total},
+                "sort": {"field": sort, "direction": direction}}
+
+    def opportunity_candidate(self, organization_id: str, candidate_id: str) -> dict:
+        with self.db.connect() as connection:
+            candidate = connection.execute("SELECT * FROM opportunity_candidates WHERE id=? AND organization_id=?", (candidate_id, organization_id)).fetchone()
+            if not candidate:
+                raise LookupError("Opportunity candidate not found")
+            versions = connection.execute("SELECT * FROM opportunity_candidate_versions WHERE candidate_id=? AND organization_id=? ORDER BY version", (candidate_id, organization_id)).fetchall()
+            runs = connection.execute("SELECT * FROM opportunity_screening_runs WHERE candidate_id=? AND organization_id=? ORDER BY evaluated_at,rowid", (candidate_id, organization_id)).fetchall()
+        candidate_value = {key: candidate[key] for key in candidate.keys() if key != "normalized_address_sha256"}
+        version_values = [{**{key: row[key] for key in row.keys() if key != "content_json"}, "content": json.loads(row["content_json"])} for row in versions]
+        run_values = [{**{key: row[key] for key in row.keys() if key != "result_json"}, "result": json.loads(row["result_json"])} for row in runs]
+        return {"candidate": candidate_value, "versions": version_values, "screening_runs": run_values,
+                "current_screening": run_values[-1] if run_values else None}
+
+    def create_opportunity_candidate_version(self, organization_id: str, user_id: str,
+                                             candidate_id: str, payload: dict) -> dict:
+        version_id, created = str(uuid.uuid4()), now()
+        with self.db.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            candidate = connection.execute("SELECT * FROM opportunity_candidates WHERE id=? AND organization_id=?", (candidate_id, organization_id)).fetchone()
+            if not candidate:
+                raise LookupError("Opportunity candidate not found")
+            snapshot = normalize_evidence_payload(candidate_id, candidate["property_type"], payload)
+            content_json, content_hash = canonical_json(snapshot), sha256_json(snapshot)
+            if connection.execute("SELECT 1 FROM opportunity_candidate_versions WHERE organization_id=? AND candidate_id=? AND content_sha256=?", (organization_id, candidate_id, content_hash)).fetchone():
+                raise ValueError("This exact candidate evidence version already exists")
+            version = connection.execute("SELECT COALESCE(MAX(version),0)+1 FROM opportunity_candidate_versions WHERE organization_id=? AND candidate_id=?", (organization_id, candidate_id)).fetchone()[0]
+            connection.execute("INSERT INTO opportunity_candidate_versions VALUES(?,?,?,?,?,?,?,?,?,?)",
+                               (version_id, organization_id, candidate_id, version,
+                                CANDIDATE_EVIDENCE_SCHEMA_VERSION, snapshot["inputs"]["analysis_as_of"],
+                                content_json, content_hash, user_id, created))
+        self.db.audit(organization_id, user_id, "opportunity.candidate_version_created", "opportunity_candidate_version",
+                      version_id, {"candidate_id": candidate_id, "version": version, "content_sha256": content_hash})
+        return {"id": version_id, "candidate_id": candidate_id, "version": version,
+                "schema_version": CANDIDATE_EVIDENCE_SCHEMA_VERSION, "analysis_as_of": snapshot["inputs"]["analysis_as_of"],
+                "content": snapshot, "content_sha256": content_hash, "created_by": user_id, "created_at": created}
+
+    def screen_opportunity_candidate(self, organization_id: str, user_id: str, candidate_id: str,
+                                     payload: dict) -> dict:
+        if not isinstance(payload, dict) or payload:
+            raise ValueError("Screening accepts no client-computed inputs; create an evidence version first")
+        with self.db.connect() as connection:
+            candidate = connection.execute("SELECT 1 FROM opportunity_candidates WHERE id=? AND organization_id=?", (candidate_id, organization_id)).fetchone()
+            if not candidate:
+                raise LookupError("Opportunity candidate not found")
+            version = connection.execute("SELECT * FROM opportunity_candidate_versions WHERE candidate_id=? AND organization_id=? ORDER BY version DESC LIMIT 1", (candidate_id, organization_id)).fetchone()
+        if not version:
+            raise ValueError("A candidate evidence version is required before screening")
+        snapshot = json.loads(version["content_json"])
+        if sha256_json(snapshot) != version["content_sha256"]:
+            raise ValueError("Candidate evidence integrity validation failed")
+        result = screen_opportunity(screening_input_from_snapshot(snapshot))
+        result_value = result.to_dict()
+        result_json, result_hash = canonical_json(result_value), sha256_json(result_value)
+        run_id, created = str(uuid.uuid4()), now()
+        with self.db.connect() as connection:
+            connection.execute("INSERT INTO opportunity_screening_runs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                               (run_id, organization_id, candidate_id, version["id"], result.policy_id,
+                                result.policy_version, result.policy_hash, result.input_snapshot_hash,
+                                result.evidence_hash, result.screening_tier.value, result_json, result_hash,
+                                user_id, result.evaluated_at.astimezone(timezone.utc).isoformat(), created))
+        self.db.audit(organization_id, user_id, "opportunity.screened", "opportunity_screening_run", run_id,
+                      {"candidate_id": candidate_id, "candidate_version_id": version["id"],
+                       "screening_tier": result.screening_tier.value, "result_sha256": result_hash})
+        return {"id": run_id, "candidate_id": candidate_id, "candidate_version_id": version["id"],
+                "result": result_value, "result_sha256": result_hash, "created_by": user_id, "created_at": created}
+
+    def opportunity_candidate_history(self, organization_id: str, candidate_id: str) -> dict:
+        detail = self.opportunity_candidate(organization_id, candidate_id)
+        timeline = ([{"type": "candidate_created", "at": detail["candidate"]["created_at"],
+                      "id": candidate_id, "actor_id": detail["candidate"]["created_by"]}]
+                    + [{"type": "evidence_version_created", "at": item["created_at"], "id": item["id"],
+                        "actor_id": item["created_by"], "version": item["version"], "content_sha256": item["content_sha256"]}
+                       for item in detail["versions"]]
+                    + [{"type": "screening_run_created", "at": item["created_at"], "id": item["id"],
+                        "actor_id": item["created_by"], "candidate_version_id": item["candidate_version_id"],
+                        "screening_tier": item["screening_tier"], "result_sha256": item["result_sha256"]}
+                       for item in detail["screening_runs"]])
+        return {"candidate_id": candidate_id, "timeline": sorted(timeline, key=lambda item: (item["at"], item["type"], item["id"]))}
 
     def property_opportunity_analysis(self, organization_id: str, user_id: str, deal_id: str,
                                       payload: dict) -> dict:
@@ -747,6 +951,9 @@ class Service:
             opportunity_runs = connection.execute("SELECT id,deal_id,content_json,content_sha256 FROM opportunity_runs WHERE organization_id=? ORDER BY rowid", (organization_id,)).fetchall()
             opportunity_decisions = connection.execute("SELECT * FROM opportunity_decisions WHERE organization_id=? ORDER BY rowid", (organization_id,)).fetchall()
             opportunity_handoffs = connection.execute("SELECT * FROM opportunity_handoffs WHERE organization_id=? ORDER BY rowid", (organization_id,)).fetchall()
+            opportunity_candidates = connection.execute("SELECT * FROM opportunity_candidates WHERE organization_id=? ORDER BY rowid", (organization_id,)).fetchall()
+            opportunity_candidate_versions = connection.execute("SELECT * FROM opportunity_candidate_versions WHERE organization_id=? ORDER BY rowid", (organization_id,)).fetchall()
+            opportunity_screening_runs = connection.execute("SELECT * FROM opportunity_screening_runs WHERE organization_id=? ORDER BY rowid", (organization_id,)).fetchall()
             extracted_membership = {(row["id"], row["deal_id"], row["document_id"]) for row in connection.execute("SELECT id,deal_id,document_id FROM extracted_values WHERE organization_id=?", (organization_id,)).fetchall()}
         storage = {"activeOriginals": 0, "purgedTombstones": 0, "missingActiveOriginals": 0, "integrityMismatches": 0, "unexpectedPurgedOriginals": 0, "unsafePaths": 0}
         upload_root = self.upload_dir.resolve()
@@ -835,8 +1042,49 @@ class Service:
                 opportunity_handoff_mismatches += 1
         opportunity_integrity["handoffCount"] = len(opportunity_handoffs)
         opportunity_integrity["handoffMismatches"] = opportunity_handoff_mismatches
+        candidate_membership = {item["id"] for item in opportunity_candidates}
+        version_membership = {(item["id"], item["candidate_id"]) for item in opportunity_candidate_versions}
+        candidate_version_mismatches = 0
+        version_snapshots = {}
+        for item in opportunity_candidate_versions:
+            try:
+                snapshot = json.loads(item["content_json"])
+                version_snapshots[item["id"]] = snapshot
+                if (item["candidate_id"] not in candidate_membership
+                        or sha256_json(snapshot) != item["content_sha256"]
+                        or snapshot.get("candidateId") != item["candidate_id"]
+                        or snapshot.get("schemaVersion") != item["schema_version"]
+                        or (snapshot.get("inputs") or {}).get("analysis_as_of") != item["analysis_as_of"]):
+                    candidate_version_mismatches += 1
+            except (json.JSONDecodeError, TypeError, ValueError):
+                candidate_version_mismatches += 1
+        screening_run_mismatches = 0
+        for item in opportunity_screening_runs:
+            try:
+                result = json.loads(item["result_json"])
+                snapshot = version_snapshots.get(item["candidate_version_id"])
+                evaluated = datetime.fromisoformat(item["evaluated_at"])
+                reproduced = screen_opportunity(screening_input_from_snapshot(snapshot), evaluated_at=evaluated).to_dict()
+                if ((item["candidate_version_id"], item["candidate_id"]) not in version_membership
+                        or item["candidate_id"] not in candidate_membership
+                        or sha256_json(result) != item["result_sha256"]
+                        or result != reproduced
+                        or result.get("policyId") != item["policy_id"]
+                        or result.get("policyVersion") != item["policy_version"]
+                        or result.get("policyHash") != item["policy_sha256"]
+                        or result.get("inputSnapshotHash") != item["input_snapshot_sha256"]
+                        or result.get("evidenceHash") != item["evidence_sha256"]
+                        or result.get("screeningTier") != item["screening_tier"]):
+                    screening_run_mismatches += 1
+            except (json.JSONDecodeError, TypeError, ValueError, KeyError, AttributeError):
+                screening_run_mismatches += 1
+        finder_integrity = {"candidateCount": len(opportunity_candidates),
+                            "versionCount": len(opportunity_candidate_versions),
+                            "versionMismatches": candidate_version_mismatches,
+                            "screeningRunCount": len(opportunity_screening_runs),
+                            "screeningRunMismatches": screening_run_mismatches}
         market_ok = not any(market_integrity[key] for key in ("missingOriginals", "hashMismatches", "unsafePaths"))
-        return {"ok": database["ok"] and audit_valid and review_valid and storage_ok and market_ok and artifact_mismatches == 0 and semantic_hash_mismatches == 0 and semantic_source_mismatches == 0 and opportunity_hash_mismatches == 0 and opportunity_decision_mismatches == 0 and opportunity_handoff_mismatches == 0, "checkedAt": now(), "database": database, "chains": chains, "storage": storage, "marketData": market_integrity, "exports": artifact_integrity, "semanticEntities": semantic_integrity, "propertyOpportunity": opportunity_integrity, "purgeStagingFiles": staging_files, "networkRequests": 0}
+        return {"ok": database["ok"] and audit_valid and review_valid and storage_ok and market_ok and artifact_mismatches == 0 and semantic_hash_mismatches == 0 and semantic_source_mismatches == 0 and opportunity_hash_mismatches == 0 and opportunity_decision_mismatches == 0 and opportunity_handoff_mismatches == 0 and candidate_version_mismatches == 0 and screening_run_mismatches == 0, "checkedAt": now(), "database": database, "chains": chains, "storage": storage, "marketData": market_integrity, "exports": artifact_integrity, "semanticEntities": semantic_integrity, "propertyOpportunity": opportunity_integrity, "opportunityFinder": finder_integrity, "purgeStagingFiles": staging_files, "networkRequests": 0}
 
     def review_value(self, organization_id: str, user_id: str, value_id: str, status: str, normalized_value: str | None, comments: str = "") -> dict:
         normalized_value = None if normalized_value is None else str(normalized_value)

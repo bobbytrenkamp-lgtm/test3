@@ -16,6 +16,9 @@ from .screening import (
     calculate_screening_metrics,
     screen_opportunity,
 )
+from .persistence import (CANDIDATE_EVIDENCE_SCHEMA_VERSION, CANDIDATE_STATUSES, ORIGIN_TYPES,
+                          PROPERTY_TYPES, canonical_json, normalize_evidence_payload,
+                          normalized_address_hash, screening_input_from_snapshot, sha256_json)
 
 __all__ = ["analyze_location_evidence", "analyze_property_opportunity", "economic_screen",
            "normalize_economic_evidence", "parse_location_evidence", "parse_sale_comps",
@@ -23,3 +26,6 @@ __all__ = ["analyze_location_evidence", "analyze_property_opportunity", "economi
            "DEFAULT_SCREENING_POLICY", "OpportunityReason", "OpportunityScreeningInput",
            "OpportunityScreeningPolicy", "OpportunityScreeningResult", "OpportunityScreeningTier",
            "OpportunityWarning", "calculate_screening_metrics", "screen_opportunity"]
+__all__ += ["CANDIDATE_EVIDENCE_SCHEMA_VERSION", "CANDIDATE_STATUSES", "ORIGIN_TYPES",
+            "PROPERTY_TYPES", "canonical_json", "normalize_evidence_payload", "normalized_address_hash",
+            "screening_input_from_snapshot", "sha256_json"]

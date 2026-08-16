@@ -123,6 +123,8 @@ Exit criteria:
 
 ### Milestone 5 — Analyst workbench and approval workflow
 
+Status: implemented and tested on the Milestone 5 branch. The workbench shows immutable evidence, sources, economics, location, quality, score status, limitations and decision history. Decisions are separate, artifact-bound, append-only and permission-scoped; approval enforces independent review and mandatory acknowledgements, while a requested modification creates a new change request rather than editing retained evidence. See `docs/opportunity-analyst-workbench.md`.
+
 Deliverables:
 
 - Add property intake, comparable selection, evidence conflicts, location context, scenario comparison, and approval views.

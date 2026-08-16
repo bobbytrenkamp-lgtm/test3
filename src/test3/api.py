@@ -299,6 +299,10 @@ class Handler(SimpleHTTPRequestHandler):
                 self._authorize_post(user, "assumption.review")
                 payload = self._payload()
                 return self._json(200, self.service.decide_assumption_run(user["organization_id"], user["id"], parts[2], str(payload.get("selection", "")), payload.get("custom_value"), str(payload.get("rationale", "")), str(payload.get("controlling_source", ""))))
+            if len(parts) == 4 and parts[:2] == ["api", "opportunity-runs"] and parts[3] == "review":
+                self._authorize_post(user, "opportunity.review")
+                return self._json(201, self.service.review_property_opportunity(
+                    user["organization_id"], user["id"], parts[2], self._payload()))
             if len(parts) == 4 and parts[:2] == ["api", "values"] and parts[3] == "review":
                 self._authorize_post(user, "value.review")
                 payload = self._payload()

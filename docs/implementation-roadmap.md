@@ -29,4 +29,4 @@ The governed implementation program for local property opportunity screening is 
 5. analyst workbench and approval;
 6. Test2 evidence handoff and institutional release audit.
 
-Milestone 1 was merged in PR #60, Milestone 2 in PR #61, and Milestone 3 in PR #62. Milestone 4's scoring governance and honest no-score state are implemented on a bounded feature branch; an actual backtest remains blocked by zero eligible realized property-level acquisition outcomes. Later milestones must not bypass the evidence, approval, model-promotion, Test2, fair-housing-sensitive-field, or zero-cost boundaries.
+Milestone 1 was merged in PR #60, Milestone 2 in PR #61, Milestone 3 in PR #62, and Milestone 4 in PR #63. Milestone 5 implements an append-only analyst workbench with artifact-bound decisions, separation of duties, mandatory acknowledgements, explicit change requests, operational integrity, and backup coverage. An actual score/backtest remains blocked by zero eligible realized property-level acquisition outcomes. Later milestones must not bypass the evidence, approval, model-promotion, Test2, fair-housing-sensitive-field, or zero-cost boundaries.

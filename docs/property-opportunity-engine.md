@@ -1,5 +1,7 @@
 # Property Opportunity Engine
 
+The upstream Opportunity Finder uses a separate, deterministic review-priority policy documented in `docs/opportunity-finder-screening.md`. Its screening tiers are not the predictive Opportunity Score, do not modify Opportunity Review, and do not authorize Test2 underwriting changes.
+
 ## Purpose
 
 The Property Opportunity Engine turns authorized local property and comparable data into an auditable acquisition-screening package. It is deliberately separate from Test3's institutional market forecasting models. It does not appraise property, promise returns, or write underwriting assumptions into Test2.

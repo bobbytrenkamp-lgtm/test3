@@ -88,7 +88,7 @@ def verify_backup(archive_path: Path, max_expanded_bytes: int = 2 * 1024 * 1024 
                 if manifest.get("schemaVersion") != 3 or not set(count_tables).issubset(available):
                     raise ValueError("Backup database does not match its 5.0 schema/table contract")
             if manifest["format"] == "test3-backup/6.0":
-                count_tables += ("manual_assumptions", "review_decisions", "reconciliation_runs", "document_purges", "export_artifacts", "semantic_entities", "data_source_snapshots", "market_observations", "model_artifacts", "assumption_runs", "assumption_evidence", "assumption_decision_context")
+                count_tables += ("manual_assumptions", "review_decisions", "reconciliation_runs", "document_purges", "export_artifacts", "semantic_entities", "data_source_snapshots", "market_observations", "model_artifacts", "assumption_runs", "assumption_evidence", "assumption_decision_context", "opportunity_runs")
                 if manifest.get("schemaVersion") != SCHEMA_VERSION or not set(count_tables).issubset(available):
                     raise ValueError("Backup database does not match its 6.0 schema/table contract")
             counts = {table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in count_tables if table in available}

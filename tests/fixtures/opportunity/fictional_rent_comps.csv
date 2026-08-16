@@ -1,0 +1,6 @@
+address,latitude,longitude,property_type,asking_rent,rent_unit,observed_date,units,year_built,source_reference
+10 Fictional Oak Street,35.7810,-78.6380,multifamily,1850,USD/unit/month,2026-06-01,105,2018,fixture://opportunity/rent/2
+20 Fictional Pine Street,35.7900,-78.6500,multifamily,1800,USD/unit/month,2026-05-15,95,2015,fixture://opportunity/rent/3
+30 Fictional Cedar Street,35.7750,-78.6350,multifamily,1900,USD/unit/month,2026-04-01,110,2020,fixture://opportunity/rent/4
+40 Fictional Future Street,35.7760,-78.6360,multifamily,9999,USD/unit/month,2026-07-01,100,2019,fixture://opportunity/rent/5
+50 Fictional Stale Street,35.7770,-78.6370,multifamily,100,USD/unit/month,2020-01-01,100,2019,fixture://opportunity/rent/6

@@ -85,9 +85,8 @@ class OpportunityPersistenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "exact"):
             self.service.create_opportunity_candidate_version(self.user["organization_id"], self.user["id"], candidate["id"], evidence())
         future = self.candidate(display_name="Future", address="2 Example Street")
-        self.service.create_opportunity_candidate_version(self.user["organization_id"], self.user["id"], future["id"], evidence(analysis_as_of="2099-01-01"))
         with self.assertRaisesRegex(ValueError, "cannot be after"):
-            self.service.screen_opportunity_candidate(self.user["organization_id"], self.user["id"], future["id"], {})
+            self.service.create_opportunity_candidate_version(self.user["organization_id"], self.user["id"], future["id"], evidence(analysis_as_of="2099-01-01"))
         duplicate = self.candidate(display_name="Same normalized address", address="  1  EXAMPLE street ")
         self.assertEqual(duplicate["warnings"], ["POSSIBLE_DUPLICATE_CANDIDATE"])
 
@@ -142,8 +141,10 @@ class OpportunityPersistenceTests(unittest.TestCase):
     def test_permissions_are_separate_from_review(self):
         require("analyst", "opportunity.create")
         require("analyst", "opportunity.screen")
+        require("analyst", "opportunity.archive")
         with self.assertRaises(PermissionError): require("reviewer", "opportunity.create")
         with self.assertRaises(PermissionError): require("reviewer", "opportunity.screen")
+        with self.assertRaises(PermissionError): require("reviewer", "opportunity.archive")
         require("reviewer", "opportunity.review")
 
 
@@ -178,14 +179,23 @@ class OpportunityApiTests(unittest.TestCase):
                                             {"property_type": "multifamily", "display_name": "API Candidate", "address": "3 Main"})
                 self.assertEqual(status, 201)
                 self.assertEqual(request("POST", f"/api/opportunities/{candidate['id']}/versions", cookie, csrf, evidence())[0], 201)
+                self.assertEqual(request("POST", f"/api/opportunities/{candidate['id']}/versions", cookie, csrf, evidence())[0], 409)
                 self.assertEqual(request("POST", f"/api/opportunities/{candidate['id']}/screen", cookie, csrf, {})[0], 201)
-                self.assertEqual(request("GET", "/api/opportunities?limit=1&sort=screening_tier", cookie)[1]["pagination"]["total"], 1)
+                listing = request("GET", "/api/opportunities?limit=1&sort=screening_tier", cookie)[1]
+                self.assertEqual(listing["pagination"]["total"], 1)
+                self.assertEqual(listing["items"][0]["screening_currency_status"], "CURRENT")
+                self.assertIsInstance(listing["items"][0]["rent_gap_pct"], str)
                 self.assertEqual(request("GET", f"/api/opportunities/{candidate['id']}", cookie)[1]["candidate"]["id"], candidate["id"])
                 self.assertEqual(len(request("GET", f"/api/opportunities/{candidate['id']}/history", cookie)[1]["timeline"]), 3)
                 reviewer_cookie, reviewer_csrf = signin("reviewer@example.test", "reviewer-password")
                 self.assertEqual(request("GET", "/api/opportunities", reviewer_cookie)[0], 200)
                 self.assertEqual(request("POST", "/api/opportunities", reviewer_cookie, reviewer_csrf,
                                          {"property_type": "multifamily", "display_name": "Denied"})[0], 401)
+                self.assertEqual(request("POST", f"/api/opportunities/{candidate['id']}/archive", reviewer_cookie, reviewer_csrf, {})[0], 401)
+                archived = request("POST", f"/api/opportunities/{candidate['id']}/archive", cookie, csrf, {})
+                self.assertEqual((archived[0], archived[1]["status"]), (200, "archived"))
+                self.assertEqual(request("GET", f"/api/opportunities/{candidate['id']}", cookie)[1]["candidate"]["status"], "archived")
+                self.assertEqual(len(request("GET", f"/api/opportunities/{candidate['id']}/history", cookie)[1]["timeline"]), 4)
             finally:
                 connection.close(); server.shutdown(); server.server_close(); worker.join(timeout=5)
 

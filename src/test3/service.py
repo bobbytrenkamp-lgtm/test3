@@ -5,6 +5,7 @@ import json
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from .adapters import diligence_summary, test1_enrichment, test2_export
@@ -32,12 +33,24 @@ from .research.comparables import analyze_location, parse_csv_records
 from .opportunity import (CANDIDATE_EVIDENCE_SCHEMA_VERSION, CANDIDATE_STATUSES, ORIGIN_TYPES,
                           PROPERTY_TYPES, OpportunityScreeningTier, analyze_property_opportunity, canonical_json,
                           normalize_evidence_payload, normalized_address_hash, parse_location_evidence,
-                          parse_sale_comps, screen_opportunity, screening_input_from_snapshot,
+                          parse_sale_comps, registered_screening_policy, screen_opportunity, screening_input_from_snapshot,
                           sha256_json)
 
 OPPORTUNITY_ACKNOWLEDGEMENTS = (
     "evidence_reviewed", "source_rights_reviewed", "limitations_acknowledged", "test2_advisory_only",
 )
+SCREENING_PRIORITY_RANK = {"HIGH_PRIORITY_REVIEW": 1, "WORTH_REVIEWING": 2, "LOW_PRIORITY": 3,
+                           "INSUFFICIENT_EVIDENCE": 4, None: 5}
+SCREENING_CURRENCY_STATUSES = frozenset({"CURRENT", "OUTDATED_EVIDENCE", "NOT_SCREENED"})
+SCREENING_PRIORITY_SQL = """CASE WHEN r.screening_tier='HIGH_PRIORITY_REVIEW' THEN 1
+    WHEN r.screening_tier='WORTH_REVIEWING' THEN 2 WHEN r.screening_tier='LOW_PRIORITY' THEN 3
+    WHEN r.screening_tier='INSUFFICIENT_EVIDENCE' THEN 4 ELSE 5 END"""
+SCREENING_CURRENCY_SQL = """CASE WHEN r.id IS NULL THEN 'NOT_SCREENED'
+    WHEN sv.version=lv.version THEN 'CURRENT' ELSE 'OUTDATED_EVIDENCE' END"""
+
+
+class ConflictError(ValueError):
+    """A requested immutable resource already exists or lifecycle state conflicts."""
 
 
 def _sha256_file(path: Path) -> str:
@@ -325,8 +338,14 @@ class Service:
         with self.db.connect() as connection:
             if deal_id and not connection.execute("SELECT 1 FROM deals WHERE id=? AND organization_id=?", (deal_id, organization_id)).fetchone():
                 raise LookupError("Deal not found")
-            if address_hash and connection.execute("SELECT 1 FROM opportunity_candidates WHERE organization_id=? AND normalized_address_sha256=?", (organization_id, address_hash)).fetchone():
-                warnings.append("POSSIBLE_DUPLICATE_CANDIDATE")
+            if address_hash:
+                exact_duplicate = connection.execute("SELECT 1 FROM opportunity_candidates WHERE organization_id=? AND normalized_address_sha256=?", (organization_id, address_hash)).fetchone()
+                legacy_duplicate = False
+                if not exact_duplicate:
+                    legacy_duplicate = any(normalized_address_hash(row[0]) == address_hash for row in connection.execute(
+                        "SELECT address FROM opportunity_candidates WHERE organization_id=? AND address IS NOT NULL", (organization_id,)))
+                if exact_duplicate or legacy_duplicate:
+                    warnings.append("POSSIBLE_DUPLICATE_CANDIDATE")
             connection.execute(
                 "INSERT INTO opportunity_candidates(id,organization_id,deal_id,created_by,property_type,display_name,address,normalized_address_sha256,market,submarket,status,origin_type,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (candidate_id, organization_id, deal_id, user_id, property_type, display_name, address,
@@ -346,17 +365,47 @@ class Service:
         if not row or not row["run_id"]:
             return None
         result = json.loads(row["result_json"])
+        metrics = result.get("derivedMetrics") or {}
+        freshness = result.get("evidenceFreshnessDetail") or {}
+        validated = result.get("validatedOpportunityScore") or {}
+        tier = row["screening_tier"]
         return {"id": row["run_id"], "candidate_version_id": row["candidate_version_id"],
-                "candidate_version": row["candidate_version"], "screening_tier": row["screening_tier"],
-                "analysis_as_of": row["analysis_as_of"], "evaluated_at": row["evaluated_at"],
+                "candidate_version": row["latest_screened_version"], "screening_tier": tier,
+                "screening_priority_rank": SCREENING_PRIORITY_RANK[tier],
+                "analysis_as_of": row["screened_analysis_as_of"], "evaluated_at": row["evaluated_at"],
                 "evidence_completeness": result.get("evidenceCompleteness"),
                 "evidence_freshness_days": result.get("evidenceFreshnessDays"),
+                "oldest_evidence_age_days": freshness.get("oldestEvidenceAgeDays"),
+                "signal_evidence_max_age_days": freshness.get("signalEvidenceMaxAgeDays"),
+                "rent_gap_pct": metrics.get("rentGapPct"),
+                "basis_discount_pct": metrics.get("basisDiscountPct"),
+                "evidence_supported_noi_delta": metrics.get("noiUpside"),
+                "noi_upside_ratio": metrics.get("noiUpsideRatio"),
+                "cap_rate_spread_bps": metrics.get("capRateSpreadBps"),
+                "vacancy_delta": metrics.get("vacancyDelta"),
+                "warning_count": len(result.get("warnings") or []),
+                "reason_count": len(result.get("reasons") or []),
+                "validated_score_status": validated.get("status", "NO_VALIDATED_OPPORTUNITY_SCORE"),
                 "result_sha256": row["result_sha256"]}
+
+    @staticmethod
+    def _decimal_query(query: dict, field: str) -> str | None:
+        if field not in query or query[field] in (None, ""):
+            return None
+        try:
+            value = Decimal(str(query[field]))
+        except InvalidOperation as exc:
+            raise ValueError(f"{field} must be a finite decimal") from exc
+        if not value.is_finite() or value < 0:
+            raise ValueError(f"{field} must be a finite non-negative decimal")
+        return format(value, "f")
 
     def list_opportunity_candidates(self, organization_id: str, query: dict) -> dict:
         if not isinstance(query, dict):
             raise ValueError("Opportunity query must be an object")
-        allowed = {"property_type", "status", "market", "screening_tier", "sort", "direction", "limit", "offset"}
+        allowed = {"property_type", "status", "market", "screening_tier", "screening_currency_status",
+                   "evidence_completeness_min", "evidence_completeness_max", "rent_gap_min",
+                   "basis_discount_min", "freshness_max_days", "q", "sort", "direction", "limit", "offset"}
         if set(query) - allowed:
             raise ValueError("Unsupported opportunity query fields")
         try:
@@ -366,11 +415,13 @@ class Service:
         if not 1 <= limit <= 200 or not 0 <= offset <= 1_000_000:
             raise ValueError("limit must be 1-200 and offset must be 0-1,000,000")
         sort = str(query.get("sort") or "created_at")
-        direction = str(query.get("direction") or "desc").lower()
-        sorts = {"created_at": "c.created_at", "analysis_as_of": "v.analysis_as_of",
-                 "screening_tier": "r.screening_tier",
+        direction = str(query.get("direction") or ("asc" if sort == "screening_tier" else "desc")).lower()
+        sorts = {"created_at": "c.created_at", "analysis_as_of": "lv.analysis_as_of",
+                 "screening_tier": SCREENING_PRIORITY_SQL,
                  "evidence_completeness": "CAST(json_extract(r.result_json,'$.evidenceCompleteness') AS REAL)",
-                 "evidence_freshness": "CAST(json_extract(r.result_json,'$.evidenceFreshnessDays') AS INTEGER)"}
+                 "evidence_freshness": "CAST(json_extract(r.result_json,'$.evidenceFreshnessDays') AS INTEGER)",
+                 "rent_gap": "CAST(json_extract(r.result_json,'$.derivedMetrics.rentGapPct') AS REAL)",
+                 "basis_discount": "CAST(json_extract(r.result_json,'$.derivedMetrics.basisDiscountPct') AS REAL)"}
         if sort not in sorts or direction not in {"asc", "desc"}:
             raise ValueError("Unsupported opportunity sort or direction")
         if query.get("property_type") and query["property_type"] not in PROPERTY_TYPES:
@@ -379,8 +430,31 @@ class Service:
             raise ValueError("Unsupported status filter")
         if query.get("screening_tier") and query["screening_tier"] not in {item.value for item in OpportunityScreeningTier}:
             raise ValueError("Unsupported screening_tier filter")
+        if query.get("screening_currency_status") and query["screening_currency_status"] not in SCREENING_CURRENCY_STATUSES:
+            raise ValueError("Unsupported screening_currency_status filter")
         if query.get("market") and len(str(query["market"])) > 200:
             raise ValueError("market filter exceeds 200 characters")
+        search = str(query.get("q") or "").strip()
+        if len(search) > 200:
+            raise ValueError("q exceeds 200 characters")
+        completeness_min = self._decimal_query(query, "evidence_completeness_min")
+        completeness_max = self._decimal_query(query, "evidence_completeness_max")
+        rent_gap_min = self._decimal_query(query, "rent_gap_min")
+        basis_discount_min = self._decimal_query(query, "basis_discount_min")
+        if completeness_min is not None and Decimal(completeness_min) > 1:
+            raise ValueError("evidence_completeness_min cannot exceed 1")
+        if completeness_max is not None and Decimal(completeness_max) > 1:
+            raise ValueError("evidence_completeness_max cannot exceed 1")
+        if completeness_min is not None and completeness_max is not None and Decimal(completeness_min) > Decimal(completeness_max):
+            raise ValueError("evidence completeness minimum cannot exceed maximum")
+        freshness_max = None
+        if query.get("freshness_max_days") not in (None, ""):
+            try:
+                freshness_max = int(query["freshness_max_days"])
+            except (TypeError, ValueError) as exc:
+                raise ValueError("freshness_max_days must be a non-negative integer") from exc
+            if freshness_max < 0 or freshness_max > 100_000:
+                raise ValueError("freshness_max_days must be between 0 and 100,000")
         where, parameters = ["c.organization_id=?"], [organization_id]
         for field in ("property_type", "status", "market"):
             if query.get(field):
@@ -389,20 +463,67 @@ class Service:
         if query.get("screening_tier"):
             where.append("r.screening_tier=?")
             parameters.append(str(query["screening_tier"]))
+        if query.get("screening_currency_status"):
+            where.append(SCREENING_CURRENCY_SQL + "=?")
+            parameters.append(str(query["screening_currency_status"]))
+        if completeness_min is not None:
+            where.append("CAST(json_extract(r.result_json,'$.evidenceCompleteness') AS REAL)>=CAST(? AS REAL)")
+            parameters.append(completeness_min)
+        if completeness_max is not None:
+            where.append("CAST(json_extract(r.result_json,'$.evidenceCompleteness') AS REAL)<=CAST(? AS REAL)")
+            parameters.append(completeness_max)
+        if rent_gap_min is not None:
+            where.append("CAST(json_extract(r.result_json,'$.derivedMetrics.rentGapPct') AS REAL)>=CAST(? AS REAL)")
+            parameters.append(rent_gap_min)
+        if basis_discount_min is not None:
+            where.append("CAST(json_extract(r.result_json,'$.derivedMetrics.basisDiscountPct') AS REAL)>=CAST(? AS REAL)")
+            parameters.append(basis_discount_min)
+        if freshness_max is not None:
+            where.append("CAST(json_extract(r.result_json,'$.evidenceFreshnessDays') AS INTEGER)<=?")
+            parameters.append(freshness_max)
+        if search:
+            escaped = search.casefold().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            where.append("(lower(COALESCE(c.display_name,'')) LIKE ? ESCAPE '\\' OR lower(COALESCE(c.address,'')) LIKE ? ESCAPE '\\' OR lower(COALESCE(c.market,'')) LIKE ? ESCAPE '\\' OR lower(COALESCE(c.submarket,'')) LIKE ? ESCAPE '\\')")
+            parameters.extend([f"%{escaped}%"] * 4)
         joins = """ FROM opportunity_candidates c
-            LEFT JOIN opportunity_screening_runs r ON r.id=(SELECT r2.id FROM opportunity_screening_runs r2 WHERE r2.organization_id=c.organization_id AND r2.candidate_id=c.id ORDER BY r2.evaluated_at DESC,r2.rowid DESC LIMIT 1)
-            LEFT JOIN opportunity_candidate_versions v ON v.id=r.candidate_version_id """
+            LEFT JOIN opportunity_candidate_versions lv ON lv.id=(SELECT lv2.id FROM opportunity_candidate_versions lv2 WHERE lv2.organization_id=c.organization_id AND lv2.candidate_id=c.id ORDER BY lv2.version DESC LIMIT 1)
+            LEFT JOIN opportunity_screening_runs r ON r.id=(SELECT r2.id FROM opportunity_screening_runs r2 JOIN opportunity_candidate_versions sv2 ON sv2.id=r2.candidate_version_id WHERE r2.organization_id=c.organization_id AND r2.candidate_id=c.id ORDER BY sv2.version DESC,r2.evaluated_at DESC,r2.rowid DESC LIMIT 1)
+            LEFT JOIN opportunity_candidate_versions sv ON sv.id=r.candidate_version_id """
         clause = " WHERE " + " AND ".join(where)
-        fields = """SELECT c.*,r.id run_id,r.candidate_version_id,r.screening_tier,r.result_json,r.result_sha256,r.evaluated_at,v.version candidate_version,v.analysis_as_of"""
+        fields = f"""SELECT c.*,r.id run_id,r.candidate_version_id,r.screening_tier,r.result_json,r.result_sha256,r.evaluated_at,
+            lv.version latest_evidence_version,lv.analysis_as_of latest_evidence_analysis_as_of,
+            sv.version latest_screened_version,sv.analysis_as_of screened_analysis_as_of,
+            {SCREENING_CURRENCY_SQL} screening_currency_status"""
         with self.db.connect() as connection:
             total = connection.execute("SELECT COUNT(*)" + joins + clause, parameters).fetchone()[0]
-            rows = connection.execute(fields + joins + clause + f" ORDER BY {sorts[sort]} {direction.upper()},c.id ASC LIMIT ? OFFSET ?",
+            sort_expression = sorts[sort]
+            rows = connection.execute(fields + joins + clause + f" ORDER BY CASE WHEN {sort_expression} IS NULL THEN 1 ELSE 0 END ASC,{sort_expression} {direction.upper()},c.id ASC LIMIT ? OFFSET ?",
                                       (*parameters, limit, offset)).fetchall()
         items = []
         for row in rows:
             candidate = {key: row[key] for key in ("id", "deal_id", "created_by", "property_type", "display_name",
                                                    "address", "market", "submarket", "status", "origin_type", "created_at")}
-            candidate["current_screening"] = self._screening_summary(row)
+            screening = self._screening_summary(row)
+            candidate.update({"latest_evidence_version": row["latest_evidence_version"],
+                              "latest_evidence_analysis_as_of": row["latest_evidence_analysis_as_of"],
+                              "latest_screened_version": row["latest_screened_version"],
+                              "screening_currency_status": row["screening_currency_status"],
+                              "screening_tier": screening["screening_tier"] if screening else None,
+                              "screening_priority_rank": screening["screening_priority_rank"] if screening else 5,
+                              "current_screening": screening})
+            if screening:
+                candidate.update({key: screening[key] for key in (
+                    "evidence_completeness", "evidence_freshness_days", "oldest_evidence_age_days",
+                    "signal_evidence_max_age_days", "rent_gap_pct", "basis_discount_pct",
+                    "evidence_supported_noi_delta", "noi_upside_ratio", "cap_rate_spread_bps",
+                    "vacancy_delta", "warning_count", "reason_count", "validated_score_status")})
+            else:
+                candidate.update({key: None for key in (
+                    "evidence_completeness", "evidence_freshness_days", "oldest_evidence_age_days",
+                    "signal_evidence_max_age_days", "rent_gap_pct", "basis_discount_pct",
+                    "evidence_supported_noi_delta", "noi_upside_ratio", "cap_rate_spread_bps", "vacancy_delta")})
+                candidate.update({"warning_count": 0, "reason_count": 0,
+                                  "validated_score_status": "NO_VALIDATED_OPPORTUNITY_SCORE"})
             items.append(candidate)
         return {"items": items, "pagination": {"limit": limit, "offset": offset, "returned": len(items), "total": total},
                 "sort": {"field": sort, "direction": direction}}
@@ -413,12 +534,44 @@ class Service:
             if not candidate:
                 raise LookupError("Opportunity candidate not found")
             versions = connection.execute("SELECT * FROM opportunity_candidate_versions WHERE candidate_id=? AND organization_id=? ORDER BY version", (candidate_id, organization_id)).fetchall()
-            runs = connection.execute("SELECT * FROM opportunity_screening_runs WHERE candidate_id=? AND organization_id=? ORDER BY evaluated_at,rowid", (candidate_id, organization_id)).fetchall()
+            runs = connection.execute("SELECT r.*,r.id run_id,v.version latest_screened_version,v.analysis_as_of screened_analysis_as_of FROM opportunity_screening_runs r JOIN opportunity_candidate_versions v ON v.id=r.candidate_version_id WHERE r.candidate_id=? AND r.organization_id=? ORDER BY v.version,r.evaluated_at,r.rowid", (candidate_id, organization_id)).fetchall()
         candidate_value = {key: candidate[key] for key in candidate.keys() if key != "normalized_address_sha256"}
         version_values = [{**{key: row[key] for key in row.keys() if key != "content_json"}, "content": json.loads(row["content_json"])} for row in versions]
-        run_values = [{**{key: row[key] for key in row.keys() if key != "result_json"}, "result": json.loads(row["result_json"])} for row in runs]
+        run_values = [{**{key: row[key] for key in row.keys() if key not in {"result_json", "run_id", "latest_screened_version", "screened_analysis_as_of"}}, "result": json.loads(row["result_json"])} for row in runs]
+        latest_version = version_values[-1] if version_values else None
+        latest_run_row = runs[-1] if runs else None
+        latest_run = run_values[-1] if run_values else None
+        if latest_run_row is None:
+            currency = "NOT_SCREENED"
+        elif latest_version and latest_run_row["latest_screened_version"] == latest_version["version"]:
+            currency = "CURRENT"
+        else:
+            currency = "OUTDATED_EVIDENCE"
+        projection = self._screening_summary(latest_run_row) if latest_run_row else None
         return {"candidate": candidate_value, "versions": version_values, "screening_runs": run_values,
-                "current_screening": run_values[-1] if run_values else None}
+                "current_screening": latest_run, "screening_projection": projection,
+                "latest_evidence_version": latest_version["version"] if latest_version else None,
+                "latest_evidence_analysis_as_of": latest_version["analysis_as_of"] if latest_version else None,
+                "latest_screened_version": latest_run_row["latest_screened_version"] if latest_run_row else None,
+                "screening_currency_status": currency}
+
+    def archive_opportunity_candidate(self, organization_id: str, user_id: str, candidate_id: str) -> dict:
+        archived_at = now()
+        with self.db.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            candidate = connection.execute("SELECT * FROM opportunity_candidates WHERE id=? AND organization_id=?", (candidate_id, organization_id)).fetchone()
+            if not candidate:
+                raise LookupError("Opportunity candidate not found")
+            if candidate["status"] == "archived":
+                raise ValueError("Opportunity candidate is already archived")
+            if candidate["status"] != "candidate":
+                raise ValueError(f"Cannot transition opportunity candidate from {candidate['status']} to archived")
+            connection.execute("UPDATE opportunity_candidates SET status='archived' WHERE id=? AND organization_id=?", (candidate_id, organization_id))
+        self.db.audit(organization_id, user_id, "opportunity.candidate_archived", "opportunity_candidate",
+                      candidate_id, {"previous_status": candidate["status"], "status": "archived",
+                                     "evidence_retained": True, "screening_history_retained": True}, candidate["deal_id"])
+        return {"id": candidate_id, "status": "archived", "archived_at": archived_at,
+                "evidence_retained": True, "screening_history_retained": True}
 
     def create_opportunity_candidate_version(self, organization_id: str, user_id: str,
                                              candidate_id: str, payload: dict) -> dict:
@@ -428,10 +581,12 @@ class Service:
             candidate = connection.execute("SELECT * FROM opportunity_candidates WHERE id=? AND organization_id=?", (candidate_id, organization_id)).fetchone()
             if not candidate:
                 raise LookupError("Opportunity candidate not found")
+            if candidate["status"] != "candidate":
+                raise ValueError("Evidence versions can be added only to active candidates")
             snapshot = normalize_evidence_payload(candidate_id, candidate["property_type"], payload)
             content_json, content_hash = canonical_json(snapshot), sha256_json(snapshot)
             if connection.execute("SELECT 1 FROM opportunity_candidate_versions WHERE organization_id=? AND candidate_id=? AND content_sha256=?", (organization_id, candidate_id, content_hash)).fetchone():
-                raise ValueError("This exact candidate evidence version already exists")
+                raise ConflictError("This exact candidate evidence version already exists")
             version = connection.execute("SELECT COALESCE(MAX(version),0)+1 FROM opportunity_candidate_versions WHERE organization_id=? AND candidate_id=?", (organization_id, candidate_id)).fetchone()[0]
             connection.execute("INSERT INTO opportunity_candidate_versions VALUES(?,?,?,?,?,?,?,?,?,?)",
                                (version_id, organization_id, candidate_id, version,
@@ -448,9 +603,11 @@ class Service:
         if not isinstance(payload, dict) or payload:
             raise ValueError("Screening accepts no client-computed inputs; create an evidence version first")
         with self.db.connect() as connection:
-            candidate = connection.execute("SELECT 1 FROM opportunity_candidates WHERE id=? AND organization_id=?", (candidate_id, organization_id)).fetchone()
+            candidate = connection.execute("SELECT status FROM opportunity_candidates WHERE id=? AND organization_id=?", (candidate_id, organization_id)).fetchone()
             if not candidate:
                 raise LookupError("Opportunity candidate not found")
+            if candidate["status"] != "candidate":
+                raise ValueError("Screening can run only for active candidates")
             version = connection.execute("SELECT * FROM opportunity_candidate_versions WHERE candidate_id=? AND organization_id=? ORDER BY version DESC LIMIT 1", (candidate_id, organization_id)).fetchone()
         if not version:
             raise ValueError("A candidate evidence version is required before screening")
@@ -475,6 +632,8 @@ class Service:
 
     def opportunity_candidate_history(self, organization_id: str, candidate_id: str) -> dict:
         detail = self.opportunity_candidate(organization_id, candidate_id)
+        with self.db.connect() as connection:
+            lifecycle = connection.execute("SELECT id,actor_id,action,details_json,created_at FROM audit_events WHERE organization_id=? AND entity_type='opportunity_candidate' AND entity_id=? AND action='opportunity.candidate_archived' ORDER BY rowid", (organization_id, candidate_id)).fetchall()
         timeline = ([{"type": "candidate_created", "at": detail["candidate"]["created_at"],
                       "id": candidate_id, "actor_id": detail["candidate"]["created_by"]}]
                     + [{"type": "evidence_version_created", "at": item["created_at"], "id": item["id"],
@@ -483,7 +642,10 @@ class Service:
                     + [{"type": "screening_run_created", "at": item["created_at"], "id": item["id"],
                         "actor_id": item["created_by"], "candidate_version_id": item["candidate_version_id"],
                         "screening_tier": item["screening_tier"], "result_sha256": item["result_sha256"]}
-                       for item in detail["screening_runs"]])
+                       for item in detail["screening_runs"]]
+                    + [{"type": "candidate_archived", "at": item["created_at"], "id": item["id"],
+                        "actor_id": item["actor_id"], "details": json.loads(item["details_json"])}
+                       for item in lifecycle])
         return {"candidate_id": candidate_id, "timeline": sorted(timeline, key=lambda item: (item["at"], item["type"], item["id"]))}
 
     def property_opportunity_analysis(self, organization_id: str, user_id: str, deal_id: str,
@@ -1043,6 +1205,7 @@ class Service:
         opportunity_integrity["handoffCount"] = len(opportunity_handoffs)
         opportunity_integrity["handoffMismatches"] = opportunity_handoff_mismatches
         candidate_membership = {item["id"] for item in opportunity_candidates}
+        candidate_property_types = {item["id"]: item["property_type"] for item in opportunity_candidates}
         version_membership = {(item["id"], item["candidate_id"]) for item in opportunity_candidate_versions}
         candidate_version_mismatches = 0
         version_snapshots = {}
@@ -1053,18 +1216,25 @@ class Service:
                 if (item["candidate_id"] not in candidate_membership
                         or sha256_json(snapshot) != item["content_sha256"]
                         or snapshot.get("candidateId") != item["candidate_id"]
+                        or snapshot.get("propertyType") != candidate_property_types.get(item["candidate_id"])
                         or snapshot.get("schemaVersion") != item["schema_version"]
                         or (snapshot.get("inputs") or {}).get("analysis_as_of") != item["analysis_as_of"]):
                     candidate_version_mismatches += 1
             except (json.JSONDecodeError, TypeError, ValueError):
                 candidate_version_mismatches += 1
-        screening_run_mismatches = 0
+        screening_run_mismatches, policy_implementation_unavailable = 0, 0
         for item in opportunity_screening_runs:
             try:
                 result = json.loads(item["result_json"])
                 snapshot = version_snapshots.get(item["candidate_version_id"])
                 evaluated = datetime.fromisoformat(item["evaluated_at"])
-                reproduced = screen_opportunity(screening_input_from_snapshot(snapshot), evaluated_at=evaluated).to_dict()
+                policy = registered_screening_policy(item["policy_id"], item["policy_version"], item["policy_sha256"])
+                if policy is None:
+                    policy_implementation_unavailable += 1
+                    screening_run_mismatches += 1
+                    continue
+                reproduced = screen_opportunity(screening_input_from_snapshot(snapshot), policy=policy,
+                                                evaluated_at=evaluated).to_dict()
                 if ((item["candidate_version_id"], item["candidate_id"]) not in version_membership
                         or item["candidate_id"] not in candidate_membership
                         or sha256_json(result) != item["result_sha256"]
@@ -1074,7 +1244,8 @@ class Service:
                         or result.get("policyHash") != item["policy_sha256"]
                         or result.get("inputSnapshotHash") != item["input_snapshot_sha256"]
                         or result.get("evidenceHash") != item["evidence_sha256"]
-                        or result.get("screeningTier") != item["screening_tier"]):
+                        or result.get("screeningTier") != item["screening_tier"]
+                        or result.get("evaluatedAt") != item["evaluated_at"]):
                     screening_run_mismatches += 1
             except (json.JSONDecodeError, TypeError, ValueError, KeyError, AttributeError):
                 screening_run_mismatches += 1
@@ -1082,7 +1253,8 @@ class Service:
                             "versionCount": len(opportunity_candidate_versions),
                             "versionMismatches": candidate_version_mismatches,
                             "screeningRunCount": len(opportunity_screening_runs),
-                            "screeningRunMismatches": screening_run_mismatches}
+                            "screeningRunMismatches": screening_run_mismatches,
+                            "policyImplementationUnavailable": policy_implementation_unavailable}
         market_ok = not any(market_integrity[key] for key in ("missingOriginals", "hashMismatches", "unsafePaths"))
         return {"ok": database["ok"] and audit_valid and review_valid and storage_ok and market_ok and artifact_mismatches == 0 and semantic_hash_mismatches == 0 and semantic_source_mismatches == 0 and opportunity_hash_mismatches == 0 and opportunity_decision_mismatches == 0 and opportunity_handoff_mismatches == 0 and candidate_version_mismatches == 0 and screening_run_mismatches == 0, "checkedAt": now(), "database": database, "chains": chains, "storage": storage, "marketData": market_integrity, "exports": artifact_integrity, "semanticEntities": semantic_integrity, "propertyOpportunity": opportunity_integrity, "opportunityFinder": finder_integrity, "purgeStagingFiles": staging_files, "networkRequests": 0}
 

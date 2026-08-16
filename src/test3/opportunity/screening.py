@@ -12,6 +12,7 @@ from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 import hashlib
 import json
+from types import MappingProxyType
 from typing import Mapping, Sequence
 
 from .scoring import current_score_status
@@ -67,6 +68,18 @@ class OpportunityScreeningPolicy:
 
 
 DEFAULT_SCREENING_POLICY = OpportunityScreeningPolicy()
+SCREENING_POLICIES = MappingProxyType({
+    (DEFAULT_SCREENING_POLICY.policy_id, DEFAULT_SCREENING_POLICY.version): DEFAULT_SCREENING_POLICY,
+})
+
+
+def registered_screening_policy(policy_id: str, policy_version: str,
+                                policy_hash: str | None = None) -> OpportunityScreeningPolicy | None:
+    """Return the immutable historic implementation only when its identity/hash agree."""
+    policy = SCREENING_POLICIES.get((policy_id, policy_version))
+    if policy is None or (policy_hash is not None and policy.content_hash != policy_hash):
+        return None
+    return policy
 
 
 @dataclass(frozen=True)

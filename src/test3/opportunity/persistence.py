@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 import hashlib
 import json
+import re
 from typing import Mapping
 
 from .screening import DIMENSIONS, OpportunityScreeningInput
@@ -40,7 +41,10 @@ def sha256_json(value: object) -> str:
 
 
 def normalized_address_hash(address: object) -> str | None:
-    normalized = " ".join(str(address or "").strip().casefold().split())
+    text = re.sub(r"[.,]", "", str(address or "").strip().casefold())
+    suffixes = {"street": "st", "road": "rd", "avenue": "ave", "boulevard": "blvd", "drive": "dr",
+                "lane": "ln", "court": "ct", "highway": "hwy", "parkway": "pkwy"}
+    normalized = " ".join(suffixes.get(token, token) for token in text.split())
     return hashlib.sha256(normalized.encode()).hexdigest() if normalized else None
 
 
@@ -77,7 +81,10 @@ def normalize_evidence_payload(candidate_id: str, property_type: str, payload: M
         raise ValueError("Unsupported candidate evidence fields: " + ", ".join(sorted(unknown)))
     if "analysis_as_of" not in payload:
         raise ValueError("analysis_as_of is required")
-    normalized: dict[str, object] = {"analysis_as_of": _date_text(payload["analysis_as_of"], "analysis_as_of")}
+    analysis_as_of = date.fromisoformat(_date_text(payload["analysis_as_of"], "analysis_as_of"))
+    if analysis_as_of > datetime.now(timezone.utc).date():
+        raise ValueError("analysis_as_of cannot be after the current UTC date")
+    normalized: dict[str, object] = {"analysis_as_of": analysis_as_of.isoformat()}
     for field in sorted(DECIMAL_FIELDS):
         if field in payload and payload[field] is not None:
             normalized[field] = _decimal_text(payload[field], field)
@@ -100,7 +107,10 @@ def normalize_evidence_payload(candidate_id: str, property_type: str, payload: M
             normalized[field] = value
     for field in sorted(DATE_FIELDS):
         if field in payload and payload[field] is not None:
-            normalized[field] = _date_text(payload[field], field)
+            parsed = date.fromisoformat(_date_text(payload[field], field))
+            if parsed > analysis_as_of:
+                raise ValueError(f"{field} cannot be after analysis_as_of")
+            normalized[field] = parsed.isoformat()
     for field in ("evidence_hashes", "evidence_dates"):
         raw = payload.get(field, {})
         if not isinstance(raw, Mapping) or set(raw) - set(DIMENSIONS):
@@ -115,8 +125,12 @@ def normalize_evidence_payload(candidate_id: str, property_type: str, payload: M
                     raise ValueError(f"{dimension} evidence contains an invalid SHA-256")
                 converted[str(dimension)] = values
         else:
-            converted = {str(dimension): _date_text(value, f"evidence_dates.{dimension}")
-                         for dimension, value in raw.items()}
+            converted = {}
+            for dimension, value in raw.items():
+                parsed = date.fromisoformat(_date_text(value, f"evidence_dates.{dimension}"))
+                if parsed > analysis_as_of:
+                    raise ValueError(f"evidence_dates.{dimension} cannot be after analysis_as_of")
+                converted[str(dimension)] = parsed.isoformat()
         normalized[field] = converted
     return {"schemaVersion": CANDIDATE_EVIDENCE_SCHEMA_VERSION, "candidateId": candidate_id,
             "propertyType": property_type, "inputs": normalized}

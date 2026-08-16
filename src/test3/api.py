@@ -13,7 +13,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
 
-from .service import Service
+from .service import ConflictError, Service
 from .auth import DUMMY_PASSWORD_HASH, SigninLimiter, session_token, verify_password
 from .db import now
 from .extraction import parse_csv, parse_xlsx_sheets
@@ -218,6 +218,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json(401, {"error": str(error)})
         except GoneError as error:
             return self._json(410, {"error": str(error)})
+        except ConflictError as error:
+            return self._json(409, {"error": str(error)})
         except (ValueError, LookupError, json.JSONDecodeError) as error:
             return self._json(404 if isinstance(error, LookupError) else 400, {"error": str(error)})
 
@@ -275,6 +277,13 @@ class Handler(SimpleHTTPRequestHandler):
                 self._authorize_post(user, "opportunity.screen")
                 return self._json(201, self.service.screen_opportunity_candidate(
                     user["organization_id"], user["id"], parts[2], self._payload()))
+            if len(parts) == 4 and parts[:2] == ["api", "opportunities"] and parts[3] == "archive":
+                self._authorize_post(user, "opportunity.archive")
+                payload = self._payload()
+                if payload:
+                    raise ValueError("Archive accepts no client-controlled status fields")
+                return self._json(200, self.service.archive_opportunity_candidate(
+                    user["organization_id"], user["id"], parts[2]))
             if parts == ["api", "market-panel"]:
                 self._authorize_post(user, "assumption.create")
                 length = int(self.headers.get("Content-Length", "0"))
@@ -353,6 +362,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json(404, {"error": "Route not found"})
         except PermissionError as error:
             return self._json(401, {"error": str(error)})
+        except ConflictError as error:
+            return self._json(409, {"error": str(error)})
         except (ValueError, LookupError, json.JSONDecodeError) as error:
             return self._json(404 if isinstance(error, LookupError) else 400, {"error": str(error)})
 

@@ -116,6 +116,11 @@ class Handler(SimpleHTTPRequestHandler):
                 parts = parsed.path.strip("/").split("/")
                 if len(parts) == 3:
                     return self._json(200, self.service.export_artifact(user["organization_id"], parts[2]))
+            if parsed.path.startswith("/api/opportunity-handoffs/"):
+                user = self._identity()
+                parts = parsed.path.strip("/").split("/")
+                if len(parts) == 3:
+                    return self._json(200, self.service.opportunity_handoff(user["organization_id"], parts[2]))
             if parsed.path.startswith("/api/documents/"):
                 user = self._identity()
                 parts = parsed.path.strip("/").split("/")
@@ -303,6 +308,10 @@ class Handler(SimpleHTTPRequestHandler):
                 self._authorize_post(user, "opportunity.review")
                 return self._json(201, self.service.review_property_opportunity(
                     user["organization_id"], user["id"], parts[2], self._payload()))
+            if len(parts) == 4 and parts[:2] == ["api", "opportunity-runs"] and parts[3] == "test2-evidence":
+                self._authorize_post(user, "export.generate")
+                return self._json(201, self.service.create_opportunity_test2_handoff(
+                    user["organization_id"], user["id"], parts[2]))
             if len(parts) == 4 and parts[:2] == ["api", "values"] and parts[3] == "review":
                 self._authorize_post(user, "value.review")
                 payload = self._payload()

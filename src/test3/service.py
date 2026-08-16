@@ -236,6 +236,7 @@ class Service:
             runs = [dict(row) for row in connection.execute("SELECT * FROM assumption_runs WHERE deal_id=? AND organization_id=? ORDER BY created_at DESC", (deal_id, organization_id))]
             opportunity_runs = [dict(row) for row in connection.execute("SELECT * FROM opportunity_runs WHERE deal_id=? AND organization_id=? ORDER BY created_at DESC", (deal_id, organization_id))]
             opportunity_decisions = [dict(row) for row in connection.execute("SELECT * FROM opportunity_decisions WHERE deal_id=? AND organization_id=? ORDER BY rowid", (deal_id, organization_id))]
+            opportunity_handoffs = [dict(row) for row in connection.execute("SELECT * FROM opportunity_handoffs WHERE deal_id=? AND organization_id=? ORDER BY version DESC", (deal_id, organization_id))]
             snapshots = [dict(row) for row in connection.execute("SELECT * FROM data_source_snapshots WHERE (deal_id=? OR deal_id IS NULL) AND organization_id=? ORDER BY created_at DESC", (deal_id, organization_id))]
             observations = [dict(row) for row in connection.execute("SELECT o.* FROM market_observations o JOIN data_source_snapshots s ON s.id=o.snapshot_id WHERE o.organization_id=? AND (s.deal_id=? OR s.deal_id IS NULL) ORDER BY o.observation_date", (organization_id, deal_id))]
             decision_contexts = [dict(row) for row in connection.execute("SELECT * FROM assumption_decision_context WHERE deal_id=? AND organization_id=? ORDER BY created_at DESC", (deal_id, organization_id))]
@@ -247,6 +248,8 @@ class Service:
         for decision in opportunity_decisions:
             decision["acknowledgements"] = json.loads(decision.pop("acknowledgements_json"))
             decision["modifications"] = json.loads(decision.pop("modifications_json"))
+        for handoff in opportunity_handoffs:
+            handoff["content"] = json.loads(handoff.pop("content_json"))
         decisions_by_run = {}
         for decision in opportunity_decisions:
             decisions_by_run.setdefault(decision["opportunity_run_id"], []).append(decision)
@@ -254,7 +257,7 @@ class Service:
             history = decisions_by_run.get(run["id"], [])
             run["decisions"] = history
             run["review_state"] = history[-1]["decision"] if history else "awaiting_review"
-        return {"deal": dict(deal), "documents": documents, "values": values, "entities": entities, "findings": findings, "audit": audit, "review_decisions": decisions, "assumption_runs": runs, "opportunity_runs": opportunity_runs, "opportunity_decisions": opportunity_decisions, "data_source_snapshots": snapshots, "market_observations": observations, "data_profile": profile_observations(observations), "benchmark_matrix": benchmark_matrix(observations), "correlation_matrix": correlation_matrix(observations), "time_series_diagnostics": time_series_diagnostics(observations), "stress_scenarios": stress_scenarios(observations), "lead_lag_matrix": lead_lag_matrix(observations), "derived_change_factors": derived_change_factors(observations), "market_factor_scorecards": market_factor_scorecards(observations), "revision_conflicts": revision_conflicts(observations), "cadence_findings": cadence_findings(observations), "source_scorecards": source_scorecards(observations, snapshots), "research_manifest": research_manifest(observations, snapshots), "walk_forward_baselines": walk_forward_baselines(observations), "market_regimes": market_regimes(observations), "assumption_decision_contexts": decision_contexts}
+        return {"deal": dict(deal), "documents": documents, "values": values, "entities": entities, "findings": findings, "audit": audit, "review_decisions": decisions, "assumption_runs": runs, "opportunity_runs": opportunity_runs, "opportunity_decisions": opportunity_decisions, "opportunity_handoffs": opportunity_handoffs, "data_source_snapshots": snapshots, "market_observations": observations, "data_profile": profile_observations(observations), "benchmark_matrix": benchmark_matrix(observations), "correlation_matrix": correlation_matrix(observations), "time_series_diagnostics": time_series_diagnostics(observations), "stress_scenarios": stress_scenarios(observations), "lead_lag_matrix": lead_lag_matrix(observations), "derived_change_factors": derived_change_factors(observations), "market_factor_scorecards": market_factor_scorecards(observations), "revision_conflicts": revision_conflicts(observations), "cadence_findings": cadence_findings(observations), "source_scorecards": source_scorecards(observations, snapshots), "research_manifest": research_manifest(observations, snapshots), "walk_forward_baselines": walk_forward_baselines(observations), "market_regimes": market_regimes(observations), "assumption_decision_contexts": decision_contexts}
 
     def location_analysis(self, organization_id: str, user_id: str, deal_id: str, payload: dict) -> dict:
         with self.db.connect() as connection:
@@ -436,6 +439,80 @@ class Service:
         return {"id": decision_id, "opportunity_run_id": run_id, "decision": decision,
                 "artifact_sha256": run["content_sha256"], "decision_hash": decision_hash,
                 "created_at": created, "automatic_test2_apply": False}
+
+    @staticmethod
+    def _comparable_reference(item: dict, evidence_type: str) -> dict:
+        fields = {key: item.get(key) for key in ("address", "observedDate", "sourceReference", "askingRent", "price", "priceUnit") if item.get(key) is not None}
+        fields["evidenceType"] = evidence_type
+        fields["referenceHash"] = hashlib.sha256(json.dumps(fields, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        return fields
+
+    def create_opportunity_test2_handoff(self, organization_id: str, user_id: str, run_id: str) -> dict:
+        created = now()
+        with self.db.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            run = connection.execute("SELECT * FROM opportunity_runs WHERE id=? AND organization_id=?", (run_id, organization_id)).fetchone()
+            if not run:
+                raise LookupError("Property opportunity run not found")
+            decision = connection.execute("SELECT * FROM opportunity_decisions WHERE opportunity_run_id=? AND organization_id=? ORDER BY rowid DESC LIMIT 1", (run_id, organization_id)).fetchone()
+            if not decision or decision["decision"] != "approved":
+                raise ValueError("The latest independent opportunity decision must be approved before Test2 evidence handoff")
+            if connection.execute("SELECT 1 FROM opportunity_handoffs WHERE opportunity_decision_id=? AND organization_id=?", (decision["id"], organization_id)).fetchone():
+                raise ValueError("A Test2 evidence handoff already exists for this approval decision")
+            content = json.loads(run["content_json"])
+            if self._opportunity_artifact_hash(content) != run["content_sha256"] or content.get("artifactHash") != run["content_sha256"] or decision["artifact_sha256"] != run["content_sha256"]:
+                raise ValueError("Approved opportunity evidence failed artifact binding")
+            version = connection.execute("SELECT COALESCE(MAX(version),0)+1 FROM opportunity_handoffs WHERE deal_id=?", (run["deal_id"],)).fetchone()[0]
+            sources = [{"sourceType": key, "sourceName": value.get("sourceName"), "rightsStatus": value.get("rightsStatus"),
+                        "licensingNotes": value.get("licensingNotes"), "fileSha256": value.get("fileSha256")}
+                       for key, value in sorted(content.get("sources", {}).items())]
+            rent_refs = [self._comparable_reference(item, "rent_comparable") for item in content.get("rentEvidence", {}).get("comparables", [])]
+            sale_refs = [self._comparable_reference(item, "sale_comparable") for item in content.get("saleEvidence", {}).get("comparables", [])]
+            test1_snapshot = content.get("test1Context", {}).get("snapshot") or {}
+            market_hashes = [value for key, value in test1_snapshot.items() if key.lower().endswith("hash") and isinstance(value, str)]
+            payload = {
+                "schemaVersion": "test3-test2-property-opportunity-evidence/1.0.0",
+                "status": "ADVISORY_APPROVED_EVIDENCE_NOT_APPLIED",
+                "automaticApply": False,
+                "controllingUnderwritingEngine": "test2",
+                "dealId": run["deal_id"], "opportunityRunId": run_id,
+                "opportunityArtifactSha256": run["content_sha256"], "analysisInputSha256": run["input_sha256"],
+                "analysisAsOf": run["analysis_as_of"], "policyVersion": run["policy_version"],
+                "approval": {"decisionId": decision["id"], "decisionHash": decision["decision_hash"],
+                             "actorId": decision["actor_id"], "decision": decision["decision"],
+                             "rationale": decision["rationale"], "createdAt": decision["created_at"]},
+                "subject": content.get("subject"), "sourceEvidence": sources,
+                "comparableEvidence": {"rent": rent_refs, "sale": sale_refs},
+                "marketDefinitionHashes": sorted(set(market_hashes)),
+                "economicEvidence": content.get("economicEvidence"),
+                "screeningScenarios": content.get("screeningScenarios"),
+                "opportunityScore": content.get("opportunityScore"),
+                "quality": content.get("quality"), "limitations": content.get("limitations", []),
+                "underwritingBoundary": "Evidence only. Test2 or an analyst must explicitly decide whether and how to apply it.",
+                "createdAt": created,
+            }
+            content_json = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+            content_hash = hashlib.sha256(content_json.encode()).hexdigest()
+            handoff_id = str(uuid.uuid4())
+            connection.execute("INSERT INTO opportunity_handoffs VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                               (handoff_id, organization_id, run["deal_id"], run_id, decision["id"], version,
+                                payload["schemaVersion"], content_json, content_hash, user_id, created))
+        self.db.audit(organization_id, user_id, "export.opportunity_test2_evidence", "opportunity_handoff", handoff_id,
+                      {"opportunity_run_id": run_id, "decision_id": decision["id"], "content_sha256": content_hash,
+                       "version": version, "automatic_apply": False}, run["deal_id"])
+        return {"artifact": {"id": handoff_id, "version": version, "content_sha256": content_hash,
+                             "schema_version": payload["schemaVersion"], "created_at": created}, "content": payload}
+
+    def opportunity_handoff(self, organization_id: str, handoff_id: str) -> dict:
+        with self.db.connect() as connection:
+            row = connection.execute("SELECT * FROM opportunity_handoffs WHERE id=? AND organization_id=?", (handoff_id, organization_id)).fetchone()
+        if not row:
+            raise LookupError("Opportunity handoff not found")
+        if hashlib.sha256(row["content_json"].encode()).hexdigest() != row["content_sha256"]:
+            raise ValueError("Opportunity handoff integrity validation failed")
+        result = dict(row)
+        result["content"] = json.loads(result.pop("content_json"))
+        return result
 
     def import_market_panel(self, organization_id: str, user_id: str, deal_id: str | None, filename: str, content: bytes, metadata: dict) -> dict:
         parsed, rows, errors = parse_market_panel(content)
@@ -669,6 +746,7 @@ class Service:
             market_snapshots = connection.execute("SELECT id,deal_id,original_stored_name,content_sha256 FROM data_source_snapshots WHERE organization_id=? AND source_type='market_panel'", (organization_id,)).fetchall()
             opportunity_runs = connection.execute("SELECT id,deal_id,content_json,content_sha256 FROM opportunity_runs WHERE organization_id=? ORDER BY rowid", (organization_id,)).fetchall()
             opportunity_decisions = connection.execute("SELECT * FROM opportunity_decisions WHERE organization_id=? ORDER BY rowid", (organization_id,)).fetchall()
+            opportunity_handoffs = connection.execute("SELECT * FROM opportunity_handoffs WHERE organization_id=? ORDER BY rowid", (organization_id,)).fetchall()
             extracted_membership = {(row["id"], row["deal_id"], row["document_id"]) for row in connection.execute("SELECT id,deal_id,document_id FROM extracted_values WHERE organization_id=?", (organization_id,)).fetchall()}
         storage = {"activeOriginals": 0, "purgedTombstones": 0, "missingActiveOriginals": 0, "integrityMismatches": 0, "unexpectedPurgedOriginals": 0, "unsafePaths": 0}
         upload_root = self.upload_dir.resolve()
@@ -747,8 +825,18 @@ class Service:
             expected_previous = item["decision_hash"]
         opportunity_integrity = {"runCount": len(opportunity_runs), "runHashMismatches": opportunity_hash_mismatches,
                                  "decisionCount": len(opportunity_decisions), "decisionMismatches": opportunity_decision_mismatches}
+        decision_membership = {(item["id"], item["opportunity_run_id"], item["artifact_sha256"], item["decision"]) for item in opportunity_decisions}
+        opportunity_handoff_mismatches = 0
+        for item in opportunity_handoffs:
+            if (hashlib.sha256(item["content_json"].encode()).hexdigest() != item["content_sha256"]
+                    or (item["opportunity_decision_id"], item["opportunity_run_id"],
+                        next((run["content_sha256"] for run in opportunity_runs if run["id"] == item["opportunity_run_id"]), None),
+                        "approved") not in decision_membership):
+                opportunity_handoff_mismatches += 1
+        opportunity_integrity["handoffCount"] = len(opportunity_handoffs)
+        opportunity_integrity["handoffMismatches"] = opportunity_handoff_mismatches
         market_ok = not any(market_integrity[key] for key in ("missingOriginals", "hashMismatches", "unsafePaths"))
-        return {"ok": database["ok"] and audit_valid and review_valid and storage_ok and market_ok and artifact_mismatches == 0 and semantic_hash_mismatches == 0 and semantic_source_mismatches == 0 and opportunity_hash_mismatches == 0 and opportunity_decision_mismatches == 0, "checkedAt": now(), "database": database, "chains": chains, "storage": storage, "marketData": market_integrity, "exports": artifact_integrity, "semanticEntities": semantic_integrity, "propertyOpportunity": opportunity_integrity, "purgeStagingFiles": staging_files, "networkRequests": 0}
+        return {"ok": database["ok"] and audit_valid and review_valid and storage_ok and market_ok and artifact_mismatches == 0 and semantic_hash_mismatches == 0 and semantic_source_mismatches == 0 and opportunity_hash_mismatches == 0 and opportunity_decision_mismatches == 0 and opportunity_handoff_mismatches == 0, "checkedAt": now(), "database": database, "chains": chains, "storage": storage, "marketData": market_integrity, "exports": artifact_integrity, "semanticEntities": semantic_integrity, "propertyOpportunity": opportunity_integrity, "purgeStagingFiles": staging_files, "networkRequests": 0}
 
     def review_value(self, organization_id: str, user_id: str, value_id: str, status: str, normalized_value: str | None, comments: str = "") -> dict:
         normalized_value = None if normalized_value is None else str(normalized_value)

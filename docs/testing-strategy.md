@@ -22,5 +22,7 @@ Opportunity-score governance tests verify the explicit no-score state, minimum s
 
 Opportunity-review tests verify reviewer-only permission, creator/approver separation, required acknowledgements, quality blockers, artifact binding, structured change requests without mutation, append-only database enforcement, decision-chain tamper detection, operational integrity, and backup/restore coverage.
 
+Opportunity-handoff tests verify latest-approval gating, exact run/decision hash binding, stable comparable references, explicit advisory status, disabled automatic application, duplicate prevention, organization-scoped retrieval, append-only enforcement, operational re-hashing, and backup schema coverage.
+
 Not yet sufficient for production: browser accessibility/e2e automation, complex PDF corpus benchmarks, OCR failure matrix, load tests, restore drill and independent penetration review.
 

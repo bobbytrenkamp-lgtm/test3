@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -66,6 +66,10 @@ CREATE TABLE IF NOT EXISTS opportunity_runs(id TEXT PRIMARY KEY, organization_id
 CREATE TRIGGER IF NOT EXISTS opportunity_runs_no_update BEFORE UPDATE ON opportunity_runs BEGIN SELECT RAISE(ABORT, 'opportunity runs are immutable research evidence'); END;
 CREATE TRIGGER IF NOT EXISTS opportunity_runs_no_delete BEFORE DELETE ON opportunity_runs BEGIN SELECT RAISE(ABORT, 'opportunity runs are retained evidence'); END;
 CREATE INDEX IF NOT EXISTS opportunity_runs_deal ON opportunity_runs(organization_id,deal_id,created_at);
+CREATE TABLE IF NOT EXISTS opportunity_decisions(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), deal_id TEXT NOT NULL REFERENCES deals(id), opportunity_run_id TEXT NOT NULL REFERENCES opportunity_runs(id), actor_id TEXT NOT NULL REFERENCES users(id), decision TEXT NOT NULL CHECK(decision IN ('approved','rejected','changes_requested')), rationale TEXT NOT NULL, acknowledgements_json TEXT NOT NULL, modifications_json TEXT NOT NULL, artifact_sha256 TEXT NOT NULL, previous_hash TEXT, decision_hash TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS opportunity_decisions_no_update BEFORE UPDATE ON opportunity_decisions BEGIN SELECT RAISE(ABORT, 'opportunity decisions are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS opportunity_decisions_no_delete BEFORE DELETE ON opportunity_decisions BEGIN SELECT RAISE(ABORT, 'opportunity decisions are retained governance evidence'); END;
+CREATE INDEX IF NOT EXISTS opportunity_decisions_run ON opportunity_decisions(organization_id,opportunity_run_id,created_at);
 CREATE TABLE IF NOT EXISTS audit_events(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), deal_id TEXT, actor_id TEXT REFERENCES users(id), action TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT, details_json TEXT NOT NULL, previous_hash TEXT, event_hash TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TRIGGER IF NOT EXISTS audit_events_no_update BEFORE UPDATE ON audit_events BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END;
 CREATE TRIGGER IF NOT EXISTS audit_events_no_delete BEFORE DELETE ON audit_events BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END;

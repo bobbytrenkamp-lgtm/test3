@@ -20,5 +20,7 @@ Property-economic tests verify source and licensing requirements, exact units, f
 
 Opportunity-score governance tests verify the explicit no-score state, minimum sample/market/period gates, synthetic-data exclusion, duplicate and future-feature leakage rejection, mandatory time/geography holdouts, baseline competition, stability, independent cross-checks, immutable lineage, and the prohibition on controlling underwriting.
 
+Opportunity-review tests verify reviewer-only permission, creator/approver separation, required acknowledgements, quality blockers, artifact binding, structured change requests without mutation, append-only database enforcement, decision-chain tamper detection, operational integrity, and backup/restore coverage.
+
 Not yet sufficient for production: browser accessibility/e2e automation, complex PDF corpus benchmarks, OCR failure matrix, load tests, restore drill and independent penetration review.
 

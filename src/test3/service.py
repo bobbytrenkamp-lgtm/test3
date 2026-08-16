@@ -31,6 +31,10 @@ from .assumptions.validation import market_regimes, walk_forward_baselines
 from .research.comparables import analyze_location, parse_csv_records
 from .opportunity import analyze_property_opportunity, parse_location_evidence, parse_sale_comps
 
+OPPORTUNITY_ACKNOWLEDGEMENTS = (
+    "evidence_reviewed", "source_rights_reviewed", "limitations_acknowledged", "test2_advisory_only",
+)
+
 
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
@@ -231,6 +235,7 @@ class Service:
         with self.db.connect() as connection:
             runs = [dict(row) for row in connection.execute("SELECT * FROM assumption_runs WHERE deal_id=? AND organization_id=? ORDER BY created_at DESC", (deal_id, organization_id))]
             opportunity_runs = [dict(row) for row in connection.execute("SELECT * FROM opportunity_runs WHERE deal_id=? AND organization_id=? ORDER BY created_at DESC", (deal_id, organization_id))]
+            opportunity_decisions = [dict(row) for row in connection.execute("SELECT * FROM opportunity_decisions WHERE deal_id=? AND organization_id=? ORDER BY rowid", (deal_id, organization_id))]
             snapshots = [dict(row) for row in connection.execute("SELECT * FROM data_source_snapshots WHERE (deal_id=? OR deal_id IS NULL) AND organization_id=? ORDER BY created_at DESC", (deal_id, organization_id))]
             observations = [dict(row) for row in connection.execute("SELECT o.* FROM market_observations o JOIN data_source_snapshots s ON s.id=o.snapshot_id WHERE o.organization_id=? AND (s.deal_id=? OR s.deal_id IS NULL) ORDER BY o.observation_date", (organization_id, deal_id))]
             decision_contexts = [dict(row) for row in connection.execute("SELECT * FROM assumption_decision_context WHERE deal_id=? AND organization_id=? ORDER BY created_at DESC", (deal_id, organization_id))]
@@ -239,7 +244,17 @@ class Service:
                 run[key.removesuffix("_json")] = json.loads(run.pop(key))
         for run in opportunity_runs:
             run["content"] = json.loads(run.pop("content_json"))
-        return {"deal": dict(deal), "documents": documents, "values": values, "entities": entities, "findings": findings, "audit": audit, "review_decisions": decisions, "assumption_runs": runs, "opportunity_runs": opportunity_runs, "data_source_snapshots": snapshots, "market_observations": observations, "data_profile": profile_observations(observations), "benchmark_matrix": benchmark_matrix(observations), "correlation_matrix": correlation_matrix(observations), "time_series_diagnostics": time_series_diagnostics(observations), "stress_scenarios": stress_scenarios(observations), "lead_lag_matrix": lead_lag_matrix(observations), "derived_change_factors": derived_change_factors(observations), "market_factor_scorecards": market_factor_scorecards(observations), "revision_conflicts": revision_conflicts(observations), "cadence_findings": cadence_findings(observations), "source_scorecards": source_scorecards(observations, snapshots), "research_manifest": research_manifest(observations, snapshots), "walk_forward_baselines": walk_forward_baselines(observations), "market_regimes": market_regimes(observations), "assumption_decision_contexts": decision_contexts}
+        for decision in opportunity_decisions:
+            decision["acknowledgements"] = json.loads(decision.pop("acknowledgements_json"))
+            decision["modifications"] = json.loads(decision.pop("modifications_json"))
+        decisions_by_run = {}
+        for decision in opportunity_decisions:
+            decisions_by_run.setdefault(decision["opportunity_run_id"], []).append(decision)
+        for run in opportunity_runs:
+            history = decisions_by_run.get(run["id"], [])
+            run["decisions"] = history
+            run["review_state"] = history[-1]["decision"] if history else "awaiting_review"
+        return {"deal": dict(deal), "documents": documents, "values": values, "entities": entities, "findings": findings, "audit": audit, "review_decisions": decisions, "assumption_runs": runs, "opportunity_runs": opportunity_runs, "opportunity_decisions": opportunity_decisions, "data_source_snapshots": snapshots, "market_observations": observations, "data_profile": profile_observations(observations), "benchmark_matrix": benchmark_matrix(observations), "correlation_matrix": correlation_matrix(observations), "time_series_diagnostics": time_series_diagnostics(observations), "stress_scenarios": stress_scenarios(observations), "lead_lag_matrix": lead_lag_matrix(observations), "derived_change_factors": derived_change_factors(observations), "market_factor_scorecards": market_factor_scorecards(observations), "revision_conflicts": revision_conflicts(observations), "cadence_findings": cadence_findings(observations), "source_scorecards": source_scorecards(observations, snapshots), "research_manifest": research_manifest(observations, snapshots), "walk_forward_baselines": walk_forward_baselines(observations), "market_regimes": market_regimes(observations), "assumption_decision_contexts": decision_contexts}
 
     def location_analysis(self, organization_id: str, user_id: str, deal_id: str, payload: dict) -> dict:
         with self.db.connect() as connection:
@@ -346,6 +361,81 @@ class Service:
                                "sale_comparables": len(result["saleEvidence"]["comparables"]),
                                "status": "research_candidate"}, deal_id)
         return {**result, "runId": run_id, "createdAt": created}
+
+    @staticmethod
+    def _opportunity_artifact_hash(content: dict) -> str:
+        payload = dict(content)
+        payload.pop("artifactHash", None)
+        return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+    def review_property_opportunity(self, organization_id: str, user_id: str, run_id: str, payload: dict) -> dict:
+        if not isinstance(payload, dict):
+            raise ValueError("Opportunity review must be a JSON object")
+        decision = str(payload.get("decision") or "").strip()
+        if decision not in ("approved", "rejected", "changes_requested"):
+            raise ValueError("Decision must be approved, rejected or changes_requested")
+        rationale = str(payload.get("rationale") or "").strip()
+        if len(rationale) < 12 or len(rationale) > 4000:
+            raise ValueError("A specific review rationale of 12 to 4,000 characters is required")
+        acknowledgements = payload.get("acknowledgements") or {}
+        if not isinstance(acknowledgements, dict) or set(acknowledgements) - set(OPPORTUNITY_ACKNOWLEDGEMENTS):
+            raise ValueError("Acknowledgements contain unsupported fields")
+        normalized_acknowledgements = {key: acknowledgements.get(key) is True for key in OPPORTUNITY_ACKNOWLEDGEMENTS}
+        modifications = payload.get("modifications") or []
+        if not isinstance(modifications, list) or len(modifications) > 100:
+            raise ValueError("Modifications must be a list of at most 100 change requests")
+        normalized_modifications = []
+        for item in modifications:
+            if not isinstance(item, dict) or set(item) != {"path", "proposed_value", "rationale"}:
+                raise ValueError("Each modification requires path, proposed_value and rationale")
+            path, proposed, reason = (str(item[key]).strip() for key in ("path", "proposed_value", "rationale"))
+            if not path.startswith("/") or len(path) > 300 or not proposed or len(proposed) > 2000 or len(reason) < 12 or len(reason) > 2000:
+                raise ValueError("Modification fields are incomplete or exceed governed limits")
+            normalized_modifications.append({"path": path, "proposed_value": proposed, "rationale": reason})
+        if decision == "changes_requested" and not normalized_modifications:
+            raise ValueError("Changes requested must identify at least one proposed modification")
+        if decision != "changes_requested" and normalized_modifications:
+            raise ValueError("Modifications are allowed only with changes_requested")
+        if decision == "approved" and not all(normalized_acknowledgements.values()):
+            raise ValueError("Every institutional acknowledgement is required for approval")
+        created = now()
+        with self.db.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            run = connection.execute("SELECT * FROM opportunity_runs WHERE id=? AND organization_id=?", (run_id, organization_id)).fetchone()
+            if not run:
+                raise LookupError("Property opportunity run not found")
+            if decision == "approved" and run["created_by"] == user_id:
+                raise ValueError("The creator cannot approve their own opportunity analysis")
+            content = json.loads(run["content_json"])
+            calculated = self._opportunity_artifact_hash(content)
+            if calculated != run["content_sha256"] or content.get("artifactHash") != run["content_sha256"]:
+                raise ValueError("Opportunity artifact integrity validation failed")
+            components = content.get("quality", {}).get("components", {})
+            blockers = [name for name in ("rentComparableMinimumMet", "saleComparableMinimumMet", "saleUnitsConsistent", "sourceRightsDocumented") if components.get(name) is not True]
+            if decision == "approved" and blockers:
+                raise ValueError("Opportunity approval blocked by: " + ", ".join(blockers))
+            previous = connection.execute("SELECT decision_hash FROM opportunity_decisions WHERE organization_id=? ORDER BY rowid DESC LIMIT 1", (organization_id,)).fetchone()
+            previous_hash = previous[0] if previous else None
+            decision_id = str(uuid.uuid4())
+            ack_json = json.dumps(normalized_acknowledgements, sort_keys=True, separators=(",", ":"))
+            modification_json = json.dumps(normalized_modifications, sort_keys=True, separators=(",", ":"))
+            decision_payload = {"id": decision_id, "organization_id": organization_id, "deal_id": run["deal_id"],
+                                "opportunity_run_id": run_id, "actor_id": user_id, "decision": decision,
+                                "rationale": rationale[:4000], "acknowledgements": normalized_acknowledgements,
+                                "modifications": normalized_modifications, "artifact_sha256": run["content_sha256"],
+                                "previous": previous_hash, "created_at": created}
+            decision_hash = hashlib.sha256(json.dumps(decision_payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            connection.execute("INSERT INTO opportunity_decisions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                               (decision_id, organization_id, run["deal_id"], run_id, user_id, decision,
+                                rationale[:4000], ack_json, modification_json, run["content_sha256"],
+                                previous_hash, decision_hash, created))
+        self.db.audit(organization_id, user_id, f"opportunity.{decision}", "opportunity_decision", decision_id,
+                      {"opportunity_run_id": run_id, "artifact_sha256": run["content_sha256"],
+                       "decision_hash": decision_hash, "acknowledgements": normalized_acknowledgements,
+                       "modification_count": len(normalized_modifications)}, run["deal_id"])
+        return {"id": decision_id, "opportunity_run_id": run_id, "decision": decision,
+                "artifact_sha256": run["content_sha256"], "decision_hash": decision_hash,
+                "created_at": created, "automatic_test2_apply": False}
 
     def import_market_panel(self, organization_id: str, user_id: str, deal_id: str | None, filename: str, content: bytes, metadata: dict) -> dict:
         parsed, rows, errors = parse_market_panel(content)
@@ -577,6 +667,8 @@ class Service:
             artifacts = connection.execute("SELECT id,content_json,content_sha256,approval_snapshot_json,approval_snapshot_sha256 FROM export_artifacts WHERE organization_id=?", (organization_id,)).fetchall()
             semantic_entities = connection.execute("SELECT id,deal_id,document_id,data_json,data_sha256,source_value_ids_json FROM semantic_entities WHERE organization_id=?", (organization_id,)).fetchall()
             market_snapshots = connection.execute("SELECT id,deal_id,original_stored_name,content_sha256 FROM data_source_snapshots WHERE organization_id=? AND source_type='market_panel'", (organization_id,)).fetchall()
+            opportunity_runs = connection.execute("SELECT id,deal_id,content_json,content_sha256 FROM opportunity_runs WHERE organization_id=? ORDER BY rowid", (organization_id,)).fetchall()
+            opportunity_decisions = connection.execute("SELECT * FROM opportunity_decisions WHERE organization_id=? ORDER BY rowid", (organization_id,)).fetchall()
             extracted_membership = {(row["id"], row["deal_id"], row["document_id"]) for row in connection.execute("SELECT id,deal_id,document_id FROM extracted_values WHERE organization_id=?", (organization_id,)).fetchall()}
         storage = {"activeOriginals": 0, "purgedTombstones": 0, "missingActiveOriginals": 0, "integrityMismatches": 0, "unexpectedPurgedOriginals": 0, "unsafePaths": 0}
         upload_root = self.upload_dir.resolve()
@@ -627,8 +719,36 @@ class Service:
             except (json.JSONDecodeError, TypeError):
                 semantic_source_mismatches += 1
         semantic_integrity = {"count": len(semantic_entities), "hashMismatches": semantic_hash_mismatches, "sourceMismatches": semantic_source_mismatches}
+        opportunity_membership = {(item["id"], item["deal_id"], item["content_sha256"]) for item in opportunity_runs}
+        opportunity_hash_mismatches = 0
+        for run in opportunity_runs:
+            try:
+                content = json.loads(run["content_json"])
+                if self._opportunity_artifact_hash(content) != run["content_sha256"] or content.get("artifactHash") != run["content_sha256"]:
+                    opportunity_hash_mismatches += 1
+            except (json.JSONDecodeError, TypeError):
+                opportunity_hash_mismatches += 1
+        opportunity_decision_mismatches, expected_previous = 0, None
+        for item in opportunity_decisions:
+            try:
+                acknowledgements = json.loads(item["acknowledgements_json"])
+                modifications = json.loads(item["modifications_json"])
+                payload = {"id": item["id"], "organization_id": item["organization_id"], "deal_id": item["deal_id"],
+                           "opportunity_run_id": item["opportunity_run_id"], "actor_id": item["actor_id"],
+                           "decision": item["decision"], "rationale": item["rationale"],
+                           "acknowledgements": acknowledgements, "modifications": modifications,
+                           "artifact_sha256": item["artifact_sha256"], "previous": item["previous_hash"],
+                           "created_at": item["created_at"]}
+                calculated = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+                if (item["opportunity_run_id"], item["deal_id"], item["artifact_sha256"]) not in opportunity_membership or item["previous_hash"] != expected_previous or calculated != item["decision_hash"]:
+                    opportunity_decision_mismatches += 1
+            except (json.JSONDecodeError, TypeError):
+                opportunity_decision_mismatches += 1
+            expected_previous = item["decision_hash"]
+        opportunity_integrity = {"runCount": len(opportunity_runs), "runHashMismatches": opportunity_hash_mismatches,
+                                 "decisionCount": len(opportunity_decisions), "decisionMismatches": opportunity_decision_mismatches}
         market_ok = not any(market_integrity[key] for key in ("missingOriginals", "hashMismatches", "unsafePaths"))
-        return {"ok": database["ok"] and audit_valid and review_valid and storage_ok and market_ok and artifact_mismatches == 0 and semantic_hash_mismatches == 0 and semantic_source_mismatches == 0, "checkedAt": now(), "database": database, "chains": chains, "storage": storage, "marketData": market_integrity, "exports": artifact_integrity, "semanticEntities": semantic_integrity, "purgeStagingFiles": staging_files, "networkRequests": 0}
+        return {"ok": database["ok"] and audit_valid and review_valid and storage_ok and market_ok and artifact_mismatches == 0 and semantic_hash_mismatches == 0 and semantic_source_mismatches == 0 and opportunity_hash_mismatches == 0 and opportunity_decision_mismatches == 0, "checkedAt": now(), "database": database, "chains": chains, "storage": storage, "marketData": market_integrity, "exports": artifact_integrity, "semanticEntities": semantic_integrity, "propertyOpportunity": opportunity_integrity, "purgeStagingFiles": staging_files, "networkRequests": 0}
 
     def review_value(self, organization_id: str, user_id: str, value_id: str, status: str, normalized_value: str | None, comments: str = "") -> dict:
         normalized_value = None if normalized_value is None else str(normalized_value)

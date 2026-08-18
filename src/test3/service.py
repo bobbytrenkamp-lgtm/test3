@@ -23,6 +23,7 @@ from .assumptions.artifacts import load_artifact
 from .assumptions.test1_economic import load_test1_economic
 from .assumptions.recommend import recommend
 from .assumptions.catalog import BY_NAME, public_catalog
+from .creos_handoff import build_assumption_run_handoff
 from .assumptions.profiling import profile_observations
 from .assumptions.analysis import benchmark_matrix, correlation_matrix, lead_lag_matrix, stress_scenarios, time_series_diagnostics
 from .assumptions.public_sources import public_series_catalog
@@ -1001,6 +1002,34 @@ class Service:
             connection.execute("INSERT INTO assumption_decision_context VALUES(?,?,?,?,?,?,?,?,?,?)", (str(uuid.uuid4()), organization_id, run["deal_id"], run_id, assumption["id"], review["decision_id"], selection, controlling_source[:500], canonical_hash(context_value), created))
         self.db.audit(organization_id, user_id, "assumption_run.decided", "assumption_run", run_id, context_value, run["deal_id"])
         return {"runId": run_id, "selection": selection, "manualAssumptionId": assumption["id"], "reviewDecisionId": review["decision_id"], "status": review["review_status"]}
+
+    def create_assumption_run_handoff(self, organization_id: str, user_id: str, run_id: str) -> dict:
+        """Phase 6: builds and returns a creos-handoff-v1 payload for one
+        assumption run -- CREOS Underwrite's counterpart to Phase 5's
+        SiteIntel "Send to Underwrite" export. See creos_handoff.py's
+        module docstring for the translation-layer decisions. Read-only:
+        an assumption run is an immutable candidate (see the
+        assumption_runs_no_update/no_delete triggers in db.py), and
+        building a handoff from it doesn't change that -- this handoff
+        can be regenerated identically at any time, and does not require
+        the run to have been decided inside this app first (the receiving
+        side's own governance rule forces status:'proposed' regardless of
+        what, if anything, this app already decided for its own deal)."""
+        with self.db.connect() as connection:
+            run = connection.execute("SELECT * FROM assumption_runs WHERE id=? AND organization_id=?", (run_id, organization_id)).fetchone()
+            if not run:
+                raise LookupError("Assumption run not found")
+            deal = connection.execute("SELECT * FROM deals WHERE id=? AND organization_id=?", (run["deal_id"], organization_id)).fetchone()
+            if not deal:
+                raise LookupError("Deal not found")
+        catalog_spec = BY_NAME.get(run["assumption_type"])
+        if not catalog_spec:
+            raise ValueError(f"Unknown assumption type: {run['assumption_type']}")
+        run_dict = dict(run)
+        run_dict["limitations"] = json.loads(run["limitations_json"] or "[]")
+        payload = build_assumption_run_handoff(run=run_dict, deal=dict(deal), catalog_spec=catalog_spec)
+        self.db.audit(organization_id, user_id, "assumption_run.handoff_generated", "assumption_run", run_id, {"handoff_id": payload["handoffId"], "assumption_type": run["assumption_type"]}, run["deal_id"])
+        return payload
 
     def create_deal(self, organization_id: str, user_id: str, payload: dict) -> dict:
         name = str(payload.get("name", "")).strip()

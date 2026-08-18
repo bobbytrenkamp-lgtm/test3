@@ -1,5 +1,13 @@
 # AI changelog
 
+## 2026-08-19 — Phase 6: MarketSignal → Underwrite handoff export
+
+- New `src/test3/creos_handoff.py`: builds a real `creos-handoff-v1` payload from one assumption run (candidate recommendation + confidence + rationale), mirroring test1 (SiteIntel)'s Phase 5 `js/parcel/handoff.js` for the same cross-repo contract.
+- Real, documented translation-layer findings, not assumptions: (1) this app has no stable per-market identity a `Market` record could safely reuse across exports — a deal isn't linked to a `MarketDefinition` record — so `market` is never populated, deliberately, rather than minting a fresh random ID that would misrepresent identity continuity; (2) `property` IS populated (a deal's own name is real, stable context, and minting a fresh `propertyId` the first time a deal crosses this boundary is the same thing test1's SiteIntel handoff already does); (3) every assumption is `sourceType: 'modeled'`/`status: 'proposed'`, regardless of whether this app's own analyst has already decided the run for test3's own purposes — that decision doesn't carry to a different deal's model in Underwrite.
+- Wired into `service.py` (`create_assumption_run_handoff`, read-only — an assumption run is an immutable candidate) and a new route, `POST /api/assumption-runs/{id}/handoff` (`export.generate` capability, already granted to analyst/reviewer — no new permission needed).
+- Added this app's first client-side file download (`downloadJson()` in `web/app.js` — Blob + `<a download>`, same idiom test1 already uses) and a "→ Underwrite" button alongside the existing Approve low/base/high actions on each assumption-run card in the Assumption Intelligence view.
+- 21 new tests (`tests/test_creos_handoff.py`): the pure builder (property/market decisions above, confidence mapping, methodology preservation, every one of the 15 catalog assumption types), plus a real end-to-end pass through `Service` reusing the market-panel fixture from `tests/test_assumption_intelligence.py` — confirms the handoff is genuinely read-only (an immutable `assumption_runs` row, regenerating the handoff twice produces the same value/status) and that an unknown run id raises cleanly. Full suite: 295/295 passing. `docs/creos-ids.md` corrected — it previously (wrongly) claimed a real handoff needed Phase 7/8 (shared auth/data layer); it doesn't, and this is the proof.
+
 ## 2026-08-07 — multi-sheet XLSX provenance tranche
 
 - Expanded guarded XLSX extraction to as many as 64 bounded worksheets while retaining the 2,000,000-cell workbook ceiling.

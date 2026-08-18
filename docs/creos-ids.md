@@ -31,21 +31,29 @@ and [`test4/docs/ARCHITECTURE.md`](https://github.com/bobbytrenkamp-lgtm/test4/b
 
 ## Status
 
-**Utility available, not yet used anywhere.** `src/test3/creos_ids.py`
-(Phase 4) implements the generator/validator side of this scheme — a
-hand-ported, test-verified copy of test4's own spec-compliant algorithm
-(see that module's docstring and `tests/test_creos_ids.py`, which
-re-checks the same known-timestamp vectors test4 verified independently
-against the ULID spec, 28/28 passing). This repository's own
-identifiers remain the sole source of truth for everything this app
-does internally — nothing calls `generate_creos_ulid()` from
-application code yet, no schema/warehouse table changed, no existing ID
-was touched or replaced. This app's local-first, no-external-
-transmission model (see `docs/security-model.md`) still means *using*
-this utility in a real handoff is inseparable from Phase 7/8 (shared
-authentication and a shared CREOS data layer) in the CREOS Integration
-Roadmap
-([`test4/docs/INTEGRATION_ROADMAP.md`](https://github.com/bobbytrenkamp-lgtm/test4/blob/main/docs/INTEGRATION_ROADMAP.md)),
-neither of which is scheduled — this utility only makes the building
-block available and tested ahead of that, per Phase 4's own "at minimum
-at their integration boundaries" scope.
+**Utility available; consumed by the Phase 6 Underwrite handoff export.**
+`src/test3/creos_ids.py` (Phase 4) implements the generator/validator
+side of this scheme — a hand-ported, test-verified copy of test4's own
+spec-compliant algorithm (see that module's docstring and
+`tests/test_creos_ids.py`, which re-checks the same known-timestamp
+vectors test4 verified independently against the ULID spec, 28/28
+passing). This repository's own identifiers remain the sole source of
+truth for everything this app does internally — no schema/warehouse
+table changed, no existing ID was touched or replaced.
+
+**Correction (Phase 6):** this section previously claimed a real handoff
+was "inseparable from Phase 7/8 (shared authentication and a shared
+CREOS data layer)." That was wrong — `test4/docs/HANDOFF_DESIGN.md`'s
+recommended transport is zero-backend JSON export/import, which needs
+neither. As of Phase 6, `src/test3/creos_handoff.py` calls
+`generate_creos_ulid()`/`creos_display_id()` to mint the `handoffId`
+and each `assumptionId`/`propertyId` in a real `creos-handoff-v1`
+payload — the first real consumer of this utility. It's wired into the
+assumption-intelligence screen's per-run actions
+(`web/app.js`'s `.run-handoff` button, `POST
+/api/assumption-runs/{id}/handoff`), which downloads a file a user can
+import into CREOS Underwrite's assumption-import screen, the same way
+test1 (SiteIntel)'s equivalent Phase 5 export already does. See that
+module's docstring for the real translation-layer decisions this pass
+found (no stable per-market identity exists in this app, so `market` is
+never populated — see decision #1).

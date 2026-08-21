@@ -1,6 +1,6 @@
 # Dependency and license audit
 
-Audit date: 2026-08-04.
+Audit date: 2026-08-04. Updated 2026-08-20: `pypdfium2` bumped 5.12.1 → 5.13.0 (routine patch, license/approval unchanged).
 
 | Component | Version/source | License | Runtime required | Approved | Notes |
 |---|---|---|---|---|---|
@@ -10,7 +10,7 @@ Audit date: 2026-08-04.
 | DuckDB | 1.5.5 | MIT | Yes | Yes | Embedded local analytical engine and Parquet reader/writer; no service or transitive Python dependency |
 | actions/checkout | v4 | MIT | CI only | Yes | GitHub-maintained public action |
 | actions/setup-python | v5 | MIT | CI only | Yes | GitHub-maintained public action |
-| pypdfium2/PDFium | 5.12.1 | Apache-2.0 OR BSD-3-Clause; bundled PDFium and notices | Yes | Yes | Local PDF text/rendering; wheel notices retained by installation |
+| pypdfium2/PDFium | 5.13.0 | Apache-2.0 OR BSD-3-Clause; bundled PDFium and notices | Yes | Yes | Local PDF text/rendering; wheel notices retained by installation |
 | Pillow | 12.3.0 | MIT-CMU | Yes | Yes | Local image decode/validation and OCR rendering |
 | openpyxl | 3.1.5 | MIT | Yes | Yes | Local XLSX parser; formula execution disabled |
 | et_xmlfile | 2.0.0 | MIT | Yes (openpyxl transitive, explicitly pinned) | Yes | Local streaming XML writer dependency |

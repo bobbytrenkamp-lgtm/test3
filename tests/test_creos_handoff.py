@@ -112,7 +112,7 @@ class BuildAssumptionRunHandoffTests(unittest.TestCase):
         payload = build_assumption_run_handoff(run=fixture_run(), deal=fixture_deal(), catalog_spec=BY_NAME["vacancy"], now=NOW)
         self.assertEqual(payload["assumptions"][0]["status"], "proposed")
 
-    def test_observations_provenance_and_sources_are_always_empty(self):
+    def test_builder_defaults_observations_provenance_and_sources_to_empty(self):
         payload = build_assumption_run_handoff(run=fixture_run(), deal=fixture_deal(), catalog_spec=BY_NAME["vacancy"], now=NOW)
         self.assertEqual(payload["observations"], [])
         self.assertEqual(payload["provenance"], [])
@@ -159,6 +159,13 @@ class BuildAssumptionRunHandoffTests(unittest.TestCase):
         payload = build_assumption_run_handoff(run=fixture_run(), deal=fixture_deal(), catalog_spec=BY_NAME["exit_cap_rate"], now=NOW)
         json.dumps(payload)  # must not raise
 
+    def test_rejects_dangling_provenance_reference(self):
+        with self.assertRaisesRegex(ValueError, "provenance is missing"):
+            build_assumption_run_handoff(
+                run=fixture_run(), deal=fixture_deal(), catalog_spec=BY_NAME["vacancy"],
+                now=NOW, provenance_id="01K36BRRY0HX5Z7861K7QX47M9",
+            )
+
     def test_every_catalog_entry_produces_a_valid_handoff(self):
         # All 15 assumption types in the catalog, not just the ones with a
         # direct real underwriting target -- this export doesn't know or
@@ -200,6 +207,13 @@ class AssumptionRunHandoffServiceIntegrationTests(unittest.TestCase):
             self.assertEqual(payload["assumptions"][0]["category"], "vacancy")
             self.assertEqual(payload["assumptions"][0]["status"], "proposed")
             self.assertTrue(is_valid_creos_ulid(payload["handoffId"]))
+            self.assertEqual(len(payload["sources"]), 1)
+            self.assertEqual(payload["sources"][0]["sourceName"], "Analyst panel")
+            self.assertEqual(payload["sources"][0]["sourceType"], "licensed_data")
+            self.assertEqual(len(payload["provenance"]), 1)
+            assumption = payload["assumptions"][0]
+            self.assertEqual(assumption["sourceId"], payload["sources"][0]["sourceId"])
+            self.assertEqual(assumption["provenanceId"], payload["provenance"][0]["provenanceId"])
             json.dumps(payload)  # must be JSON-serializable end to end, not just from the pure builder
 
     def test_raises_lookup_error_for_an_unknown_run_id(self):
@@ -226,8 +240,49 @@ class AssumptionRunHandoffServiceIntegrationTests(unittest.TestCase):
             run = service.run_assumption_intelligence(user["organization_id"], user["id"], deal_id, "exit_cap_rate", {"market_id": "BAL"})
             before = service.create_assumption_run_handoff(user["organization_id"], user["id"], run["id"])
             after = service.create_assumption_run_handoff(user["organization_id"], user["id"], run["id"])
-            self.assertEqual(before["assumptions"][0]["value"], after["assumptions"][0]["value"])
-            self.assertEqual(before["assumptions"][0]["status"], after["assumptions"][0]["status"])
+            self.assertEqual(before, after)
+
+    def test_same_deal_has_one_property_identity_across_distinct_runs(self):
+        with tempfile.TemporaryDirectory() as folder:
+            service = Service(Path(folder))
+            user = service.seed()
+            with service.db.connect() as connection:
+                deal_id = connection.execute("SELECT id FROM deals").fetchone()[0]
+            service.import_market_panel(
+                user["organization_id"], user["id"], deal_id, "panel.csv", PANEL,
+                {"source_name": "Analyst panel", "source_version": "2025Q3", "as_of_date": "2025-08-01",
+                 "licensing_notes": "Analyst-owned internal data", "freshness_state": "current"},
+            )
+            first = service.run_assumption_intelligence(user["organization_id"], user["id"], deal_id, "vacancy", {"market_id": "BAL"})
+            second = service.run_assumption_intelligence(user["organization_id"], user["id"], deal_id, "exit_cap_rate", {"market_id": "BAL"})
+            first_payload = service.create_assumption_run_handoff(user["organization_id"], user["id"], first["id"])
+            second_payload = service.create_assumption_run_handoff(user["organization_id"], user["id"], second["id"])
+            self.assertEqual(first_payload["property"]["identity"]["propertyId"], second_payload["property"]["identity"]["propertyId"])
+            self.assertNotEqual(first_payload["handoffId"], second_payload["handoffId"])
+            self.assertNotEqual(first_payload["assumptions"][0]["assumptionId"], second_payload["assumptions"][0]["assumptionId"])
+            self.assertEqual(first_payload["sources"][0]["sourceId"], second_payload["sources"][0]["sourceId"])
+
+    def test_creos_identity_links_are_immutable_and_integrity_checked(self):
+        with tempfile.TemporaryDirectory() as folder:
+            service = Service(Path(folder))
+            user = service.seed()
+            with service.db.connect() as connection:
+                deal_id = connection.execute("SELECT id FROM deals").fetchone()[0]
+            service.import_market_panel(
+                user["organization_id"], user["id"], deal_id, "panel.csv", PANEL,
+                {"source_name": "Analyst panel", "source_version": "2025Q3", "as_of_date": "2025-08-01",
+                 "licensing_notes": "Analyst-owned internal data", "freshness_state": "current"},
+            )
+            run = service.run_assumption_intelligence(user["organization_id"], user["id"], deal_id, "vacancy", {"market_id": "BAL"})
+            service.create_assumption_run_handoff(user["organization_id"], user["id"], run["id"])
+            with service.db.connect() as connection:
+                count = connection.execute("SELECT COUNT(*) FROM creos_entity_links WHERE organization_id=?", (user["organization_id"],)).fetchone()[0]
+                self.assertEqual(count, 6)
+                with self.assertRaises(Exception):
+                    connection.execute("UPDATE creos_entity_links SET creos_ulid='00000000000000000000000000'")
+            report = service.operational_integrity(user["organization_id"])
+            self.assertTrue(report["ok"])
+            self.assertEqual(report["creosIdentity"], {"count": 6, "mismatches": 0})
 
 
 if __name__ == "__main__":

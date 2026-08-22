@@ -86,7 +86,7 @@ class OpportunityReviewBridgeTests(unittest.TestCase):
                     connection.execute("DELETE FROM opportunity_candidate_review_decisions WHERE id=?", (decision["id"],))
             archive = Path(root) / "bridge.zip"; create_backup(Path(root), archive)
             report = verify_backup(archive)
-            self.assertEqual(report["format"], "test3-backup/11.0")
+            self.assertEqual(report["format"], "test3-backup/12.0")
             self.assertEqual(report["counts"]["opportunity_candidate_review_artifacts"], 1)
             self.assertEqual(report["counts"]["opportunity_candidate_promotions"], 1)
 

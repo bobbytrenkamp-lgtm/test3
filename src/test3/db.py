@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 
 def _decimal_compare(left: object, right: object, operator) -> int:
@@ -119,6 +119,10 @@ CREATE TABLE IF NOT EXISTS opportunity_candidate_promotions(id TEXT PRIMARY KEY,
 CREATE TRIGGER IF NOT EXISTS opportunity_candidate_promotions_no_update BEFORE UPDATE ON opportunity_candidate_promotions BEGIN SELECT RAISE(ABORT, 'candidate promotions are immutable lifecycle evidence'); END;
 CREATE TRIGGER IF NOT EXISTS opportunity_candidate_promotions_no_delete BEFORE DELETE ON opportunity_candidate_promotions BEGIN SELECT RAISE(ABORT, 'candidate promotions are retained lifecycle evidence'); END;
 CREATE INDEX IF NOT EXISTS opportunity_candidate_promotions_candidate ON opportunity_candidate_promotions(organization_id,candidate_id,created_at);
+CREATE TABLE IF NOT EXISTS creos_entity_links(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), entity_kind TEXT NOT NULL CHECK(entity_kind IN ('property','deal','market','assumption','source','provenance','handoff')), local_record_type TEXT NOT NULL, local_record_id TEXT NOT NULL, creos_ulid TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(organization_id,entity_kind,local_record_type,local_record_id), UNIQUE(organization_id,creos_ulid));
+CREATE TRIGGER IF NOT EXISTS creos_entity_links_no_update BEFORE UPDATE ON creos_entity_links BEGIN SELECT RAISE(ABORT, 'CREOS entity links are immutable identity evidence'); END;
+CREATE TRIGGER IF NOT EXISTS creos_entity_links_no_delete BEFORE DELETE ON creos_entity_links BEGIN SELECT RAISE(ABORT, 'CREOS entity links are retained identity evidence'); END;
+CREATE INDEX IF NOT EXISTS creos_entity_links_local ON creos_entity_links(organization_id,local_record_type,local_record_id);
 CREATE TABLE IF NOT EXISTS audit_events(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), deal_id TEXT, actor_id TEXT REFERENCES users(id), action TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT, details_json TEXT NOT NULL, previous_hash TEXT, event_hash TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TRIGGER IF NOT EXISTS audit_events_no_update BEFORE UPDATE ON audit_events BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END;
 CREATE TRIGGER IF NOT EXISTS audit_events_no_delete BEFORE DELETE ON audit_events BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END;

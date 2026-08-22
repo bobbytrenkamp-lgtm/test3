@@ -46,14 +46,33 @@ was "inseparable from Phase 7/8 (shared authentication and a shared
 CREOS data layer)." That was wrong — `test4/docs/HANDOFF_DESIGN.md`'s
 recommended transport is zero-backend JSON export/import, which needs
 neither. As of Phase 6, `src/test3/creos_handoff.py` calls
-`generate_creos_ulid()`/`creos_display_id()` to mint the `handoffId`
-and each `assumptionId`/`propertyId` in a real `creos-handoff-v1`
-payload — the first real consumer of this utility. It's wired into the
+`generate_creos_ulid()` to establish durable identity links in the local
+`creos_entity_links` registry for each exported property, deal, assumption,
+source, provenance record, and handoff. Re-exporting the same immutable
+assumption run is byte-equivalent, and separate runs for one deal retain the
+same CREOS `propertyId`; the previous behavior minted look-alike identities
+on every export and has been retired. The handoff also carries each evidence
+snapshot as a CREOS Source and links the modeled assumption through a CREOS
+Provenance record, so evidence does not disappear at the module boundary.
+These records remain organization-scoped, immutable, locally backed up, and
+integrity checked. The export is wired into the
 assumption-intelligence screen's per-run actions
 (`web/app.js`'s `.run-handoff` button, `POST
 /api/assumption-runs/{id}/handoff`), which downloads a file a user can
 import into CREOS Underwrite's assumption-import screen, the same way
 test1 (SiteIntel)'s equivalent Phase 5 export already does. See that
-module's docstring for the real translation-layer decisions this pass
-found (no stable per-market identity exists in this app, so `market` is
-never populated — see decision #1).
+module's docstring for the translation-layer decisions. A stable governed
+CREOS market identity still does not exist for arbitrary deal runs, so
+`market` remains intentionally absent rather than being guessed from a name.
+
+## Boundary identity rules
+
+- Local Test3 UUIDs remain authoritative inside MarketSignal.
+- `creos_entity_links` is an immutable boundary registry, not a replacement
+  application database and not a shared cloud service.
+- One local deal maps to one CREOS Property and one reserved CREOS Deal ID.
+- One immutable assumption run maps to one Assumption, Provenance, and Handoff.
+- One immutable source snapshot maps to one CREOS Source, reusable across runs.
+- Deleting or changing a mapping is rejected by database triggers; backups use
+  `test3-backup/12.0` and restore-time operational integrity verifies every ID
+  and every referenced local record.

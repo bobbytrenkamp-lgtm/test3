@@ -48,7 +48,7 @@ Every relied-upon dimension carries field-level source hashes and an evidence da
 
 ## Persistent Opportunity Finder contract
 
-SQLite schema version 9 persists three organization-scoped records:
+SQLite schema version 10 persists three core organization-scoped Finder records:
 
 - `opportunity_candidates`: stable candidate identity and optional linkage to an existing deal. Candidate creation never creates a deal.
 - `opportunity_candidate_versions`: immutable, sequential, content-hashed evidence snapshots. A `BEGIN IMMEDIATE` transaction assigns each version number safely.
@@ -65,7 +65,7 @@ The JSON API provides bounded list/filter/sort pagination and candidate detail/h
 
 Analysts have separate `opportunity.create` and `opportunity.screen` permissions. Reviewers can read candidates and retain the independent `opportunity.review` authority, but cannot create evidence or run Finder screening. API clients must send financial and rate values as decimal strings (or exact integers); JSON floats are rejected. Clients cannot submit tiers, reasons, derived metrics, or any other server-computed result.
 
-The current screening projection is derived from the latest immutable run. Operational integrity reproduces every screening result from its persisted evidence version and evaluation timestamp, verifies all hashes and membership bindings, and fails closed on tampering. Backup format 9.0 includes these records; prior backup formats remain readable.
+The current screening projection is derived from the latest immutable run. Operational integrity reproduces every screening result from its persisted evidence version and evaluation timestamp, verifies all hashes and membership bindings, and fails closed on tampering. Backup format 10.0 includes these records and the governed review bridge; prior backup formats remain readable.
 
 The Finder UI and enhanced Opportunity Detail remain the recommended scope for PR #69. Deal Pipeline promotion remains a later governed workflow. Those surfaces must consume this API rather than reproduce policy logic in browser code.
 
@@ -107,3 +107,11 @@ The local interface uses the bounded `GET /api/opportunities` query for search, 
 Candidate detail keeps three states visibly separate: immutable evidence versions, immutable screening runs, and screening currency. `OUTDATED_EVIDENCE` is rendered as **New evidence — rescreen**, while the retained historic run remains inspectable. Viewer and reviewer roles are read-only. Analyst and administrator roles may create a candidate, add a new immutable evidence version, invoke server-side screening, and archive an active candidate. Archive is a retained, audited lifecycle transition rather than deletion.
 
 The interface labels the server's NOI comparison as **Evidence-supported NOI delta** and explicitly states that it is a comparison of supplied current and stabilized evidence, not a Test2 forecast. Missing values render as an em dash, never as zero. The validated-score panel reports that no validated opportunity score exists until governed realized-outcome data supports one.
+
+## Governed review bridge
+
+Schema version 10 adds immutable `opportunity_candidate_review_artifacts` and append-only `opportunity_candidate_review_decisions`. An analyst or administrator can send only the latest, currently screened evidence version to Opportunity Review. The server builds the artifact from persisted records; the client cannot author or replace its evidence. One artifact is allowed per immutable screening run.
+
+The artifact binds the candidate, evidence version, screening run, screening-result hash, and explicit `NO_VALIDATED_OPPORTUNITY_SCORE` state. Operational integrity re-hashes the artifact and decision chain and verifies their relational bindings. Backup format 10.0 retains both tables.
+
+This bridge does not create a deal, promote a candidate, calculate a return, apply an Underwrite assumption, or produce a Test2 handoff. Reviewers and administrators may independently approve or reject the evidence package. The artifact creator cannot approve it. Approval also fails if the candidate was archived, newer evidence exists, or a newer screening superseded the artifact. An insufficient-evidence screening cannot be approved, and changed evidence requires a new screening and artifact.

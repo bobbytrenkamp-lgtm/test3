@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 
 def _decimal_compare(left: object, right: object, operator) -> int:
@@ -107,6 +107,14 @@ CREATE TABLE IF NOT EXISTS opportunity_screening_runs(id TEXT PRIMARY KEY, organ
 CREATE TRIGGER IF NOT EXISTS opportunity_screening_runs_no_update BEFORE UPDATE ON opportunity_screening_runs BEGIN SELECT RAISE(ABORT, 'opportunity screening runs are immutable evidence'); END;
 CREATE TRIGGER IF NOT EXISTS opportunity_screening_runs_no_delete BEFORE DELETE ON opportunity_screening_runs BEGIN SELECT RAISE(ABORT, 'opportunity screening runs are retained evidence'); END;
 CREATE INDEX IF NOT EXISTS opportunity_screening_runs_candidate ON opportunity_screening_runs(organization_id,candidate_id,evaluated_at);
+CREATE TABLE IF NOT EXISTS opportunity_candidate_review_artifacts(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), candidate_id TEXT NOT NULL REFERENCES opportunity_candidates(id), candidate_version_id TEXT NOT NULL REFERENCES opportunity_candidate_versions(id), screening_run_id TEXT NOT NULL REFERENCES opportunity_screening_runs(id), schema_version TEXT NOT NULL, content_json TEXT NOT NULL, content_sha256 TEXT NOT NULL, created_by TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL, UNIQUE(organization_id,screening_run_id));
+CREATE TRIGGER IF NOT EXISTS opportunity_candidate_review_artifacts_no_update BEFORE UPDATE ON opportunity_candidate_review_artifacts BEGIN SELECT RAISE(ABORT, 'candidate review artifacts are immutable evidence'); END;
+CREATE TRIGGER IF NOT EXISTS opportunity_candidate_review_artifacts_no_delete BEFORE DELETE ON opportunity_candidate_review_artifacts BEGIN SELECT RAISE(ABORT, 'candidate review artifacts are retained evidence'); END;
+CREATE INDEX IF NOT EXISTS opportunity_candidate_review_artifacts_list ON opportunity_candidate_review_artifacts(organization_id,candidate_id,created_at);
+CREATE TABLE IF NOT EXISTS opportunity_candidate_review_decisions(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), artifact_id TEXT NOT NULL REFERENCES opportunity_candidate_review_artifacts(id), actor_id TEXT NOT NULL REFERENCES users(id), decision TEXT NOT NULL CHECK(decision IN ('approved','rejected','changes_requested')), rationale TEXT NOT NULL, acknowledgements_json TEXT NOT NULL, modifications_json TEXT NOT NULL, artifact_sha256 TEXT NOT NULL, previous_hash TEXT, decision_hash TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS opportunity_candidate_review_decisions_no_update BEFORE UPDATE ON opportunity_candidate_review_decisions BEGIN SELECT RAISE(ABORT, 'candidate review decisions are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS opportunity_candidate_review_decisions_no_delete BEFORE DELETE ON opportunity_candidate_review_decisions BEGIN SELECT RAISE(ABORT, 'candidate review decisions are retained governance evidence'); END;
+CREATE INDEX IF NOT EXISTS opportunity_candidate_review_decisions_artifact ON opportunity_candidate_review_decisions(organization_id,artifact_id,created_at);
 CREATE TABLE IF NOT EXISTS audit_events(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), deal_id TEXT, actor_id TEXT REFERENCES users(id), action TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT, details_json TEXT NOT NULL, previous_hash TEXT, event_hash TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TRIGGER IF NOT EXISTS audit_events_no_update BEFORE UPDATE ON audit_events BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END;
 CREATE TRIGGER IF NOT EXISTS audit_events_no_delete BEFORE DELETE ON audit_events BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END;

@@ -47,6 +47,16 @@ class OpportunityFinderUiContractTests(unittest.TestCase):
         self.assertIn("screening_currency_status", self.js)
         self.assertNotIn("screeningTier:", self.js)
 
+    def test_finder_review_bridge_remains_segregated_from_underwriting(self):
+        app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("Send to Opportunity Review", self.js)
+        self.assertIn("/review-artifacts`,", self.js)
+        self.assertIn("/api/opportunity-candidate-review-artifacts", app)
+        self.assertIn("Independent reviewer required", app)
+        self.assertIn("workflow priority, not a score", app)
+        self.assertIn("Validated score", app)
+        self.assertNotIn("automaticUnderwritingApply=true", self.js + app)
+
     def test_permissions_and_xss_boundaries_are_visible_in_client(self):
         malicious = '<img src=x onerror=alert(1)>'
         self.assertIn("['analyst','admin']", self.js)

@@ -681,6 +681,109 @@ class Service:
                        for item in lifecycle])
         return {"candidate_id": candidate_id, "timeline": sorted(timeline, key=lambda item: (item["at"], item["type"], item["id"]))}
 
+    def create_candidate_review_artifact(self, organization_id: str, user_id: str, candidate_id: str) -> dict:
+        detail = self.opportunity_candidate(organization_id, candidate_id)
+        if detail["candidate"]["status"] != "candidate":
+            raise ValueError("Only an active candidate can generate a review artifact")
+        if detail["screening_currency_status"] != "CURRENT" or not detail["latest_screening"]:
+            raise ValueError("The latest evidence must have a current immutable screening run")
+        version, run = detail["versions"][-1], detail["latest_screening"]
+        content = {
+            "schemaVersion": "test3-opportunity-candidate-review/1.0.0",
+            "candidate": detail["candidate"],
+            "evidenceVersion": version,
+            "screeningRun": run,
+            "screeningCurrencyStatus": "CURRENT",
+            "validatedOpportunityScore": {"status": "NO_VALIDATED_OPPORTUNITY_SCORE"},
+            "governanceBoundary": "Independent evidence review only. No deal is created and no Underwrite assumption is applied.",
+        }
+        content["artifactHash"] = sha256_json(content)
+        artifact_id, created = str(uuid.uuid4()), now()
+        with self.db.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if connection.execute("SELECT 1 FROM opportunity_candidate_review_artifacts WHERE organization_id=? AND screening_run_id=?", (organization_id, run["id"])).fetchone():
+                raise ConflictError("This exact screening run already has a governed review artifact")
+            connection.execute("INSERT INTO opportunity_candidate_review_artifacts VALUES(?,?,?,?,?,?,?,?,?,?)",
+                               (artifact_id, organization_id, candidate_id, version["id"], run["id"],
+                                content["schemaVersion"], canonical_json(content), content["artifactHash"], user_id, created))
+        self.db.audit(organization_id, user_id, "opportunity.candidate_review_artifact_created",
+                      "opportunity_candidate_review_artifact", artifact_id,
+                      {"candidate_id": candidate_id, "candidate_version_id": version["id"],
+                       "screening_run_id": run["id"], "artifact_sha256": content["artifactHash"]})
+        return {"id": artifact_id, "content": content, "content_sha256": content["artifactHash"],
+                "created_by": user_id, "created_at": created}
+
+    def candidate_review_artifacts(self, organization_id: str) -> list[dict]:
+        with self.db.connect() as connection:
+            rows = connection.execute("SELECT * FROM opportunity_candidate_review_artifacts WHERE organization_id=? ORDER BY created_at DESC,id", (organization_id,)).fetchall()
+            decisions = connection.execute("SELECT * FROM opportunity_candidate_review_decisions WHERE organization_id=? ORDER BY rowid", (organization_id,)).fetchall()
+        by_artifact: dict[str, list[dict]] = {}
+        for row in decisions:
+            item = dict(row); item["acknowledgements"] = json.loads(item.pop("acknowledgements_json")); item["modifications"] = json.loads(item.pop("modifications_json"))
+            by_artifact.setdefault(item["artifact_id"], []).append(item)
+        result = []
+        for row in rows:
+            item = dict(row); item["content"] = json.loads(item.pop("content_json")); item["decisions"] = by_artifact.get(item["id"], [])
+            item["review_state"] = item["decisions"][-1]["decision"] if item["decisions"] else "pending_review"
+            result.append(item)
+        return result
+
+    def review_candidate_artifact(self, organization_id: str, user_id: str, artifact_id: str, payload: dict) -> dict:
+        if not isinstance(payload, dict):
+            raise ValueError("Candidate review decision must be a JSON object")
+        decision, rationale = str(payload.get("decision") or "").strip(), str(payload.get("rationale") or "").strip()
+        if decision not in ("approved", "rejected", "changes_requested"):
+            raise ValueError("Decision must be approved, rejected or changes_requested")
+        if not 12 <= len(rationale) <= 4000:
+            raise ValueError("A specific review rationale of 12 to 4,000 characters is required")
+        acknowledgements = payload.get("acknowledgements") or {}
+        if not isinstance(acknowledgements, dict) or set(acknowledgements) - set(OPPORTUNITY_ACKNOWLEDGEMENTS):
+            raise ValueError("Acknowledgements contain unsupported fields")
+        acknowledgements = {key: acknowledgements.get(key) is True for key in OPPORTUNITY_ACKNOWLEDGEMENTS}
+        modifications = payload.get("modifications") or []
+        if modifications or decision == "changes_requested":
+            raise ValueError("Candidate screening artifacts are immutable; request new evidence instead of inline modifications")
+        if decision == "approved" and not all(acknowledgements.values()):
+            raise ValueError("Every institutional acknowledgement is required for approval")
+        created, decision_id = now(), str(uuid.uuid4())
+        with self.db.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            artifact = connection.execute("SELECT * FROM opportunity_candidate_review_artifacts WHERE id=? AND organization_id=?", (artifact_id, organization_id)).fetchone()
+            if not artifact:
+                raise LookupError("Candidate review artifact not found")
+            if artifact["created_by"] == user_id and decision == "approved":
+                raise ValueError("The creator cannot approve their own candidate review artifact")
+            content = json.loads(artifact["content_json"]); expected = dict(content); expected.pop("artifactHash", None)
+            if sha256_json(expected) != artifact["content_sha256"] or content.get("artifactHash") != artifact["content_sha256"]:
+                raise ValueError("Candidate review artifact integrity validation failed")
+            if decision == "approved":
+                candidate = connection.execute("SELECT status FROM opportunity_candidates WHERE id=? AND organization_id=?", (artifact["candidate_id"], organization_id)).fetchone()
+                latest_version = connection.execute("SELECT id FROM opportunity_candidate_versions WHERE candidate_id=? AND organization_id=? ORDER BY version DESC LIMIT 1", (artifact["candidate_id"], organization_id)).fetchone()
+                latest_run = connection.execute("SELECT r.id FROM opportunity_screening_runs r JOIN opportunity_candidate_versions v ON v.id=r.candidate_version_id WHERE r.candidate_id=? AND r.organization_id=? ORDER BY v.version DESC,r.evaluated_at DESC,r.rowid DESC LIMIT 1", (artifact["candidate_id"], organization_id)).fetchone()
+                if (not candidate or candidate["status"] != "candidate" or not latest_version or not latest_run
+                        or latest_version["id"] != artifact["candidate_version_id"]
+                        or latest_run["id"] != artifact["screening_run_id"]):
+                    raise ValueError("Candidate review artifact is no longer current; generate a new artifact from the latest screening")
+            if decision == "approved" and content["screeningRun"]["screening_tier"] == "INSUFFICIENT_EVIDENCE":
+                raise ValueError("Insufficient-evidence screening cannot be approved")
+            previous = connection.execute("SELECT decision_hash FROM opportunity_candidate_review_decisions WHERE organization_id=? ORDER BY rowid DESC LIMIT 1", (organization_id,)).fetchone()
+            previous_hash = previous[0] if previous else None
+            decision_payload = {"id": decision_id, "organization_id": organization_id, "artifact_id": artifact_id,
+                                "actor_id": user_id, "decision": decision, "rationale": rationale,
+                                "acknowledgements": acknowledgements, "modifications": [],
+                                "artifact_sha256": artifact["content_sha256"], "previous": previous_hash,
+                                "created_at": created}
+            decision_hash = sha256_json(decision_payload)
+            connection.execute("INSERT INTO opportunity_candidate_review_decisions VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                               (decision_id, organization_id, artifact_id, user_id, decision, rationale,
+                                canonical_json(acknowledgements), "[]", artifact["content_sha256"], previous_hash, decision_hash, created))
+        self.db.audit(organization_id, user_id, f"opportunity.candidate_{decision}",
+                      "opportunity_candidate_review_decision", decision_id,
+                      {"artifact_id": artifact_id, "artifact_sha256": artifact["content_sha256"], "decision_hash": decision_hash})
+        return {"id": decision_id, "artifact_id": artifact_id, "decision": decision,
+                "decision_hash": decision_hash, "automatic_deal_creation": False,
+                "automatic_underwrite_apply": False, "created_at": created}
+
     def property_opportunity_analysis(self, organization_id: str, user_id: str, deal_id: str,
                                       payload: dict) -> dict:
         if not isinstance(payload, dict):
@@ -1177,6 +1280,8 @@ class Service:
             opportunity_candidates = connection.execute("SELECT * FROM opportunity_candidates WHERE organization_id=? ORDER BY rowid", (organization_id,)).fetchall()
             opportunity_candidate_versions = connection.execute("SELECT * FROM opportunity_candidate_versions WHERE organization_id=? ORDER BY rowid", (organization_id,)).fetchall()
             opportunity_screening_runs = connection.execute("SELECT * FROM opportunity_screening_runs WHERE organization_id=? ORDER BY rowid", (organization_id,)).fetchall()
+            candidate_review_artifacts = connection.execute("SELECT * FROM opportunity_candidate_review_artifacts WHERE organization_id=? ORDER BY rowid", (organization_id,)).fetchall()
+            candidate_review_decisions = connection.execute("SELECT * FROM opportunity_candidate_review_decisions WHERE organization_id=? ORDER BY rowid", (organization_id,)).fetchall()
             extracted_membership = {(row["id"], row["deal_id"], row["document_id"]) for row in connection.execute("SELECT id,deal_id,document_id FROM extracted_values WHERE organization_id=?", (organization_id,)).fetchall()}
         storage = {"activeOriginals": 0, "purgedTombstones": 0, "missingActiveOriginals": 0, "integrityMismatches": 0, "unexpectedPurgedOriginals": 0, "unsafePaths": 0}
         upload_root = self.upload_dir.resolve()
@@ -1316,8 +1421,53 @@ class Service:
                             "screeningRunCount": len(opportunity_screening_runs),
                             "screeningRunMismatches": screening_run_mismatches,
                             "policyImplementationUnavailable": policy_implementation_unavailable}
+        review_artifact_membership = set()
+        candidate_review_artifact_mismatches = 0
+        screening_membership = {(item["id"], item["candidate_id"], item["candidate_version_id"], item["result_sha256"])
+                                for item in opportunity_screening_runs}
+        for item in candidate_review_artifacts:
+            try:
+                content = json.loads(item["content_json"])
+                unhashed = dict(content); unhashed.pop("artifactHash", None)
+                run = content["screeningRun"]
+                evidence = content["evidenceVersion"]
+                if (sha256_json(unhashed) != item["content_sha256"]
+                        or content.get("artifactHash") != item["content_sha256"]
+                        or content.get("schemaVersion") != item["schema_version"]
+                        or content.get("screeningCurrencyStatus") != "CURRENT"
+                        or content["candidate"].get("id") != item["candidate_id"]
+                        or evidence.get("id") != item["candidate_version_id"]
+                        or run.get("id") != item["screening_run_id"]
+                        or (run.get("id"), item["candidate_id"], evidence.get("id"), run.get("result_sha256")) not in screening_membership):
+                    candidate_review_artifact_mismatches += 1
+                else:
+                    review_artifact_membership.add((item["id"], item["content_sha256"]))
+            except (json.JSONDecodeError, TypeError, KeyError, AttributeError):
+                candidate_review_artifact_mismatches += 1
+        candidate_review_decision_mismatches, candidate_review_previous = 0, None
+        for item in candidate_review_decisions:
+            try:
+                acknowledgements = json.loads(item["acknowledgements_json"])
+                modifications = json.loads(item["modifications_json"])
+                payload = {"id": item["id"], "organization_id": item["organization_id"],
+                           "artifact_id": item["artifact_id"], "actor_id": item["actor_id"],
+                           "decision": item["decision"], "rationale": item["rationale"],
+                           "acknowledgements": acknowledgements, "modifications": modifications,
+                           "artifact_sha256": item["artifact_sha256"], "previous": item["previous_hash"],
+                           "created_at": item["created_at"]}
+                if ((item["artifact_id"], item["artifact_sha256"]) not in review_artifact_membership
+                        or item["previous_hash"] != candidate_review_previous
+                        or sha256_json(payload) != item["decision_hash"]):
+                    candidate_review_decision_mismatches += 1
+            except (json.JSONDecodeError, TypeError):
+                candidate_review_decision_mismatches += 1
+            candidate_review_previous = item["decision_hash"]
+        candidate_review_integrity = {"artifactCount": len(candidate_review_artifacts),
+                                      "artifactMismatches": candidate_review_artifact_mismatches,
+                                      "decisionCount": len(candidate_review_decisions),
+                                      "decisionMismatches": candidate_review_decision_mismatches}
         market_ok = not any(market_integrity[key] for key in ("missingOriginals", "hashMismatches", "unsafePaths"))
-        return {"ok": database["ok"] and audit_valid and review_valid and storage_ok and market_ok and artifact_mismatches == 0 and semantic_hash_mismatches == 0 and semantic_source_mismatches == 0 and opportunity_hash_mismatches == 0 and opportunity_decision_mismatches == 0 and opportunity_handoff_mismatches == 0 and candidate_version_mismatches == 0 and screening_run_mismatches == 0, "checkedAt": now(), "database": database, "chains": chains, "storage": storage, "marketData": market_integrity, "exports": artifact_integrity, "semanticEntities": semantic_integrity, "propertyOpportunity": opportunity_integrity, "opportunityFinder": finder_integrity, "purgeStagingFiles": staging_files, "networkRequests": 0}
+        return {"ok": database["ok"] and audit_valid and review_valid and storage_ok and market_ok and artifact_mismatches == 0 and semantic_hash_mismatches == 0 and semantic_source_mismatches == 0 and opportunity_hash_mismatches == 0 and opportunity_decision_mismatches == 0 and opportunity_handoff_mismatches == 0 and candidate_version_mismatches == 0 and screening_run_mismatches == 0 and candidate_review_artifact_mismatches == 0 and candidate_review_decision_mismatches == 0, "checkedAt": now(), "database": database, "chains": chains, "storage": storage, "marketData": market_integrity, "exports": artifact_integrity, "semanticEntities": semantic_integrity, "propertyOpportunity": opportunity_integrity, "opportunityFinder": finder_integrity, "opportunityCandidateReview": candidate_review_integrity, "purgeStagingFiles": staging_files, "networkRequests": 0}
 
     def review_value(self, organization_id: str, user_id: str, value_id: str, status: str, normalized_value: str | None, comments: str = "") -> dict:
         normalized_value = None if normalized_value is None else str(normalized_value)

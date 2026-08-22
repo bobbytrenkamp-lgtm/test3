@@ -91,6 +91,44 @@ class OpportunityHardeningTests(unittest.TestCase):
         self.assertEqual(final["screening_currency_status"], "CURRENT")
         self.assertEqual(len(final["screening_runs"]), 2)
 
+    def test_latest_screening_uses_highest_version_then_newest_run(self):
+        candidate = self.candidate("Latest semantics")
+        self.service.create_opportunity_candidate_version(self.user["organization_id"], self.user["id"], candidate["id"], compact_evidence())
+        self.service.screen_opportunity_candidate(self.user["organization_id"], self.user["id"], candidate["id"], {})
+        self.service.create_opportunity_candidate_version(self.user["organization_id"], self.user["id"], candidate["id"], compact_evidence(rent=("999", "1000")))
+        first_v2 = self.service.screen_opportunity_candidate(self.user["organization_id"], self.user["id"], candidate["id"], {})
+        second_v2 = self.service.screen_opportunity_candidate(self.user["organization_id"], self.user["id"], candidate["id"], {})
+        detail = self.service.opportunity_candidate(self.user["organization_id"], candidate["id"])
+        self.assertEqual(detail["latest_screening"]["id"], second_v2["id"])
+        self.assertEqual(detail["current_screening"], detail["latest_screening"])
+        self.assertNotEqual(first_v2["id"], second_v2["id"])
+        self.assertEqual((detail["latest_evidence_version"], detail["latest_screened_version"],
+                          detail["screening_currency_status"]), (2, 2, "CURRENT"))
+
+    def test_decimal_threshold_filters_are_lossless_at_boundaries(self):
+        subjects = {
+            "Boundary Above": "0.9249999999999999999",
+            "Boundary Equal": "0.925",
+            "Boundary Below": "0.9250000000000000001",
+        }
+        for name, subject in subjects.items():
+            candidate = self.candidate(name)
+            self.add_and_screen(candidate, compact_evidence(
+                rent=(subject, "1"), basis=(subject, "1")))
+        rent = self.service.list_opportunity_candidates(
+            self.user["organization_id"], {"q": "Boundary", "rent_gap_min": "0.075"})
+        basis = self.service.list_opportunity_candidates(
+            self.user["organization_id"], {"q": "Boundary", "basis_discount_min": "0.075"})
+        self.assertEqual({item["display_name"] for item in rent["items"]},
+                         {"Boundary Above", "Boundary Equal"})
+        self.assertEqual({item["display_name"] for item in basis["items"]},
+                         {"Boundary Above", "Boundary Equal"})
+        exact_completeness = rent["items"][0]["evidence_completeness"]
+        completeness = self.service.list_opportunity_candidates(
+            self.user["organization_id"], {"q": "Boundary", "evidence_completeness_min": exact_completeness,
+                                            "evidence_completeness_max": exact_completeness})
+        self.assertEqual(completeness["pagination"]["total"], 3)
+
     def test_projection_is_ui_ready_exact_and_filters_are_server_side(self):
         candidate = self.candidate("Oak Ridge", "10 Oak Ridge Avenue", "Charlotte")
         result = self.add_and_screen(candidate, compact_evidence(rent=("1000", "1125"), basis=("150", "170"), extra={
@@ -126,6 +164,10 @@ class OpportunityHardeningTests(unittest.TestCase):
         self.assertEqual(archived["status"], "archived")
         detail = self.service.opportunity_candidate(self.user["organization_id"], first["id"])
         self.assertEqual((detail["candidate"]["status"], len(detail["versions"]), len(detail["screening_runs"])), ("archived", 1, 1))
+        self.assertEqual(detail["candidate"]["archived_at"], archived["archived_at"])
+        archive_event = [item for item in self.service.opportunity_candidate_history(
+            self.user["organization_id"], first["id"])["timeline"] if item["type"] == "candidate_archived"]
+        self.assertEqual(archive_event[0]["at"], archived["archived_at"])
         self.assertEqual(self.service.list_opportunity_candidates(self.user["organization_id"], {"status": "archived"})["pagination"]["total"], 1)
         with self.assertRaisesRegex(ValueError, "already archived"):
             self.service.archive_opportunity_candidate(self.user["organization_id"], self.user["id"], first["id"])
@@ -154,6 +196,13 @@ class OpportunityHardeningTests(unittest.TestCase):
         elapsed = time.perf_counter() - started
         self.assertEqual((page["pagination"]["total"], page["pagination"]["returned"]), (10_000, 25))
         self.assertLess(elapsed, 5.0)
+
+    def test_representative_query_plan_uses_governed_indexes(self):
+        details = "\n".join(item["detail"] for item in self.service.opportunity_candidate_query_plan(
+            self.user["organization_id"]))
+        self.assertIn("opportunity_candidates_list", details)
+        self.assertIn("opportunity_candidate_versions_candidate", details)
+        self.assertIn("opportunity_screening_runs_candidate", details)
 
     def test_every_screening_binding_tamper_fails_integrity(self):
         mutations = {

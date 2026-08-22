@@ -5,9 +5,31 @@ import sqlite3
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 SCHEMA_VERSION = 9
+
+
+def _decimal_compare(left: object, right: object, operator) -> int:
+    """Losslessly compare canonical decimal text inside SQLite queries."""
+    if left is None or right is None:
+        return 0
+    try:
+        first, second = Decimal(str(left)), Decimal(str(right))
+    except (InvalidOperation, ValueError):
+        return 0
+    if not first.is_finite() or not second.is_finite():
+        return 0
+    return int(operator(first, second))
+
+
+def _decimal_gte(left: object, right: object) -> int:
+    return _decimal_compare(left, right, lambda first, second: first >= second)
+
+
+def _decimal_lte(left: object, right: object) -> int:
+    return _decimal_compare(left, right, lambda first, second: first <= second)
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -133,6 +155,8 @@ class Database:
     def connect(self):
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row
+        connection.create_function("decimal_gte", 2, _decimal_gte, deterministic=True)
+        connection.create_function("decimal_lte", 2, _decimal_lte, deterministic=True)
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=5000")
         try:

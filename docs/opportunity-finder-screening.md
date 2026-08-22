@@ -80,14 +80,22 @@ The current screening projection is the newest screening run for the highest evi
 - `screening_currency_status`: `CURRENT`, `OUTDATED_EVIDENCE`, or `NOT_SCREENED`; and
 - the immutable run projection used for display.
 
+The preferred name for that retained run is `latest_screening`. `current_screening` remains a deprecated compatibility alias and can refer to an older evidence version when `screening_currency_status` is `OUTDATED_EVIDENCE`; clients must not infer currency from the alias name.
+
 Workflow tier ordering is explicit: `HIGH_PRIORITY_REVIEW` (1), `WORTH_REVIEWING` (2), `LOW_PRIORITY` (3), `INSUFFICIENT_EVIDENCE` (4), and no screening (5). `screening_priority_rank` is only an analyst-workflow ordering. It is not an opportunity score, expected return, investment recommendation, or underwriting conclusion.
 
 List projections expose exact decimal strings for rent gap, basis discount, evidence-supported NOI delta, NOI ratio, cap-rate spread, and vacancy delta. Test3 compares supplied current and stabilized NOI evidence; it does not forecast NOI in Finder. Test2 remains responsible for controlling underwriting. Completeness, evidence age, reason/warning counts, score availability, and screening currency are also projected from the immutable result so browser code does not reproduce authoritative calculations.
 
 The bounded list endpoint supports deterministic search across display name, address, market, and submarket plus filters for property type, market, lifecycle status, tier, screening currency, completeness range, minimum rent/basis gaps, and maximum evidence age. Search is limited to 200 characters and escapes SQL wildcard characters. Tier sorting uses workflow rank. Completeness sorts numerically. Freshness sorts by evidence age: ascending means fresher first and descending means stalest first. The version and screening indexes support local pagination; a committed test exercises the bounded projection at 10,000 candidates.
 
+Authoritative completeness, rent-gap, and basis-discount threshold inclusion uses SQLite deterministic scalar functions backed by Python `Decimal`. SQLite `REAL` is retained only for approximate display ordering. Exact comparison preserves boundary behavior, totals, and pagination for values immediately above, equal to, and immediately below a threshold without adding duplicated projection columns or changing the database/backup format.
+
+`Service.opportunity_candidate_query_plan()` exposes the representative bounded query through `EXPLAIN QUERY PLAN`. Tests verify use of `opportunity_candidates_list`, `opportunity_candidate_versions_candidate`, and `opportunity_screening_runs_candidate`; SQLite may still use a bounded temporary B-tree for the derived tier/version ordering. `scripts/opportunity_finder_scale_benchmark.py` creates an ignored, temporary 10,000-candidate fictional fixture with more than 15,000 evidence versions and 8,000 screening runs, then measures the required filter, sort, search, exact-threshold, and high-offset queries. The standard CI fixture is smaller but retains the same relational shapes and all currency/tier states.
+
 Address duplicate warnings use conservative normalization only: case and whitespace normalization, harmless punctuation removal, and a small explicit street-suffix dictionary. Unit/subunit text remains part of identity. The system never geocodes, fuzzily matches, merges, or blocks candidate creation.
 
 The only lifecycle transition introduced here is the explicit, audited `candidate -> archived` action at `POST /api/opportunities/{id}/archive`. Archiving retains every evidence version and screening run. Archived candidates remain queryable with `status=archived`; they cannot receive new evidence or screening. Promotion and reopening remain separate future governed workflows.
+
+Archive timestamps returned from the action and candidate detail are read from the immutable `opportunity.candidate_archived` audit event. A transient application timestamp is not treated as lifecycle evidence.
 
 Historic policy implementations are immutable and registered by policy ID and version. Integrity reproduction selects the exact registered policy and verifies its stored hash. It never evaluates an old run with a newer default policy. If an implementation is unavailable or its hash differs, integrity reports `policyImplementationUnavailable`, counts a screening mismatch, and fails closed.

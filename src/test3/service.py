@@ -468,16 +468,16 @@ class Service:
             where.append(SCREENING_CURRENCY_SQL + "=?")
             parameters.append(str(query["screening_currency_status"]))
         if completeness_min is not None:
-            where.append("CAST(json_extract(r.result_json,'$.evidenceCompleteness') AS REAL)>=CAST(? AS REAL)")
+            where.append("decimal_gte(json_extract(r.result_json,'$.evidenceCompleteness'),?)=1")
             parameters.append(completeness_min)
         if completeness_max is not None:
-            where.append("CAST(json_extract(r.result_json,'$.evidenceCompleteness') AS REAL)<=CAST(? AS REAL)")
+            where.append("decimal_lte(json_extract(r.result_json,'$.evidenceCompleteness'),?)=1")
             parameters.append(completeness_max)
         if rent_gap_min is not None:
-            where.append("CAST(json_extract(r.result_json,'$.derivedMetrics.rentGapPct') AS REAL)>=CAST(? AS REAL)")
+            where.append("decimal_gte(json_extract(r.result_json,'$.derivedMetrics.rentGapPct'),?)=1")
             parameters.append(rent_gap_min)
         if basis_discount_min is not None:
-            where.append("CAST(json_extract(r.result_json,'$.derivedMetrics.basisDiscountPct') AS REAL)>=CAST(? AS REAL)")
+            where.append("decimal_gte(json_extract(r.result_json,'$.derivedMetrics.basisDiscountPct'),?)=1")
             parameters.append(basis_discount_min)
         if freshness_max is not None:
             where.append("CAST(json_extract(r.result_json,'$.evidenceFreshnessDays') AS INTEGER)<=?")
@@ -511,6 +511,7 @@ class Service:
                               "screening_currency_status": row["screening_currency_status"],
                               "screening_tier": screening["screening_tier"] if screening else None,
                               "screening_priority_rank": screening["screening_priority_rank"] if screening else 5,
+                              "latest_screening": screening,
                               "current_screening": screening})
             if screening:
                 candidate.update({key: screening[key] for key in (
@@ -529,6 +530,19 @@ class Service:
         return {"items": items, "pagination": {"limit": limit, "offset": offset, "returned": len(items), "total": total},
                 "sort": {"field": sort, "direction": direction}}
 
+    def opportunity_candidate_query_plan(self, organization_id: str) -> list[dict]:
+        """Return SQLite's plan for the representative bounded Finder list query."""
+        sql = f"""EXPLAIN QUERY PLAN SELECT c.id,lv.version,sv.version
+            FROM opportunity_candidates c
+            LEFT JOIN opportunity_candidate_versions lv ON lv.id=(SELECT lv2.id FROM opportunity_candidate_versions lv2 WHERE lv2.organization_id=c.organization_id AND lv2.candidate_id=c.id ORDER BY lv2.version DESC LIMIT 1)
+            LEFT JOIN opportunity_screening_runs r ON r.id=(SELECT r2.id FROM opportunity_screening_runs r2 JOIN opportunity_candidate_versions sv2 ON sv2.id=r2.candidate_version_id WHERE r2.organization_id=c.organization_id AND r2.candidate_id=c.id ORDER BY sv2.version DESC,r2.evaluated_at DESC,r2.rowid DESC LIMIT 1)
+            LEFT JOIN opportunity_candidate_versions sv ON sv.id=r.candidate_version_id
+            WHERE c.organization_id=? AND c.status='candidate'
+            ORDER BY {SCREENING_PRIORITY_SQL} ASC,c.id ASC LIMIT 25"""
+        with self.db.connect() as connection:
+            rows = connection.execute(sql, (organization_id,)).fetchall()
+        return [{"id": row[0], "parent": row[1], "detail": row[3]} for row in rows]
+
     def opportunity_candidate(self, organization_id: str, candidate_id: str) -> dict:
         with self.db.connect() as connection:
             candidate = connection.execute("SELECT * FROM opportunity_candidates WHERE id=? AND organization_id=?", (candidate_id, organization_id)).fetchone()
@@ -536,7 +550,9 @@ class Service:
                 raise LookupError("Opportunity candidate not found")
             versions = connection.execute("SELECT * FROM opportunity_candidate_versions WHERE candidate_id=? AND organization_id=? ORDER BY version", (candidate_id, organization_id)).fetchall()
             runs = connection.execute("SELECT r.*,r.id run_id,v.version latest_screened_version,v.analysis_as_of screened_analysis_as_of FROM opportunity_screening_runs r JOIN opportunity_candidate_versions v ON v.id=r.candidate_version_id WHERE r.candidate_id=? AND r.organization_id=? ORDER BY v.version,r.evaluated_at,r.rowid", (candidate_id, organization_id)).fetchall()
+            archive_event = connection.execute("SELECT created_at FROM audit_events WHERE organization_id=? AND entity_type='opportunity_candidate' AND entity_id=? AND action='opportunity.candidate_archived' ORDER BY rowid DESC LIMIT 1", (organization_id, candidate_id)).fetchone()
         candidate_value = {key: candidate[key] for key in candidate.keys() if key != "normalized_address_sha256"}
+        candidate_value["archived_at"] = archive_event["created_at"] if archive_event else None
         version_values = [{**{key: row[key] for key in row.keys() if key != "content_json"}, "content": json.loads(row["content_json"])} for row in versions]
         run_values = [{**{key: row[key] for key in row.keys() if key not in {"result_json", "run_id", "latest_screened_version", "screened_analysis_as_of"}}, "result": json.loads(row["result_json"])} for row in runs]
         latest_version = version_values[-1] if version_values else None
@@ -550,6 +566,7 @@ class Service:
             currency = "OUTDATED_EVIDENCE"
         projection = self._screening_summary(latest_run_row) if latest_run_row else None
         return {"candidate": candidate_value, "versions": version_values, "screening_runs": run_values,
+                "latest_screening": latest_run,
                 "current_screening": latest_run, "screening_projection": projection,
                 "latest_evidence_version": latest_version["version"] if latest_version else None,
                 "latest_evidence_analysis_as_of": latest_version["analysis_as_of"] if latest_version else None,
@@ -557,7 +574,6 @@ class Service:
                 "screening_currency_status": currency}
 
     def archive_opportunity_candidate(self, organization_id: str, user_id: str, candidate_id: str) -> dict:
-        archived_at = now()
         with self.db.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             candidate = connection.execute("SELECT * FROM opportunity_candidates WHERE id=? AND organization_id=?", (candidate_id, organization_id)).fetchone()
@@ -568,9 +584,11 @@ class Service:
             if candidate["status"] != "candidate":
                 raise ValueError(f"Cannot transition opportunity candidate from {candidate['status']} to archived")
             connection.execute("UPDATE opportunity_candidates SET status='archived' WHERE id=? AND organization_id=?", (candidate_id, organization_id))
-        self.db.audit(organization_id, user_id, "opportunity.candidate_archived", "opportunity_candidate",
-                      candidate_id, {"previous_status": candidate["status"], "status": "archived",
-                                     "evidence_retained": True, "screening_history_retained": True}, candidate["deal_id"])
+        event_id = self.db.audit(organization_id, user_id, "opportunity.candidate_archived", "opportunity_candidate",
+                                 candidate_id, {"previous_status": candidate["status"], "status": "archived",
+                                                "evidence_retained": True, "screening_history_retained": True}, candidate["deal_id"])
+        with self.db.connect() as connection:
+            archived_at = connection.execute("SELECT created_at FROM audit_events WHERE id=?", (event_id,)).fetchone()[0]
         return {"id": candidate_id, "status": "archived", "archived_at": archived_at,
                 "evidence_retained": True, "screening_history_retained": True}
 

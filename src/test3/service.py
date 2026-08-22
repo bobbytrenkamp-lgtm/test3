@@ -666,7 +666,7 @@ class Service:
     def opportunity_candidate_history(self, organization_id: str, candidate_id: str) -> dict:
         detail = self.opportunity_candidate(organization_id, candidate_id)
         with self.db.connect() as connection:
-            lifecycle = connection.execute("SELECT id,actor_id,action,details_json,created_at FROM audit_events WHERE organization_id=? AND entity_type='opportunity_candidate' AND entity_id=? AND action='opportunity.candidate_archived' ORDER BY rowid", (organization_id, candidate_id)).fetchall()
+            lifecycle = connection.execute("SELECT id,actor_id,action,details_json,created_at FROM audit_events WHERE organization_id=? AND entity_type='opportunity_candidate' AND entity_id=? AND action IN ('opportunity.candidate_archived','opportunity.candidate_promoted') ORDER BY rowid", (organization_id, candidate_id)).fetchall()
         timeline = ([{"type": "candidate_created", "at": detail["candidate"]["created_at"],
                       "id": candidate_id, "actor_id": detail["candidate"]["created_by"]}]
                     + [{"type": "evidence_version_created", "at": item["created_at"], "id": item["id"],
@@ -676,7 +676,7 @@ class Service:
                         "actor_id": item["created_by"], "candidate_version_id": item["candidate_version_id"],
                         "screening_tier": item["screening_tier"], "result_sha256": item["result_sha256"]}
                        for item in detail["screening_runs"]]
-                    + [{"type": "candidate_archived", "at": item["created_at"], "id": item["id"],
+                    + [{"type": "candidate_promoted" if item["action"] == "opportunity.candidate_promoted" else "candidate_archived", "at": item["created_at"], "id": item["id"],
                         "actor_id": item["actor_id"], "details": json.loads(item["details_json"])}
                        for item in lifecycle])
         return {"candidate_id": candidate_id, "timeline": sorted(timeline, key=lambda item: (item["at"], item["type"], item["id"]))}
@@ -717,14 +717,20 @@ class Service:
         with self.db.connect() as connection:
             rows = connection.execute("SELECT * FROM opportunity_candidate_review_artifacts WHERE organization_id=? ORDER BY created_at DESC,id", (organization_id,)).fetchall()
             decisions = connection.execute("SELECT * FROM opportunity_candidate_review_decisions WHERE organization_id=? ORDER BY rowid", (organization_id,)).fetchall()
+            promotions = connection.execute("SELECT * FROM opportunity_candidate_promotions WHERE organization_id=? ORDER BY rowid", (organization_id,)).fetchall()
         by_artifact: dict[str, list[dict]] = {}
         for row in decisions:
             item = dict(row); item["acknowledgements"] = json.loads(item.pop("acknowledgements_json")); item["modifications"] = json.loads(item.pop("modifications_json"))
             by_artifact.setdefault(item["artifact_id"], []).append(item)
         result = []
+        by_artifact_promotion = {}
+        for row in promotions:
+            promotion = dict(row); promotion["content"] = json.loads(promotion.pop("content_json"))
+            by_artifact_promotion[promotion["artifact_id"]] = promotion
         for row in rows:
             item = dict(row); item["content"] = json.loads(item.pop("content_json")); item["decisions"] = by_artifact.get(item["id"], [])
             item["review_state"] = item["decisions"][-1]["decision"] if item["decisions"] else "pending_review"
+            item["promotion"] = by_artifact_promotion.get(item["id"])
             result.append(item)
         return result
 
@@ -751,6 +757,8 @@ class Service:
             artifact = connection.execute("SELECT * FROM opportunity_candidate_review_artifacts WHERE id=? AND organization_id=?", (artifact_id, organization_id)).fetchone()
             if not artifact:
                 raise LookupError("Candidate review artifact not found")
+            if connection.execute("SELECT 1 FROM opportunity_candidate_promotions WHERE organization_id=? AND artifact_id=?", (organization_id, artifact_id)).fetchone():
+                raise ConflictError("A promoted candidate artifact has a closed review record")
             if artifact["created_by"] == user_id and decision == "approved":
                 raise ValueError("The creator cannot approve their own candidate review artifact")
             content = json.loads(artifact["content_json"]); expected = dict(content); expected.pop("artifactHash", None)
@@ -782,6 +790,65 @@ class Service:
                       {"artifact_id": artifact_id, "artifact_sha256": artifact["content_sha256"], "decision_hash": decision_hash})
         return {"id": decision_id, "artifact_id": artifact_id, "decision": decision,
                 "decision_hash": decision_hash, "automatic_deal_creation": False,
+                "automatic_underwrite_apply": False, "created_at": created}
+
+    def promote_opportunity_candidate(self, organization_id: str, user_id: str, candidate_id: str) -> dict:
+        """Explicitly create a diligence deal from independently approved current evidence."""
+        promotion_id, deal_id, created = str(uuid.uuid4()), str(uuid.uuid4()), now()
+        with self.db.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            candidate = connection.execute("SELECT * FROM opportunity_candidates WHERE id=? AND organization_id=?", (candidate_id, organization_id)).fetchone()
+            if not candidate:
+                raise LookupError("Opportunity candidate not found")
+            if candidate["status"] != "candidate" or candidate["deal_id"]:
+                raise ConflictError("Only an active, unpromoted candidate can enter Deal Pipeline")
+            version = connection.execute("SELECT * FROM opportunity_candidate_versions WHERE candidate_id=? AND organization_id=? ORDER BY version DESC LIMIT 1", (candidate_id, organization_id)).fetchone()
+            run = connection.execute("SELECT r.* FROM opportunity_screening_runs r JOIN opportunity_candidate_versions v ON v.id=r.candidate_version_id WHERE r.candidate_id=? AND r.organization_id=? ORDER BY v.version DESC,r.evaluated_at DESC,r.rowid DESC LIMIT 1", (candidate_id, organization_id)).fetchone()
+            if not version or not run or run["candidate_version_id"] != version["id"]:
+                raise ValueError("A current screening of the latest evidence is required before promotion")
+            artifact = connection.execute("SELECT * FROM opportunity_candidate_review_artifacts WHERE organization_id=? AND candidate_id=? AND candidate_version_id=? AND screening_run_id=? ORDER BY rowid DESC LIMIT 1", (organization_id, candidate_id, version["id"], run["id"])).fetchone()
+            if not artifact:
+                raise ValueError("A governed review artifact for the current screening is required before promotion")
+            decision = connection.execute("SELECT * FROM opportunity_candidate_review_decisions WHERE organization_id=? AND artifact_id=? ORDER BY rowid DESC LIMIT 1", (organization_id, artifact["id"])).fetchone()
+            if not decision or decision["decision"] != "approved":
+                raise ValueError("The current screening artifact requires an independent approval before promotion")
+            artifact_content = json.loads(artifact["content_json"]); unhashed = dict(artifact_content); unhashed.pop("artifactHash", None)
+            acknowledgements = json.loads(decision["acknowledgements_json"]); modifications = json.loads(decision["modifications_json"])
+            decision_payload = {"id": decision["id"], "organization_id": decision["organization_id"],
+                                "artifact_id": decision["artifact_id"], "actor_id": decision["actor_id"],
+                                "decision": decision["decision"], "rationale": decision["rationale"],
+                                "acknowledgements": acknowledgements, "modifications": modifications,
+                                "artifact_sha256": decision["artifact_sha256"], "previous": decision["previous_hash"],
+                                "created_at": decision["created_at"]}
+            if (sha256_json(unhashed) != artifact["content_sha256"]
+                    or artifact_content.get("artifactHash") != artifact["content_sha256"]
+                    or decision["artifact_sha256"] != artifact["content_sha256"]
+                    or sha256_json(decision_payload) != decision["decision_hash"]):
+                raise ValueError("Approved candidate evidence failed integrity validation")
+            deal_name = str(candidate["display_name"] or candidate["address"] or "Opportunity candidate")[:200]
+            connection.execute("INSERT INTO deals VALUES(?,?,?,?,?,?,?,?,?)",
+                               (deal_id, organization_id, deal_name, str(candidate["address"] or "")[:500],
+                                candidate["property_type"], "not_processed", user_id, created, created))
+            promotion_content = {
+                "schemaVersion": "test3-opportunity-candidate-promotion/1.0.0",
+                "candidateId": candidate_id, "candidateVersionId": version["id"],
+                "screeningRunId": run["id"], "reviewArtifactId": artifact["id"],
+                "reviewArtifactHash": artifact["content_sha256"], "reviewDecisionId": decision["id"],
+                "reviewDecisionHash": decision["decision_hash"], "dealId": deal_id,
+                "boundary": "Explicit Deal Pipeline intake only; no evidence is approved as an underwriting assumption and no Test2 value is applied.",
+            }
+            promotion_hash = sha256_json(promotion_content)
+            connection.execute("INSERT INTO opportunity_candidate_promotions VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                               (promotion_id, organization_id, candidate_id, artifact["id"], decision["id"], deal_id,
+                                promotion_content["schemaVersion"], canonical_json(promotion_content), promotion_hash,
+                                user_id, created))
+            connection.execute("UPDATE opportunity_candidates SET status='promoted_to_diligence',deal_id=? WHERE id=? AND organization_id=?", (deal_id, candidate_id, organization_id))
+        self.db.audit(organization_id, user_id, "opportunity.candidate_promoted", "opportunity_candidate",
+                      candidate_id, {"promotion_id": promotion_id, "deal_id": deal_id,
+                                     "artifact_id": artifact["id"], "decision_id": decision["id"],
+                                     "promotion_sha256": promotion_hash, "automatic_underwrite_apply": False}, deal_id)
+        return {"id": promotion_id, "candidate_id": candidate_id, "deal_id": deal_id,
+                "content_sha256": promotion_hash, "status": "promoted_to_diligence",
                 "automatic_underwrite_apply": False, "created_at": created}
 
     def property_opportunity_analysis(self, organization_id: str, user_id: str, deal_id: str,
@@ -1282,6 +1349,8 @@ class Service:
             opportunity_screening_runs = connection.execute("SELECT * FROM opportunity_screening_runs WHERE organization_id=? ORDER BY rowid", (organization_id,)).fetchall()
             candidate_review_artifacts = connection.execute("SELECT * FROM opportunity_candidate_review_artifacts WHERE organization_id=? ORDER BY rowid", (organization_id,)).fetchall()
             candidate_review_decisions = connection.execute("SELECT * FROM opportunity_candidate_review_decisions WHERE organization_id=? ORDER BY rowid", (organization_id,)).fetchall()
+            candidate_promotions = connection.execute("SELECT * FROM opportunity_candidate_promotions WHERE organization_id=? ORDER BY rowid", (organization_id,)).fetchall()
+            deal_membership = {row["id"] for row in connection.execute("SELECT id FROM deals WHERE organization_id=?", (organization_id,)).fetchall()}
             extracted_membership = {(row["id"], row["deal_id"], row["document_id"]) for row in connection.execute("SELECT id,deal_id,document_id FROM extracted_values WHERE organization_id=?", (organization_id,)).fetchall()}
         storage = {"activeOriginals": 0, "purgedTombstones": 0, "missingActiveOriginals": 0, "integrityMismatches": 0, "unexpectedPurgedOriginals": 0, "unsafePaths": 0}
         upload_root = self.upload_dir.resolve()
@@ -1372,6 +1441,7 @@ class Service:
         opportunity_integrity["handoffMismatches"] = opportunity_handoff_mismatches
         candidate_membership = {item["id"] for item in opportunity_candidates}
         candidate_property_types = {item["id"]: item["property_type"] for item in opportunity_candidates}
+        candidate_lifecycle = {item["id"]: (item["status"], item["deal_id"]) for item in opportunity_candidates}
         version_membership = {(item["id"], item["candidate_id"]) for item in opportunity_candidate_versions}
         candidate_version_mismatches = 0
         version_snapshots = {}
@@ -1466,8 +1536,28 @@ class Service:
                                       "artifactMismatches": candidate_review_artifact_mismatches,
                                       "decisionCount": len(candidate_review_decisions),
                                       "decisionMismatches": candidate_review_decision_mismatches}
+        promotion_mismatches = 0
+        review_decision_membership = {(item["id"], item["artifact_id"], item["decision_hash"], item["decision"])
+                                      for item in candidate_review_decisions}
+        for item in candidate_promotions:
+            try:
+                content = json.loads(item["content_json"])
+                if (sha256_json(content) != item["content_sha256"]
+                        or content.get("schemaVersion") != item["schema_version"]
+                        or content.get("candidateId") != item["candidate_id"]
+                        or content.get("reviewArtifactId") != item["artifact_id"]
+                        or content.get("reviewDecisionId") != item["decision_id"]
+                        or content.get("dealId") != item["deal_id"]
+                        or item["deal_id"] not in deal_membership
+                        or candidate_lifecycle.get(item["candidate_id"]) != ("promoted_to_diligence", item["deal_id"])
+                        or (item["decision_id"], item["artifact_id"], content.get("reviewDecisionHash"), "approved") not in review_decision_membership):
+                    promotion_mismatches += 1
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                promotion_mismatches += 1
+        candidate_review_integrity["promotionCount"] = len(candidate_promotions)
+        candidate_review_integrity["promotionMismatches"] = promotion_mismatches
         market_ok = not any(market_integrity[key] for key in ("missingOriginals", "hashMismatches", "unsafePaths"))
-        return {"ok": database["ok"] and audit_valid and review_valid and storage_ok and market_ok and artifact_mismatches == 0 and semantic_hash_mismatches == 0 and semantic_source_mismatches == 0 and opportunity_hash_mismatches == 0 and opportunity_decision_mismatches == 0 and opportunity_handoff_mismatches == 0 and candidate_version_mismatches == 0 and screening_run_mismatches == 0 and candidate_review_artifact_mismatches == 0 and candidate_review_decision_mismatches == 0, "checkedAt": now(), "database": database, "chains": chains, "storage": storage, "marketData": market_integrity, "exports": artifact_integrity, "semanticEntities": semantic_integrity, "propertyOpportunity": opportunity_integrity, "opportunityFinder": finder_integrity, "opportunityCandidateReview": candidate_review_integrity, "purgeStagingFiles": staging_files, "networkRequests": 0}
+        return {"ok": database["ok"] and audit_valid and review_valid and storage_ok and market_ok and artifact_mismatches == 0 and semantic_hash_mismatches == 0 and semantic_source_mismatches == 0 and opportunity_hash_mismatches == 0 and opportunity_decision_mismatches == 0 and opportunity_handoff_mismatches == 0 and candidate_version_mismatches == 0 and screening_run_mismatches == 0 and candidate_review_artifact_mismatches == 0 and candidate_review_decision_mismatches == 0 and promotion_mismatches == 0, "checkedAt": now(), "database": database, "chains": chains, "storage": storage, "marketData": market_integrity, "exports": artifact_integrity, "semanticEntities": semantic_integrity, "propertyOpportunity": opportunity_integrity, "opportunityFinder": finder_integrity, "opportunityCandidateReview": candidate_review_integrity, "purgeStagingFiles": staging_files, "networkRequests": 0}
 
     def review_value(self, organization_id: str, user_id: str, value_id: str, status: str, normalized_value: str | None, comments: str = "") -> dict:
         normalized_value = None if normalized_value is None else str(normalized_value)

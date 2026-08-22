@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 
 def _decimal_compare(left: object, right: object, operator) -> int:
@@ -115,6 +115,10 @@ CREATE TABLE IF NOT EXISTS opportunity_candidate_review_decisions(id TEXT PRIMAR
 CREATE TRIGGER IF NOT EXISTS opportunity_candidate_review_decisions_no_update BEFORE UPDATE ON opportunity_candidate_review_decisions BEGIN SELECT RAISE(ABORT, 'candidate review decisions are append-only'); END;
 CREATE TRIGGER IF NOT EXISTS opportunity_candidate_review_decisions_no_delete BEFORE DELETE ON opportunity_candidate_review_decisions BEGIN SELECT RAISE(ABORT, 'candidate review decisions are retained governance evidence'); END;
 CREATE INDEX IF NOT EXISTS opportunity_candidate_review_decisions_artifact ON opportunity_candidate_review_decisions(organization_id,artifact_id,created_at);
+CREATE TABLE IF NOT EXISTS opportunity_candidate_promotions(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), candidate_id TEXT NOT NULL REFERENCES opportunity_candidates(id), artifact_id TEXT NOT NULL REFERENCES opportunity_candidate_review_artifacts(id), decision_id TEXT NOT NULL REFERENCES opportunity_candidate_review_decisions(id), deal_id TEXT NOT NULL REFERENCES deals(id), schema_version TEXT NOT NULL, content_json TEXT NOT NULL, content_sha256 TEXT NOT NULL, actor_id TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL, UNIQUE(organization_id,candidate_id), UNIQUE(organization_id,deal_id));
+CREATE TRIGGER IF NOT EXISTS opportunity_candidate_promotions_no_update BEFORE UPDATE ON opportunity_candidate_promotions BEGIN SELECT RAISE(ABORT, 'candidate promotions are immutable lifecycle evidence'); END;
+CREATE TRIGGER IF NOT EXISTS opportunity_candidate_promotions_no_delete BEFORE DELETE ON opportunity_candidate_promotions BEGIN SELECT RAISE(ABORT, 'candidate promotions are retained lifecycle evidence'); END;
+CREATE INDEX IF NOT EXISTS opportunity_candidate_promotions_candidate ON opportunity_candidate_promotions(organization_id,candidate_id,created_at);
 CREATE TABLE IF NOT EXISTS audit_events(id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), deal_id TEXT, actor_id TEXT REFERENCES users(id), action TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT, details_json TEXT NOT NULL, previous_hash TEXT, event_hash TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TRIGGER IF NOT EXISTS audit_events_no_update BEFORE UPDATE ON audit_events BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END;
 CREATE TRIGGER IF NOT EXISTS audit_events_no_delete BEFORE DELETE ON audit_events BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END;

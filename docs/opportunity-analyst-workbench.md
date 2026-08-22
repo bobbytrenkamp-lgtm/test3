@@ -24,3 +24,5 @@ Opportunity Review also lists candidate-scoped Finder artifacts independently of
 
 Candidate artifacts support approve and reject decisions. Changes require a new evidence version, screening run, and artifact rather than an inline mutation. Review remains available without selecting a deal so institutional segregation does not depend on Deal Pipeline state.
 
+An independent approval makes an explicit **Promote to Deal Pipeline** action available to analysts and administrators. That action creates a fresh diligence intake and immutable promotion evidence; it does not convert screening evidence into an approved underwriting input. Reviewers cannot promote, and approval alone never triggers promotion. Once promoted, the artifact's review record is closed so a later decision cannot silently contradict the promotion evidence.
+

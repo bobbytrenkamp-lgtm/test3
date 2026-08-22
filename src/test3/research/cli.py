@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+from datetime import date
 from pathlib import Path
 
 import duckdb
@@ -18,6 +19,8 @@ from .target_harmonization import (approve_target_harmonization, prepare_target_
                                    target_harmonization_status)
 from test3.warehouse.storage import WarehousePaths
 from test3.cre_data.maa_markets import prepare_maa_market_definitions, approve_maa_market_definitions
+from test3.opportunity.outcomes import (approve_outcome_review, approved_outcome_readiness,
+                                        prepare_outcome_review)
 
 
 MAX_INPUT_ROWS = 2_000_000
@@ -59,6 +62,17 @@ def main(argv: list[str] | None = None) -> int:
     readiness = subparsers.add_parser("target-readiness", help="report real CRE target eligibility without fabricating readiness")
     readiness.add_argument("--data-root", default="data")
     readiness.add_argument("--model-specification", choices=tuple(sorted(MODEL_SPECIFICATIONS)))
+    outcome_review = subparsers.add_parser(
+        "prepare-opportunity-outcome-review", help="create a blank, hash-bound realized-outcome review packet")
+    outcome_review.add_argument("--input", required=True); outcome_review.add_argument("--output", required=True)
+    outcome_review.add_argument("--as-of")
+    outcome_approve = subparsers.add_parser(
+        "approve-opportunity-outcome-review", help="publish a human-attested immutable realized-outcome dataset")
+    outcome_approve.add_argument("--input", required=True); outcome_approve.add_argument("--attestation", required=True)
+    outcome_approve.add_argument("--output", required=True); outcome_approve.add_argument("--as-of")
+    outcome_status = subparsers.add_parser(
+        "opportunity-outcome-readiness", help="verify an approved outcome dataset and report score readiness")
+    outcome_status.add_argument("--input", required=True); outcome_status.add_argument("--as-of")
     milestone = subparsers.add_parser("milestone7-status", help="show approval, market-map, feature, and model gates")
     milestone8 = subparsers.add_parser("milestone8-status", help="show multi-source approval and generalization gates")
     milestone8.add_argument("--data-root", default="data")
@@ -129,6 +143,17 @@ def main(argv: list[str] | None = None) -> int:
     lags.add_argument("--feature", required=True)
     lags.add_argument("--lags", default="0,1,2,4,6,8")
     args = parser.parse_args(argv)
+    evaluation_date = date.fromisoformat(args.as_of) if getattr(args, "as_of", None) else None
+    if args.command == "prepare-opportunity-outcome-review":
+        print(json.dumps(prepare_outcome_review(args.input, args.output, as_of=evaluation_date), indent=2, sort_keys=True))
+        return 0
+    if args.command == "approve-opportunity-outcome-review":
+        print(json.dumps(approve_outcome_review(args.input, args.attestation, args.output,
+                                                as_of=evaluation_date), indent=2, sort_keys=True))
+        return 0
+    if args.command == "opportunity-outcome-readiness":
+        print(json.dumps(approved_outcome_readiness(args.input, as_of=evaluation_date), indent=2, sort_keys=True))
+        return 0
     if args.command == "target-readiness":
         paths = WarehousePaths.from_data_root(Path(args.data_root))
         output = (target_readiness_for_specification(paths, MODEL_SPECIFICATIONS[args.model_specification])

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import date
 
 from test3.opportunity.scoring import DEFAULT_POLICY, current_score_status, promotion_decision, score_dataset_readiness
 
@@ -51,8 +52,16 @@ class OpportunityScoringGovernanceTests(unittest.TestCase):
         duplicate["observation_id"] = "fictional-duplicate"
         readiness = score_dataset_readiness([leaked, duplicate])
         self.assertEqual(readiness["eligibleObservations"], 0)
-        self.assertEqual(readiness["rejected"]["future_feature_leakage"], 1)
-        self.assertEqual(readiness["rejected"]["duplicate_property_origin_outcome"], 1)
+        self.assertNotIn("future_feature_leakage", readiness["rejected"])
+        self.assertEqual(readiness["rejected"]["duplicate_property_origin_outcome"], 2)
+
+    def test_future_release_is_not_counted_as_current_realized_evidence(self):
+        readiness = score_dataset_readiness(
+            [_row(data_status="real", outcome_released_at="2027-02-01")],
+            evaluation_date=date(2026, 8, 22),
+        )
+        self.assertEqual(readiness["eligibleObservations"], 0)
+        self.assertEqual(readiness["rejected"]["outcome_not_released_as_of_evaluation"], 1)
 
     def test_promotion_requires_baseline_holdouts_stability_and_lineage(self):
         readiness = {"readyForCandidateBacktest": True, "blockers": []}

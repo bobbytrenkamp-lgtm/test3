@@ -6,6 +6,39 @@ Test3 does not currently have an approved, realized property-level acquisition o
 
 This is a governed rejection, not a missing UI feature.
 
+## Realized-outcome feedback workflow
+
+The absence of installed outcomes is an explicit data-governance task, not an
+invitation to weaken the score gates. An analyst with legitimately owned
+property performance history can use the entirely local workflow:
+
+```powershell
+test3-research prepare-opportunity-outcome-review --input data/authorized-outcomes.csv --output data/outcome-review.json --as-of 2026-08-22
+test3-research approve-opportunity-outcome-review --input data/authorized-outcomes.csv --attestation data/completed-outcome-attestation.json --output data/approved-outcomes.csv --as-of 2026-08-22
+test3-research opportunity-outcome-readiness --input data/approved-outcomes.csv --as-of 2026-08-22
+```
+
+Preparation is non-authoritative and exception-first. It reports duplicate
+property/origin/outcome keys, invalid periods and hashes, release-date timing,
+future-feature leakage, synthetic status, extreme-value warnings, and a
+dataset-hash-derived spot-check sample. It creates a blank attestation and
+never fills analyst identity, decision, signature, or rationale.
+
+Approval requires a timezone-aware human signature, explicit outcome scope,
+substantive rationale, and acknowledgements covering source evidence,
+methodology, rights, warning review, realized-versus-forecast status, and the
+absence of synthetic/interpolated outcomes. The attestation is bound to the
+exact candidate SHA-256. Approval creates a separate immutable CSV and
+attestation sidecar; changing either causes readiness verification to fail.
+The source candidate is never rewritten.
+
+Readiness then applies the existing 200-observation / 10-market / 12-period
+governance policy and still does not train or promote a score. An outcome
+released later than the requested evaluation date is excluded, and every row
+in a duplicated logical outcome group is rejected rather than accepting the
+first row encountered. This makes historical readiness deterministic at an
+explicit as-of date and prevents file ordering from deciding evidence.
+
 ## Outcome contract
 
 Before a candidate score can be backtested, every outcome must preserve property, market, period, property type, forecast origin, feature availability, outcome realization and release dates, outcome definition/value, analyst verification, rights status, and source/feature hashes.

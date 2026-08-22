@@ -62,11 +62,22 @@ class OpportunityReviewBridgeTests(unittest.TestCase):
             self.assertFalse(decision["automatic_deal_creation"])
             self.assertFalse(decision["automatic_underwrite_apply"])
             self.assertEqual(service.candidate_review_artifacts(creator["organization_id"])[0]["review_state"], "approved")
+            promotion = service.promote_opportunity_candidate(creator["organization_id"], creator["id"], candidate["id"])
+            self.assertFalse(promotion["automatic_underwrite_apply"])
+            promoted = service.opportunity_candidate(creator["organization_id"], candidate["id"])["candidate"]
+            self.assertEqual((promoted["status"], promoted["deal_id"]), ("promoted_to_diligence", promotion["deal_id"]))
+            with self.assertRaisesRegex(ConflictError, "closed review"):
+                service.review_candidate_artifact(creator["organization_id"], reviewer, artifact["id"],
+                    {"decision": "rejected", "rationale": "Post-promotion mutation must be blocked."})
+            self.assertEqual(service.opportunity_candidate_history(creator["organization_id"], candidate["id"])["timeline"][-1]["type"], "candidate_promoted")
+            with service.db.connect() as connection:
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM manual_assumptions WHERE deal_id=?", (promotion["deal_id"],)).fetchone()[0], 0)
             integrity = service.operational_integrity(creator["organization_id"])
             self.assertTrue(integrity["ok"])
             self.assertEqual(integrity["opportunityCandidateReview"], {
                 "artifactCount": 1, "artifactMismatches": 0,
                 "decisionCount": 1, "decisionMismatches": 0,
+                "promotionCount": 1, "promotionMismatches": 0,
             })
             with service.db.connect() as connection:
                 with self.assertRaises(sqlite3.DatabaseError):
@@ -75,8 +86,9 @@ class OpportunityReviewBridgeTests(unittest.TestCase):
                     connection.execute("DELETE FROM opportunity_candidate_review_decisions WHERE id=?", (decision["id"],))
             archive = Path(root) / "bridge.zip"; create_backup(Path(root), archive)
             report = verify_backup(archive)
-            self.assertEqual(report["format"], "test3-backup/10.0")
+            self.assertEqual(report["format"], "test3-backup/11.0")
             self.assertEqual(report["counts"]["opportunity_candidate_review_artifacts"], 1)
+            self.assertEqual(report["counts"]["opportunity_candidate_promotions"], 1)
 
     def test_generation_fails_closed_for_missing_outdated_and_duplicate_screening(self):
         with tempfile.TemporaryDirectory() as root:
@@ -107,6 +119,20 @@ class OpportunityReviewBridgeTests(unittest.TestCase):
             rejected = service.review_candidate_artifact(creator["organization_id"], reviewer, artifact["id"],
                     {"decision": "rejected", "rationale": "Superseded by a newer evidence version."})
             self.assertEqual(rejected["decision"], "rejected")
+
+    def test_promotion_requires_current_independent_approval(self):
+        with tempfile.TemporaryDirectory() as root:
+            service, creator, reviewer, candidate = self.workspace(root)
+            service.create_opportunity_candidate_version(creator["organization_id"], creator["id"], candidate["id"], evidence())
+            service.screen_opportunity_candidate(creator["organization_id"], creator["id"], candidate["id"], {})
+            artifact = service.create_candidate_review_artifact(creator["organization_id"], creator["id"], candidate["id"])
+            with self.assertRaisesRegex(ValueError, "independent approval"):
+                service.promote_opportunity_candidate(creator["organization_id"], creator["id"], candidate["id"])
+            service.review_candidate_artifact(creator["organization_id"], reviewer, artifact["id"],
+                    {"decision": "approved", "rationale": "Independent review supports diligence intake.", "acknowledgements": ACKS})
+            service.promote_opportunity_candidate(creator["organization_id"], creator["id"], candidate["id"])
+            with self.assertRaises(ConflictError):
+                service.promote_opportunity_candidate(creator["organization_id"], creator["id"], candidate["id"])
 
     def test_insufficient_evidence_artifact_can_be_rejected_but_not_approved(self):
         with tempfile.TemporaryDirectory() as root:

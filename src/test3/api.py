@@ -295,6 +295,13 @@ class Handler(SimpleHTTPRequestHandler):
                     raise ValueError("Review artifact generation accepts no client-authored evidence")
                 return self._json(201, self.service.create_candidate_review_artifact(
                     user["organization_id"], user["id"], parts[2]))
+            if len(parts) == 4 and parts[:2] == ["api", "opportunities"] and parts[3] == "promote":
+                self._authorize_post(user, "opportunity.promote")
+                payload = self._payload()
+                if payload:
+                    raise ValueError("Promotion accepts no client-authored deal or underwriting fields")
+                return self._json(201, self.service.promote_opportunity_candidate(
+                    user["organization_id"], user["id"], parts[2]))
             if len(parts) == 4 and parts[:2] == ["api", "opportunity-candidate-review-artifacts"] and parts[3] == "review":
                 self._authorize_post(user, "opportunity.review")
                 return self._json(201, self.service.review_candidate_artifact(

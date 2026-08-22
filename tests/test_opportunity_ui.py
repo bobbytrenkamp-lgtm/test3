@@ -55,6 +55,8 @@ class OpportunityFinderUiContractTests(unittest.TestCase):
         self.assertIn("Independent reviewer required", app)
         self.assertIn("workflow priority, not a score", app)
         self.assertIn("Validated score", app)
+        self.assertIn("Promote to Deal Pipeline", app)
+        self.assertIn("underwriting remains unchanged", app)
         self.assertNotIn("automaticUnderwritingApply=true", self.js + app)
 
     def test_permissions_and_xss_boundaries_are_visible_in_client(self):

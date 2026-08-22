@@ -129,7 +129,7 @@ class OpportunityPersistenceTests(unittest.TestCase):
         archive = Path(self.temp.name) / "opportunities.zip"
         create_backup(Path(self.temp.name), archive)
         report = verify_backup(archive)
-        self.assertEqual(report["format"], "test3-backup/10.0")
+        self.assertEqual(report["format"], "test3-backup/11.0")
         self.assertEqual(report["counts"]["opportunity_candidate_versions"], 1)
         with self.service.db.connect() as connection:
             connection.execute("DROP TRIGGER opportunity_candidate_versions_no_update")
@@ -142,9 +142,11 @@ class OpportunityPersistenceTests(unittest.TestCase):
         require("analyst", "opportunity.create")
         require("analyst", "opportunity.screen")
         require("analyst", "opportunity.archive")
+        require("analyst", "opportunity.promote")
         with self.assertRaises(PermissionError): require("reviewer", "opportunity.create")
         with self.assertRaises(PermissionError): require("reviewer", "opportunity.screen")
         with self.assertRaises(PermissionError): require("reviewer", "opportunity.archive")
+        with self.assertRaises(PermissionError): require("reviewer", "opportunity.promote")
         require("reviewer", "opportunity.review")
 
 
@@ -203,10 +205,12 @@ class OpportunityApiTests(unittest.TestCase):
                 self.assertEqual(request("POST", "/api/opportunities", reviewer_cookie, reviewer_csrf,
                                          {"property_type": "multifamily", "display_name": "Denied"})[0], 401)
                 self.assertEqual(request("POST", f"/api/opportunities/{candidate['id']}/archive", reviewer_cookie, reviewer_csrf, {})[0], 401)
-                archived = request("POST", f"/api/opportunities/{candidate['id']}/archive", cookie, csrf, {})
-                self.assertEqual((archived[0], archived[1]["status"]), (200, "archived"))
-                self.assertEqual(request("GET", f"/api/opportunities/{candidate['id']}", cookie)[1]["candidate"]["status"], "archived")
-                self.assertEqual(len(request("GET", f"/api/opportunities/{candidate['id']}/history", cookie)[1]["timeline"]), 4)
+                self.assertEqual(request("POST", f"/api/opportunities/{candidate['id']}/promote", reviewer_cookie, reviewer_csrf, {})[0], 401)
+                promoted = request("POST", f"/api/opportunities/{candidate['id']}/promote", cookie, csrf, {})
+                self.assertEqual((promoted[0], promoted[1]["status"], promoted[1]["automatic_underwrite_apply"]),
+                                 (201, "promoted_to_diligence", False))
+                detail = request("GET", f"/api/opportunities/{candidate['id']}", cookie)[1]["candidate"]
+                self.assertEqual((detail["status"], detail["deal_id"]), ("promoted_to_diligence", promoted[1]["deal_id"]))
             finally:
                 connection.close(); server.shutdown(); server.server_close(); worker.join(timeout=5)
 

@@ -1,5 +1,12 @@
 # AI changelog
 
+## 2026-08-22 — Human-governance approval workspace
+
+- Added a read-only Research Lab action queue for local MAA/AVB analyst-review packets and candidate market-definition artifacts.
+- Re-hashes every displayed review artifact, reports tampering separately, and exposes candidate scope, warnings, blockers, spot checks, unresolved geography evidence, and exact weight integrity.
+- Keeps approval strictly human: the workspace cannot populate identity/signature fields, approve targets, or make candidate geographies feature-eligible.
+- Added focused integrity, tampering, and no-auto-approval tests; the complete suite passes with all zero-cost, license, accessibility, dependency, compile, and JavaScript checks.
+
 ## 2026-08-19 — Phase 6: MarketSignal → Underwrite handoff export
 
 - New `src/test3/creos_handoff.py`: builds a real `creos-handoff-v1` payload from one assumption run (candidate recommendation + confidence + rationale), mirroring test1 (SiteIntel)'s Phase 5 `js/parcel/handoff.js` for the same cross-repo contract.

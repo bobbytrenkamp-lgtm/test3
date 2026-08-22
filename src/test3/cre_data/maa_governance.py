@@ -175,6 +175,40 @@ def _load_packet(path: Path, schema: str) -> dict:
     return payload
 
 
+def inspect_maa_review_packet(path: str | Path) -> dict:
+    """Return a bounded, non-authoritative summary of a hash-verified review packet."""
+    packet_path = Path(path)
+    if not packet_path.is_file() or packet_path.stat().st_size > 10_000_000:
+        raise ValueError("MAA review packet must be an existing JSON file no larger than 10 MB")
+    packet = _load_packet(packet_path, MAA_REVIEW_PACKET_SCHEMA)
+    summary = packet.get("dataset_summary") or {}
+    scope = packet.get("immediate_scope") or {}
+    verification = packet.get("verification_summary") or {}
+    template = packet.get("attestation_template") or {}
+    return {
+        "schema_version": packet["schema_version"],
+        "artifact_sha256": packet["artifact_sha256"],
+        "candidate_dataset_sha256": packet["candidate_dataset_sha256"],
+        "source": scope.get("source"),
+        "property_type": scope.get("property_type"),
+        "metric": scope.get("metric"),
+        "candidate_observations": int(summary.get("candidate_observations") or 0),
+        "scoped_candidate_observations": int(scope.get("candidate_observations") or 0),
+        "markets": int(summary.get("markets") or 0),
+        "quarters": int(summary.get("quarters") or 0),
+        "earliest_period": summary.get("earliest_period"),
+        "latest_period": summary.get("latest_period"),
+        "warnings": int(verification.get("warnings") or 0),
+        "blocking_findings": int(verification.get("blocking_findings") or 0),
+        "clean_spot_checks": len(packet.get("clean_spot_check_sample") or ()),
+        "attestation_state": "BLANK_HUMAN_ATTESTATION_TEMPLATE",
+        "template_has_identity": bool(str(template.get("analyst_identity") or "").strip()),
+        "template_has_signature": bool(str(template.get("analyst_signature") or "").strip()),
+        "authoritative": False,
+        "integrity_status": "passed",
+    }
+
+
 def approve_maa_rent_growth_review(input_path: str | Path, packet_path: str | Path,
                                    attestation_path: str | Path, output_path: str | Path) -> dict:
     source, packet_file, attestation_file, output = map(Path, (input_path, packet_path, attestation_path, output_path))

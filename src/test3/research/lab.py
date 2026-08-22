@@ -13,6 +13,7 @@ from test3.research.specifications import MODEL_SPECIFICATIONS
 from test3.research.target_panel import target_readiness_for_specification
 from test3.research.milestone7 import milestone7_status
 from test3.research.milestone8 import milestone8_status
+from test3.research.governance_workspace import approval_workspace
 from test3.cre_data.sources import source_catalog
 from test3.cre_data.sources import discovery_catalog
 from test3.cre_data.audit import target_data_audit, target_readiness_funnel
@@ -137,6 +138,7 @@ def research_lab_report(data_dir: str | Path, database, organization_id: str) ->
     models = checked("models", lambda: _models(database, organization_id), [])
     milestone_7 = checked("milestone_7", lambda: milestone7_status(paths), {})
     milestone_8 = checked("milestone_8", lambda: milestone8_status(paths), {})
+    governance = checked("approval_workspace", lambda: approval_workspace(paths), {})
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "status": "degraded" if errors else "ready",
@@ -157,6 +159,7 @@ def research_lab_report(data_dir: str | Path, database, organization_id: str) ->
         "models": models,
         "milestone_7": milestone_7,
         "milestone_8": milestone_8,
+        "approval_workspace": governance,
         "model_summary": {
             "total": len(models),
             "validated_real": sum(item["validation_state"] == "validated" and item["data_status"] == "real" for item in models),

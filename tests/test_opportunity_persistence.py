@@ -129,7 +129,7 @@ class OpportunityPersistenceTests(unittest.TestCase):
         archive = Path(self.temp.name) / "opportunities.zip"
         create_backup(Path(self.temp.name), archive)
         report = verify_backup(archive)
-        self.assertEqual(report["format"], "test3-backup/9.0")
+        self.assertEqual(report["format"], "test3-backup/10.0")
         self.assertEqual(report["counts"]["opportunity_candidate_versions"], 1)
         with self.service.db.connect() as connection:
             connection.execute("DROP TRIGGER opportunity_candidate_versions_no_update")
@@ -187,8 +187,19 @@ class OpportunityApiTests(unittest.TestCase):
                 self.assertIsInstance(listing["items"][0]["rent_gap_pct"], str)
                 self.assertEqual(request("GET", f"/api/opportunities/{candidate['id']}", cookie)[1]["candidate"]["id"], candidate["id"])
                 self.assertEqual(len(request("GET", f"/api/opportunities/{candidate['id']}/history", cookie)[1]["timeline"]), 3)
+                status, artifact = request("POST", f"/api/opportunities/{candidate['id']}/review-artifacts", cookie, csrf, {})
+                self.assertEqual(status, 201)
+                self.assertFalse(artifact["content"]["candidate"]["deal_id"])
                 reviewer_cookie, reviewer_csrf = signin("reviewer@example.test", "reviewer-password")
                 self.assertEqual(request("GET", "/api/opportunities", reviewer_cookie)[0], 200)
+                review_items = request("GET", "/api/opportunity-candidate-review-artifacts", reviewer_cookie)[1]["items"]
+                self.assertEqual(review_items[0]["id"], artifact["id"])
+                status, decision = request("POST", f"/api/opportunity-candidate-review-artifacts/{artifact['id']}/review",
+                                           reviewer_cookie, reviewer_csrf,
+                                           {"decision": "approved", "rationale": "Independent API evidence review completed.",
+                                            "acknowledgements": {"evidence_reviewed": True, "source_rights_reviewed": True,
+                                                                 "limitations_acknowledged": True, "test2_advisory_only": True}})
+                self.assertEqual((status, decision["decision"], decision["automatic_deal_creation"]), (201, "approved", False))
                 self.assertEqual(request("POST", "/api/opportunities", reviewer_cookie, reviewer_csrf,
                                          {"property_type": "multifamily", "display_name": "Denied"})[0], 401)
                 self.assertEqual(request("POST", f"/api/opportunities/{candidate['id']}/archive", reviewer_cookie, reviewer_csrf, {})[0], 401)

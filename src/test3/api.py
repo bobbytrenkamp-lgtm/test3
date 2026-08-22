@@ -108,6 +108,10 @@ class Handler(SimpleHTTPRequestHandler):
                 require(user["role"], "read")
                 parameters = {key: values[-1] for key, values in parse_qs(parsed.query, keep_blank_values=True).items()}
                 return self._json(200, self.service.list_opportunity_candidates(user["organization_id"], parameters))
+            if parsed.path == "/api/opportunity-candidate-review-artifacts":
+                user = self._identity()
+                require(user["role"], "read")
+                return self._json(200, {"items": self.service.candidate_review_artifacts(user["organization_id"])})
             if parsed.path.startswith("/api/opportunities/"):
                 user = self._identity()
                 require(user["role"], "read")
@@ -284,6 +288,17 @@ class Handler(SimpleHTTPRequestHandler):
                     raise ValueError("Archive accepts no client-controlled status fields")
                 return self._json(200, self.service.archive_opportunity_candidate(
                     user["organization_id"], user["id"], parts[2]))
+            if len(parts) == 4 and parts[:2] == ["api", "opportunities"] and parts[3] == "review-artifacts":
+                self._authorize_post(user, "opportunity.create")
+                payload = self._payload()
+                if payload:
+                    raise ValueError("Review artifact generation accepts no client-authored evidence")
+                return self._json(201, self.service.create_candidate_review_artifact(
+                    user["organization_id"], user["id"], parts[2]))
+            if len(parts) == 4 and parts[:2] == ["api", "opportunity-candidate-review-artifacts"] and parts[3] == "review":
+                self._authorize_post(user, "opportunity.review")
+                return self._json(201, self.service.review_candidate_artifact(
+                    user["organization_id"], user["id"], parts[2], self._payload()))
             if parts == ["api", "market-panel"]:
                 self._authorize_post(user, "assumption.create")
                 length = int(self.headers.get("Content-Length", "0"))

@@ -18,3 +18,9 @@ Schema version 7 and backup format 7.0 include opportunity decisions. Update/del
 
 The local separation-of-duties control distinguishes user IDs and roles; it is not enterprise identity proofing. The operator remains responsible for provisioning independent named users, protecting the local device and backups, and establishing retention and review policies. Source-rights acknowledgement records an analyst decision and is not legal advice.
 
+## Finder candidate evidence
+
+Opportunity Review also lists candidate-scoped Finder artifacts independently of deal-bound property analyses. A candidate artifact is generated server-side only from a current immutable screening run and remains visibly labeled as deterministic workflow-priority evidence with no validated score. Review decisions are append-only and hash-bound. They never create a deal, produce Test2 evidence, or change underwriting.
+
+Candidate artifacts support approve and reject decisions. Changes require a new evidence version, screening run, and artifact rather than an inline mutation. Review remains available without selecting a deal so institutional segregation does not depend on Deal Pipeline state.
+

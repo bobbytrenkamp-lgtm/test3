@@ -129,7 +129,7 @@ class OpportunityPersistenceTests(unittest.TestCase):
         archive = Path(self.temp.name) / "opportunities.zip"
         create_backup(Path(self.temp.name), archive)
         report = verify_backup(archive)
-        self.assertEqual(report["format"], "test3-backup/11.0")
+        self.assertEqual(report["format"], "test3-backup/12.0")
         self.assertEqual(report["counts"]["opportunity_candidate_versions"], 1)
         with self.service.db.connect() as connection:
             connection.execute("DROP TRIGGER opportunity_candidate_versions_no_update")

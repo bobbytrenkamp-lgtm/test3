@@ -234,3 +234,19 @@
 - Expanded category-scoped fictional header aliases and added negative tests preventing cross-category semantic assignment.
 - Added an opt-in loopback-only Ollama probe/JSON-generation interface with redirect blocking, prompt bounds, structured validation, required provenance metadata and candidate-only outputs.
 - Re-ran complete local and GitHub CI gates after each focused pull request and updated the final institutional-readiness boundary.
+# 2026-08-22 — Durable CREOS identity and source-linked handoffs
+
+- Added an organization-scoped, immutable `creos_entity_links` registry so
+  MarketSignal exports preserve property, deal, assumption, handoff, source,
+  and provenance identities across repeated CREOS handoffs.
+- Made assumption-run handoffs reproducible: the same immutable run now emits
+  the same IDs and timestamp, while distinct runs for one deal share the same
+  property identity and retain distinct assumption identities.
+- Added CREOS Source and Provenance objects for every referenced Test3 evidence
+  snapshot, including local source record ID, version, content hash, retrieval
+  date, effective date, and license notes. Underwrite no longer receives a
+  modeled assumption detached from its evidence inventory.
+- Extended operational integrity and backup/restore to schema 12 / backup 12.0,
+  with tests for identity immutability, lineage referential integrity, repeated
+  export equivalence, and cross-run property continuity.
+- No hosted service, paid API, credential, or billing-capable dependency added.

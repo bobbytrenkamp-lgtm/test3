@@ -23,12 +23,10 @@ rather than leaving implicit:
    Minting a fresh random ULID on every export would misrepresent
    identity continuity that doesn't actually exist here, which is a form
    of fabrication this project doesn't accept even implicitly.
-2. ``property`` IS populated, and that's a different case: it's fine (and
-   is exactly what test1's SiteIntel handoff already does) to mint a
-   fresh ``propertyId`` the first time a specific deal's property crosses
-   this boundary — a deal's ``name`` is real, stable, non-fabricated
-   context, unlike a market-wide identity this app doesn't actually
-   track. No structured ``identity.address`` for the same reason Phase 5
+2. ``property`` IS populated with the durable CREOS identity linked to
+   the local deal by ``creos_entity_links``. Re-exporting a run therefore
+   preserves identity instead of creating a look-alike property. No
+   structured ``identity.address`` for the same reason Phase 5
    omitted one: this app only has a single-line address, never a
    decomposed city/state/postal code.
 3. Every assumption is ``sourceType: 'modeled'``, never ``'observed'`` —
@@ -55,7 +53,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from .creos_ids import generate_creos_ulid
+from .creos_ids import generate_creos_ulid, is_valid_creos_ulid
 
 SCHEMA_VERSION = "creos-handoff-v1"
 
@@ -88,7 +86,7 @@ def _numeric_or_string(raw: object) -> tuple[str, object]:
         return "string", str(raw)
 
 
-def _property_from_deal(deal: dict) -> dict:
+def _property_from_deal(deal: dict, property_id: str) -> dict:
     property_type_raw = (deal.get("property_type") or "").strip()
     normalized = property_type_raw.lower().replace(" ", "_")
     classification: dict = {}
@@ -100,7 +98,7 @@ def _property_from_deal(deal: dict) -> dict:
 
     property_payload: dict = {
         "identity": {
-            "propertyId": generate_creos_ulid(),
+            "propertyId": property_id,
             "propertyName": deal.get("name") or "Unnamed deal",
         },
     }
@@ -109,16 +107,39 @@ def _property_from_deal(deal: dict) -> dict:
     return property_payload
 
 
-def build_assumption_run_handoff(*, run: dict, deal: dict, catalog_spec, now: str | None = None) -> dict:
+def build_assumption_run_handoff(
+    *, run: dict, deal: dict, catalog_spec, now: str | None = None,
+    handoff_id: str | None = None, property_id: str | None = None,
+    assumption_id: str | None = None, provenance_id: str | None = None,
+    sources: list[dict] | None = None, provenance: list[dict] | None = None,
+    model_version: str | None = None,
+) -> dict:
     """Builds a creos-handoff-v1 payload for a single assumption run.
 
-    Pure function: no I/O, no ID lookups beyond generating fresh ULIDs, so
+    Pure function: no I/O. Callers at a durable integration boundary pass
+    persistent IDs; fresh IDs remain a convenience for isolated unit use, so
     it's directly unit-testable (see tests/test_creos_handoff.py) without a
     database. Raises ValueError if the run has no base_recommendation to
     send -- a handoff with no actual value would be pointless, not merely
     incomplete.
     """
     ts = now or _now_iso()
+    handoff_id = handoff_id or generate_creos_ulid()
+    property_id = property_id or generate_creos_ulid()
+    assumption_id = assumption_id or generate_creos_ulid()
+    supplied_ids = (handoff_id, property_id, assumption_id) + ((provenance_id,) if provenance_id else ())
+    if not all(is_valid_creos_ulid(item) for item in supplied_ids):
+        raise ValueError("build_assumption_run_handoff: invalid CREOS ULID")
+    source_ids = [item.get("sourceId") for item in (sources or [])]
+    provenance_ids = [item.get("provenanceId") for item in (provenance or [])]
+    if (len(source_ids) != len(set(source_ids))
+            or len(provenance_ids) != len(set(provenance_ids))
+            or not all(is_valid_creos_ulid(item) for item in source_ids + provenance_ids)):
+        raise ValueError("build_assumption_run_handoff: invalid or duplicate source/provenance identity")
+    if provenance_id and provenance_id not in provenance_ids:
+        raise ValueError("build_assumption_run_handoff: assumption provenance is missing from payload")
+    if any(item.get("sourceId") not in source_ids for item in (provenance or []) if item.get("sourceId")):
+        raise ValueError("build_assumption_run_handoff: provenance references an absent source")
 
     value_type, value = _numeric_or_string(run.get("base_recommendation"))
     if value is None:
@@ -142,7 +163,7 @@ def build_assumption_run_handoff(*, run: dict, deal: dict, catalog_spec, now: st
     methodology = " ".join(part for part in methodology_parts if part)
 
     assumption: dict = {
-        "assumptionId": generate_creos_ulid(),
+        "assumptionId": assumption_id,
         "name": catalog_spec.label,
         "category": catalog_spec.name,
         "valueType": value_type,
@@ -160,17 +181,23 @@ def build_assumption_run_handoff(*, run: dict, deal: dict, catalog_spec, now: st
         assumption["confidence"] = confidence
     if methodology:
         assumption["methodology"] = methodology
+    if provenance_id:
+        assumption["provenanceId"] = provenance_id
+    if model_version:
+        assumption["modelVersion"] = model_version
+    if len(sources or []) == 1:
+        assumption["sourceId"] = sources[0]["sourceId"]
 
     return {
         "schemaVersion": SCHEMA_VERSION,
-        "handoffId": generate_creos_ulid(),
+        "handoffId": handoff_id,
         "createdAt": ts,
         "sourceModule": "marketsignal",
         "targetModule": "underwrite",
         "sourceApplicationVersion": "test3-marketsignal",
-        "property": _property_from_deal(deal),
+        "property": _property_from_deal(deal, property_id),
         "assumptions": [assumption],
         "observations": [],
-        "provenance": [],
-        "sources": [],
+        "provenance": list(provenance or []),
+        "sources": list(sources or []),
     }

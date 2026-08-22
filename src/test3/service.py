@@ -24,6 +24,7 @@ from .assumptions.test1_economic import load_test1_economic
 from .assumptions.recommend import recommend
 from .assumptions.catalog import BY_NAME, public_catalog
 from .creos_handoff import build_assumption_run_handoff
+from .creos_ids import generate_creos_ulid, is_valid_creos_ulid
 from .assumptions.profiling import profile_observations
 from .assumptions.analysis import benchmark_matrix, correlation_matrix, lead_lag_matrix, stress_scenarios, time_series_diagnostics
 from .assumptions.public_sources import public_series_catalog
@@ -1205,6 +1206,55 @@ class Service:
         self.db.audit(organization_id, user_id, "assumption_run.decided", "assumption_run", run_id, context_value, run["deal_id"])
         return {"runId": run_id, "selection": selection, "manualAssumptionId": assumption["id"], "reviewDecisionId": review["decision_id"], "status": review["review_status"]}
 
+    @staticmethod
+    def _creos_link(connection, organization_id: str, entity_kind: str,
+                    local_record_type: str, local_record_id: str) -> tuple[str, str]:
+        """Return the immutable CREOS identity for one local record.
+
+        INSERT OR IGNORE makes concurrent first exports converge on the
+        database uniqueness constraint; the subsequent read is authoritative.
+        """
+        existing = connection.execute(
+            "SELECT creos_ulid,created_at FROM creos_entity_links WHERE organization_id=? AND entity_kind=? AND local_record_type=? AND local_record_id=?",
+            (organization_id, entity_kind, local_record_type, local_record_id),
+        ).fetchone()
+        if existing:
+            if not is_valid_creos_ulid(existing["creos_ulid"]):
+                raise ValueError("Stored CREOS identity is invalid")
+            return existing["creos_ulid"], existing["created_at"]
+        creos_ulid, created = generate_creos_ulid(), now()
+        connection.execute(
+            "INSERT OR IGNORE INTO creos_entity_links VALUES(?,?,?,?,?,?,?)",
+            (str(uuid.uuid4()), organization_id, entity_kind, local_record_type, local_record_id, creos_ulid, created),
+        )
+        linked = connection.execute(
+            "SELECT creos_ulid,created_at FROM creos_entity_links WHERE organization_id=? AND entity_kind=? AND local_record_type=? AND local_record_id=?",
+            (organization_id, entity_kind, local_record_type, local_record_id),
+        ).fetchone()
+        if not linked or not is_valid_creos_ulid(linked["creos_ulid"]):
+            raise RuntimeError("Failed to establish a durable CREOS identity")
+        return linked["creos_ulid"], linked["created_at"]
+
+    @staticmethod
+    def _creos_source(snapshot: dict, source_id: str) -> dict:
+        source_types = {
+            "test1_economic": "public_data", "public_extract": "public_data",
+            "market_panel": "licensed_data", "analyst_comp_package": "user_input",
+        }
+        payload = {
+            "sourceId": source_id,
+            "sourceName": snapshot["source_name"],
+            "sourceType": source_types.get(snapshot["source_type"], "other"),
+            "sourceRecordId": snapshot["id"],
+            "retrievedAt": snapshot["imported_at"],
+            "licenseNotes": snapshot["licensing_notes"],
+            "referenceNotes": f"Test3 snapshot {snapshot['source_version']}; content SHA-256 {snapshot['content_sha256']}",
+        }
+        as_of = snapshot["as_of_date"]
+        if as_of and len(as_of) == 10:
+            payload["effectiveDate"] = as_of
+        return payload
+
     def create_assumption_run_handoff(self, organization_id: str, user_id: str, run_id: str) -> dict:
         """Phase 6: builds and returns a creos-handoff-v1 payload for one
         assumption run -- CREOS Underwrite's counterpart to Phase 5's
@@ -1212,24 +1262,70 @@ class Service:
         module docstring for the translation-layer decisions. Read-only:
         an assumption run is an immutable candidate (see the
         assumption_runs_no_update/no_delete triggers in db.py), and
-        building a handoff from it doesn't change that -- this handoff
-        can be regenerated identically at any time, and does not require
+        building a handoff from it doesn't change that. Durable identity
+        links make repeat generation byte-equivalent, and it does not require
         the run to have been decided inside this app first (the receiving
         side's own governance rule forces status:'proposed' regardless of
         what, if anything, this app already decided for its own deal)."""
         with self.db.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             run = connection.execute("SELECT * FROM assumption_runs WHERE id=? AND organization_id=?", (run_id, organization_id)).fetchone()
             if not run:
                 raise LookupError("Assumption run not found")
             deal = connection.execute("SELECT * FROM deals WHERE id=? AND organization_id=?", (run["deal_id"], organization_id)).fetchone()
             if not deal:
                 raise LookupError("Deal not found")
+            snapshot_ids = json.loads(run["evidence_snapshot_ids_json"] or "[]")
+            snapshots = []
+            for snapshot_id in snapshot_ids:
+                snapshot = connection.execute(
+                    "SELECT * FROM data_source_snapshots WHERE id=? AND organization_id=?",
+                    (snapshot_id, organization_id),
+                ).fetchone()
+                if not snapshot:
+                    raise ValueError(f"Assumption run references missing evidence snapshot: {snapshot_id}")
+                snapshots.append(dict(snapshot))
+            model = None
+            if run["model_artifact_id"]:
+                model = connection.execute(
+                    "SELECT * FROM model_artifacts WHERE id=? AND organization_id=?",
+                    (run["model_artifact_id"], organization_id),
+                ).fetchone()
+                if not model:
+                    raise ValueError("Assumption run references a missing model artifact")
+            property_id, _ = self._creos_link(connection, organization_id, "property", "deal", deal["id"])
+            # Reserve the shared Deal identity even though handoff-v1 currently carries Property.
+            self._creos_link(connection, organization_id, "deal", "deal", deal["id"])
+            assumption_id, _ = self._creos_link(connection, organization_id, "assumption", "assumption_run", run_id)
+            provenance_id, _ = self._creos_link(connection, organization_id, "provenance", "assumption_run", run_id)
+            handoff_id, handoff_created = self._creos_link(connection, organization_id, "handoff", "assumption_run", run_id)
+            sources = []
+            for snapshot in snapshots:
+                source_id, _ = self._creos_link(connection, organization_id, "source", "data_source_snapshot", snapshot["id"])
+                sources.append(self._creos_source(snapshot, source_id))
         catalog_spec = BY_NAME.get(run["assumption_type"])
         if not catalog_spec:
             raise ValueError(f"Unknown assumption type: {run['assumption_type']}")
         run_dict = dict(run)
         run_dict["limitations"] = json.loads(run["limitations_json"] or "[]")
-        payload = build_assumption_run_handoff(run=run_dict, deal=dict(deal), catalog_spec=catalog_spec)
+        model_version = f"{model['model_name']}@{model['model_version']}" if model else None
+        provenance = [{
+            "provenanceId": provenance_id,
+            "originModule": "marketsignal",
+            "originRecordId": run_id,
+            "transformation": f"Assumption run {run['method']} over evidence snapshots: "
+                              + ", ".join(snapshot["id"] for snapshot in snapshots),
+            "methodology": run["rationale"],
+            "lastUpdated": run["created_at"],
+            **({"sourceId": sources[0]["sourceId"]} if len(sources) == 1 else {}),
+            **({"modelVersion": model_version} if model_version else {}),
+        }]
+        payload = build_assumption_run_handoff(
+            run=run_dict, deal=dict(deal), catalog_spec=catalog_spec,
+            now=handoff_created, handoff_id=handoff_id, property_id=property_id,
+            assumption_id=assumption_id, provenance_id=provenance_id,
+            sources=sources, provenance=provenance, model_version=model_version,
+        )
         self.db.audit(organization_id, user_id, "assumption_run.handoff_generated", "assumption_run", run_id, {"handoff_id": payload["handoffId"], "assumption_type": run["assumption_type"]}, run["deal_id"])
         return payload
 
@@ -1350,7 +1446,10 @@ class Service:
             candidate_review_artifacts = connection.execute("SELECT * FROM opportunity_candidate_review_artifacts WHERE organization_id=? ORDER BY rowid", (organization_id,)).fetchall()
             candidate_review_decisions = connection.execute("SELECT * FROM opportunity_candidate_review_decisions WHERE organization_id=? ORDER BY rowid", (organization_id,)).fetchall()
             candidate_promotions = connection.execute("SELECT * FROM opportunity_candidate_promotions WHERE organization_id=? ORDER BY rowid", (organization_id,)).fetchall()
+            creos_links = connection.execute("SELECT * FROM creos_entity_links WHERE organization_id=? ORDER BY rowid", (organization_id,)).fetchall()
             deal_membership = {row["id"] for row in connection.execute("SELECT id FROM deals WHERE organization_id=?", (organization_id,)).fetchall()}
+            assumption_run_membership = {row["id"] for row in connection.execute("SELECT id FROM assumption_runs WHERE organization_id=?", (organization_id,)).fetchall()}
+            snapshot_membership = {row["id"] for row in connection.execute("SELECT id FROM data_source_snapshots WHERE organization_id=?", (organization_id,)).fetchall()}
             extracted_membership = {(row["id"], row["deal_id"], row["document_id"]) for row in connection.execute("SELECT id,deal_id,document_id FROM extracted_values WHERE organization_id=?", (organization_id,)).fetchall()}
         storage = {"activeOriginals": 0, "purgedTombstones": 0, "missingActiveOriginals": 0, "integrityMismatches": 0, "unexpectedPurgedOriginals": 0, "unsafePaths": 0}
         upload_root = self.upload_dir.resolve()
@@ -1556,8 +1655,18 @@ class Service:
                 promotion_mismatches += 1
         candidate_review_integrity["promotionCount"] = len(candidate_promotions)
         candidate_review_integrity["promotionMismatches"] = promotion_mismatches
+        creos_link_mismatches = 0
+        for link in creos_links:
+            target_exists = (
+                link["local_record_type"] == "deal" and link["local_record_id"] in deal_membership
+                or link["local_record_type"] == "assumption_run" and link["local_record_id"] in assumption_run_membership
+                or link["local_record_type"] == "data_source_snapshot" and link["local_record_id"] in snapshot_membership
+            )
+            if not is_valid_creos_ulid(link["creos_ulid"]) or not target_exists:
+                creos_link_mismatches += 1
+        creos_identity_integrity = {"count": len(creos_links), "mismatches": creos_link_mismatches}
         market_ok = not any(market_integrity[key] for key in ("missingOriginals", "hashMismatches", "unsafePaths"))
-        return {"ok": database["ok"] and audit_valid and review_valid and storage_ok and market_ok and artifact_mismatches == 0 and semantic_hash_mismatches == 0 and semantic_source_mismatches == 0 and opportunity_hash_mismatches == 0 and opportunity_decision_mismatches == 0 and opportunity_handoff_mismatches == 0 and candidate_version_mismatches == 0 and screening_run_mismatches == 0 and candidate_review_artifact_mismatches == 0 and candidate_review_decision_mismatches == 0 and promotion_mismatches == 0, "checkedAt": now(), "database": database, "chains": chains, "storage": storage, "marketData": market_integrity, "exports": artifact_integrity, "semanticEntities": semantic_integrity, "propertyOpportunity": opportunity_integrity, "opportunityFinder": finder_integrity, "opportunityCandidateReview": candidate_review_integrity, "purgeStagingFiles": staging_files, "networkRequests": 0}
+        return {"ok": database["ok"] and audit_valid and review_valid and storage_ok and market_ok and artifact_mismatches == 0 and semantic_hash_mismatches == 0 and semantic_source_mismatches == 0 and opportunity_hash_mismatches == 0 and opportunity_decision_mismatches == 0 and opportunity_handoff_mismatches == 0 and candidate_version_mismatches == 0 and screening_run_mismatches == 0 and candidate_review_artifact_mismatches == 0 and candidate_review_decision_mismatches == 0 and promotion_mismatches == 0 and creos_link_mismatches == 0, "checkedAt": now(), "database": database, "chains": chains, "storage": storage, "marketData": market_integrity, "exports": artifact_integrity, "semanticEntities": semantic_integrity, "propertyOpportunity": opportunity_integrity, "opportunityFinder": finder_integrity, "opportunityCandidateReview": candidate_review_integrity, "creosIdentity": creos_identity_integrity, "purgeStagingFiles": staging_files, "networkRequests": 0}
 
     def review_value(self, organization_id: str, user_id: str, value_id: str, status: str, normalized_value: str | None, comments: str = "") -> dict:
         normalized_value = None if normalized_value is None else str(normalized_value)

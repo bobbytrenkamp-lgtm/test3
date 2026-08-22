@@ -77,7 +77,7 @@ class OpportunityReviewTests(unittest.TestCase):
             archive = Path(root) / "review.zip"
             create_backup(Path(root), archive)
             report = verify_backup(archive)
-            self.assertEqual(report["format"], "test3-backup/11.0")
+            self.assertEqual(report["format"], "test3-backup/12.0")
             self.assertEqual(report["counts"]["opportunity_decisions"], 1)
 
     def test_test2_handoff_requires_latest_approval_and_remains_advisory(self):

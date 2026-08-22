@@ -493,10 +493,19 @@ class Service:
         clause = " WHERE " + " AND ".join(where)
         fields = f"""SELECT c.*,r.id run_id,r.candidate_version_id,r.screening_tier,r.result_json,r.result_sha256,r.evaluated_at,
             lv.version latest_evidence_version,lv.analysis_as_of latest_evidence_analysis_as_of,
+            json_extract(lv.content_json,'$.inputs.acquisition_basis') latest_acquisition_basis,
+            json_extract(lv.content_json,'$.inputs.basis_unit') latest_basis_unit,
             sv.version latest_screened_version,sv.analysis_as_of screened_analysis_as_of,
             {SCREENING_CURRENCY_SQL} screening_currency_status"""
         with self.db.connect() as connection:
             total = connection.execute("SELECT COUNT(*)" + joins + clause, parameters).fetchone()[0]
+            summary_row = connection.execute(f"""SELECT
+                COUNT(*) total_candidates,
+                SUM(CASE WHEN r.screening_tier='HIGH_PRIORITY_REVIEW' THEN 1 ELSE 0 END) high_priority_review,
+                SUM(CASE WHEN r.screening_tier='WORTH_REVIEWING' THEN 1 ELSE 0 END) worth_reviewing,
+                SUM(CASE WHEN r.id IS NULL OR r.screening_tier='INSUFFICIENT_EVIDENCE' THEN 1 ELSE 0 END) needs_evidence,
+                SUM(CASE WHEN {SCREENING_CURRENCY_SQL}='OUTDATED_EVIDENCE' THEN 1 ELSE 0 END) stale_screening
+                """ + joins + clause, parameters).fetchone()
             sort_expression = sorts[sort]
             rows = connection.execute(fields + joins + clause + f" ORDER BY CASE WHEN {sort_expression} IS NULL THEN 1 ELSE 0 END ASC,{sort_expression} {direction.upper()},c.id ASC LIMIT ? OFFSET ?",
                                       (*parameters, limit, offset)).fetchall()
@@ -507,6 +516,8 @@ class Service:
             screening = self._screening_summary(row)
             candidate.update({"latest_evidence_version": row["latest_evidence_version"],
                               "latest_evidence_analysis_as_of": row["latest_evidence_analysis_as_of"],
+                              "acquisition_basis": row["latest_acquisition_basis"],
+                              "basis_unit": row["latest_basis_unit"],
                               "latest_screened_version": row["latest_screened_version"],
                               "screening_currency_status": row["screening_currency_status"],
                               "screening_tier": screening["screening_tier"] if screening else None,
@@ -527,7 +538,10 @@ class Service:
                 candidate.update({"warning_count": 0, "reason_count": 0,
                                   "validated_score_status": "NO_VALIDATED_OPPORTUNITY_SCORE"})
             items.append(candidate)
+        summary = {key: int(summary_row[key] or 0) for key in (
+            "total_candidates", "high_priority_review", "worth_reviewing", "needs_evidence", "stale_screening")}
         return {"items": items, "pagination": {"limit": limit, "offset": offset, "returned": len(items), "total": total},
+                "summary": summary,
                 "sort": {"field": sort, "direction": direction}}
 
     def opportunity_candidate_query_plan(self, organization_id: str) -> list[dict]:

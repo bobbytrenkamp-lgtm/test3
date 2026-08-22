@@ -41,7 +41,8 @@ def _sha(value: object) -> bool:
     return len(text) == 64 and all(character in "0123456789abcdef" for character in text)
 
 
-def score_dataset_readiness(rows: list[dict], policy: OpportunityScorePolicy = DEFAULT_POLICY) -> dict:
+def score_dataset_readiness(rows: list[dict], policy: OpportunityScorePolicy = DEFAULT_POLICY,
+                            evaluation_date: date | None = None) -> dict:
     if not isinstance(rows, list):
         raise ValueError("opportunity outcome rows must be a list")
     blockers, eligible, rejected = [], [], {}
@@ -49,7 +50,13 @@ def score_dataset_readiness(rows: list[dict], policy: OpportunityScorePolicy = D
     def reject(reason: str) -> None:
         rejected[reason] = rejected.get(reason, 0) + 1
 
-    identities = set()
+    as_of = evaluation_date or date.today()
+    identity_counts: dict[tuple[str, str, str], int] = {}
+    for row in rows:
+        if isinstance(row, dict):
+            identity = (str(row.get("property_id") or ""), str(row.get("forecast_origin") or ""),
+                        str(row.get("outcome") or ""))
+            identity_counts[identity] = identity_counts.get(identity, 0) + 1
     for row in rows:
         if not isinstance(row, dict) or not REQUIRED_OUTCOME_FIELDS <= set(row):
             reject("schema_invalid")
@@ -61,10 +68,9 @@ def score_dataset_readiness(rows: list[dict], policy: OpportunityScorePolicy = D
             reject("period_invalid")
             continue
         identity = (str(row["property_id"]), str(row["forecast_origin"]), str(row["outcome"]))
-        if identity in identities:
+        if identity_counts.get(identity, 0) > 1:
             reject("duplicate_property_origin_outcome")
             continue
-        identities.add(identity)
         if row["data_status"] != "real":
             reject("non_real_data")
             continue
@@ -95,6 +101,9 @@ def score_dataset_readiness(rows: list[dict], policy: OpportunityScorePolicy = D
         if realized <= origin or released < realized:
             reject("outcome_not_forward")
             continue
+        if released > as_of:
+            reject("outcome_not_released_as_of_evaluation")
+            continue
         if not (-10 <= value <= 10):
             reject("outcome_value_extreme_review")
             continue
@@ -115,6 +124,7 @@ def score_dataset_readiness(rows: list[dict], policy: OpportunityScorePolicy = D
         blockers.append(f"markets_meeting_longitudinal_depth:{len(deep_markets)}<{policy.minimum_markets}")
     return {
         "policy": {**asdict(policy), "content_hash": policy.content_hash},
+        "evaluatedAsOf": as_of.isoformat(),
         "rawObservations": len(rows),
         "eligibleObservations": len(eligible),
         "markets": len(markets),

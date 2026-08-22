@@ -1,5 +1,20 @@
 # AI changelog
 
+## 2026-08-22 — Governed realized-outcome feedback intake
+
+- Added a local, exception-first property acquisition outcome review workflow
+  so legitimately owned performance history can eventually close the loop
+  between MarketSignal evidence, underwriting decisions, and realized results.
+- Added hash-bound human attestation, explicit outcome scope, rights and
+  methodology acknowledgements, deterministic clean-row sampling, immutable
+  approved CSV/sidecar output, and tamper-checked readiness loading.
+- Hardened score readiness so all members of a duplicate
+  property/forecast-origin/outcome group are rejected and outcomes released
+  after the governed evaluation date cannot enter the evidence set.
+- Added three `test3-research` commands for preparation, approval, and
+  readiness. The workflow does not train, score, forecast, or auto-approve.
+- No network service, paid dependency, credential, or billable runtime added.
+
 ## 2026-08-22 — Human-governance approval workspace
 
 - Added a read-only Research Lab action queue for local MAA/AVB analyst-review packets and candidate market-definition artifacts.

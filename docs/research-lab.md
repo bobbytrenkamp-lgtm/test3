@@ -8,6 +8,12 @@ Public Census HVS rental vacancy and vacant-unit asking rent appear as residenti
 
 The response is bounded to 500 warehouse coverage rows, 500 CRE target groups, 100 CRE import versions, and 100 model artifacts. Integrity errors degrade the report and remain visible rather than being silently omitted.
 
+## Human governance workspace
+
+Research Lab inventories local MAA/AVB review packets and market-definition candidate artifacts beneath `data/cre_reports`. Every displayed packet is re-hashed before it is shown. The view exposes candidate scope, warnings, blockers, deterministic spot-check counts, unresolved geography evidence, exact-weight readiness, and the next required human action.
+
+This workspace is deliberately read-only. It cannot populate an analyst identity or signature, record an approval, make an unresolved geography feature-eligible, or treat a candidate definition as authoritative. Tampered artifacts are removed from the valid inventory and reported as integrity errors. Approval continues through the separately hash-bound CLI attestation workflows documented in `docs/historical-cre-data.md`.
+
 To populate the two implemented Census HVS series:
 
 ```text

@@ -152,6 +152,50 @@ def prepare_maa_market_definitions(target_input: str | Path, output_path: str | 
             "status": "AWAITING_MARKET_DEFINITION_APPROVAL"}
 
 
+def inspect_market_definition_candidates(path: str | Path) -> dict:
+    """Inspect candidate geography evidence without treating it as analyst approval."""
+    candidate_path = Path(path)
+    if not candidate_path.is_file() or candidate_path.stat().st_size > 10_000_000:
+        raise ValueError("market-definition candidates must be an existing JSON file no larger than 10 MB")
+    payload = json.loads(candidate_path.read_text(encoding="utf-8"))
+    if payload.get("schema_version") != MARKET_CANDIDATE_SCHEMA or payload.get("artifact_sha256") != _artifact_hash(payload):
+        raise ValueError("market-definition candidate integrity failure")
+    resolved = []
+    unresolved = []
+    invalid = []
+    for item in payload.get("definitions") or ():
+        body = {key: value for key, value in item.items() if key != "definition_hash"}
+        weights = [Decimal(str(component.get("weight"))) for component in item.get("counties") or ()]
+        exact_total = sum(weights, Decimal("0")) if weights else None
+        hash_valid = item.get("definition_hash") == _hash(body)
+        weight_integrity = bool(weights) and exact_total == Decimal("1")
+        row = {
+            "market_id": item.get("market_id"), "source_market_name": item.get("source_market_name"),
+            "counties": len(weights), "weight_sum": format(exact_total, "f") if exact_total is not None else None,
+            "weighting_methodology": item.get("weighting_methodology"), "confidence": item.get("confidence"),
+            "evidence_count": len(item.get("evidence") or ()), "review_status": item.get("review_status"),
+            "unresolved_reason": item.get("unresolved_reason"), "candidate_integrity": hash_valid,
+            "weight_integrity": weight_integrity,
+        }
+        if not hash_valid or (weights and not weight_integrity):
+            invalid.append(row)
+        elif not weights or item.get("unresolved_reason"):
+            unresolved.append(row)
+        elif weight_integrity:
+            resolved.append(row)
+    template = payload.get("attestation_template") or {}
+    return {
+        "schema_version": payload["schema_version"], "artifact_sha256": payload["artifact_sha256"],
+        "target_dataset_sha256": payload.get("target_dataset_sha256"),
+        "property_inventory_sha256": payload.get("property_inventory_sha256"),
+        "markets": len(resolved) + len(unresolved) + len(invalid), "evidence_ready": len(resolved),
+        "unresolved": len(unresolved), "invalid": len(invalid), "definitions": resolved + unresolved + invalid,
+        "attestation_state": "BLANK_HUMAN_ATTESTATION_TEMPLATE",
+        "template_has_identity": bool(str(template.get("analyst_identity") or "").strip()),
+        "authoritative": False, "integrity_status": "passed",
+    }
+
+
 def _intervals_overlap(left: dict, right: dict) -> bool:
     left_start, right_start = date.fromisoformat(left["effective_from"]), date.fromisoformat(right["effective_from"])
     left_end = date.max if not left.get("effective_to") else date.fromisoformat(left["effective_to"])

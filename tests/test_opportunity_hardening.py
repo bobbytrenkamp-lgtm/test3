@@ -145,8 +145,24 @@ class OpportunityHardeningTests(unittest.TestCase):
         self.assertEqual(item["evidence_supported_noi_delta"], "100000.00")
         self.assertIsInstance(item["rent_gap_pct"], str)
         self.assertEqual(item["validated_score_status"], "NO_VALIDATED_OPPORTUNITY_SCORE")
+        self.assertEqual((item["acquisition_basis"], item["basis_unit"]), ("150", "USD/unit"))
         self.assertGreater(item["warning_count"], 0)
         self.assertEqual(self.service.list_opportunity_candidates(self.user["organization_id"], {"q": "%_"})["pagination"]["total"], 0)
+
+    def test_summary_is_server_derived_and_filter_aware(self):
+        high = self.candidate("Summary High", market="Raleigh")
+        never = self.candidate("Summary Never", market="Raleigh")
+        self.add_and_screen(high, compact_evidence(rent=("1000", "1200"), basis=("100", "120"), extra={
+            "current_noi": "100", "stabilized_noi": "120",
+            "subject_cap_rate": "0.06", "market_cap_rate": "0.05",
+            "evidence_hashes": {item: [HASH] for item in ("rent", "basis", "noi", "cap_rate", "comparables")},
+            "evidence_dates": {item: "2026-06-01" for item in ("rent", "basis", "noi", "cap_rate", "comparables")},
+        }))
+        page = self.service.list_opportunity_candidates(self.user["organization_id"], {"market": "Raleigh"})
+        self.assertEqual(page["summary"], {"total_candidates": 2, "high_priority_review": 1,
+                                            "worth_reviewing": 0, "needs_evidence": 1,
+                                            "stale_screening": 0})
+        self.assertEqual(never["status"], "candidate")
 
     def test_conservative_address_normalization_and_archive_transition(self):
         first = self.candidate("First", "123 Main Street")

@@ -99,3 +99,11 @@ The only lifecycle transition introduced here is the explicit, audited `candidat
 Archive timestamps returned from the action and candidate detail are read from the immutable `opportunity.candidate_archived` audit event. A transient application timestamp is not treated as lifecycle evidence.
 
 Historic policy implementations are immutable and registered by policy ID and version. Integrity reproduction selects the exact registered policy and verifies its stored hash. It never evaluates an old run with a newer default policy. If an implementation is unavailable or its hash differs, integrity reports `policyImplementationUnavailable`, counts a screening mismatch, and fails closed.
+
+## Opportunity Finder interface
+
+The local interface uses the bounded `GET /api/opportunities` query for search, filters, sorting, pagination, and filter-aware summary counts. It never recreates screening calculations in JavaScript. Common financial projections remain exact decimal strings in the API and are formatted only for display. The list defaults to active candidates and explicit workflow-priority ordering; archived candidates remain available through the status filter.
+
+Candidate detail keeps three states visibly separate: immutable evidence versions, immutable screening runs, and screening currency. `OUTDATED_EVIDENCE` is rendered as **New evidence — rescreen**, while the retained historic run remains inspectable. Viewer and reviewer roles are read-only. Analyst and administrator roles may create a candidate, add a new immutable evidence version, invoke server-side screening, and archive an active candidate. Archive is a retained, audited lifecycle transition rather than deletion.
+
+The interface labels the server's NOI comparison as **Evidence-supported NOI delta** and explicitly states that it is a comparison of supplied current and stabilized evidence, not a Test2 forecast. Missing values render as an em dash, never as zero. The validated-score panel reports that no validated opportunity score exists until governed realized-outcome data supports one.
